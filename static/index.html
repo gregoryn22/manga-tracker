@@ -1,0 +1,1560 @@
+<!DOCTYPE html>
+<html lang="en" x-data="app()" x-init="init()">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Manga Tracker</title>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:          #0b0d14;
+      --surface:     #13161f;
+      --surface2:    #1c2030;
+      --surface3:    #242840;
+      --border:      #2a2f4a;
+      --accent:      #7c6cff;
+      --accent-h:    #9d91ff;
+      --accent-dim:  rgba(124,108,255,0.12);
+      --green:       #22c55e;
+      --green-dim:   rgba(34,197,94,0.12);
+      --yellow:      #f59e0b;
+      --yellow-dim:  rgba(245,158,11,0.12);
+      --red:         #ef4444;
+      --red-dim:     rgba(239,68,68,0.12);
+      --blue:        #3b82f6;
+      --blue-dim:    rgba(59,130,246,0.12);
+      --pink:        #ec4899;
+      --text:        #e2e5f0;
+      --text-muted:  #7a809e;
+      --text-dim:    #4a5070;
+      --radius:      12px;
+      --shadow:      0 8px 32px rgba(0,0,0,0.5);
+      --glow:        0 0 20px rgba(124,108,255,0.15);
+    }
+
+    html { font-family: 'Inter', sans-serif; font-size: 15px; }
+    body { background: var(--bg); color: var(--text); min-height: 100vh; }
+    ::-webkit-scrollbar { width: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+    [x-cloak] { display: none !important; }
+
+    /* ── Layout ────────────────────────────────────────── */
+    .app { display: flex; height: 100vh; overflow: hidden; }
+
+    /* ── Sidebar ───────────────────────────────────────── */
+    .sidebar {
+      width: 220px; flex-shrink: 0;
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      display: flex; flex-direction: column; padding: 0;
+      overflow: hidden;
+    }
+    .sidebar-brand {
+      padding: 22px 20px 18px;
+      display: flex; align-items: center; gap: 10px;
+      border-bottom: 1px solid var(--border);
+    }
+    .brand-icon { font-size: 1.4rem; }
+    .brand-name { font-size: 1rem; font-weight: 700; color: var(--text); }
+    .brand-sub { font-size: 0.65rem; color: var(--text-muted); }
+
+    .nav { flex: 1; padding: 10px 0; overflow-y: auto; }
+    .nav-section { padding: 14px 16px 6px; font-size: 0.65rem; font-weight: 700;
+                   letter-spacing: 0.1em; color: var(--text-dim); text-transform: uppercase; }
+    .nav-item {
+      display: flex; align-items: center; gap: 10px;
+      padding: 9px 16px; cursor: pointer; user-select: none;
+      border-left: 3px solid transparent; transition: all 0.12s;
+      color: var(--text-muted); font-size: 0.88rem; font-weight: 500;
+    }
+    .nav-item:hover { background: var(--surface2); color: var(--text); }
+    .nav-item.active {
+      border-left-color: var(--accent); background: var(--accent-dim);
+      color: var(--text);
+    }
+    .nav-icon { width: 18px; text-align: center; font-size: 1rem; flex-shrink: 0; }
+    .nav-badge {
+      margin-left: auto; background: var(--accent); color: white;
+      font-size: 0.68rem; font-weight: 700; padding: 2px 7px;
+      border-radius: 99px; min-width: 20px; text-align: center;
+    }
+    .nav-badge.green { background: var(--green); }
+
+    .sidebar-footer {
+      padding: 14px 16px; border-top: 1px solid var(--border);
+      font-size: 0.72rem; color: var(--text-dim);
+    }
+    .sidebar-footer a { color: var(--accent); text-decoration: none; }
+
+    /* ── Main ──────────────────────────────────────────── */
+    .main { flex: 1; overflow-y: auto; display: flex; flex-direction: column; min-width: 0; }
+
+    .topbar {
+      display: flex; align-items: center; gap: 12px;
+      padding: 14px 28px; border-bottom: 1px solid var(--border);
+      background: var(--surface); position: sticky; top: 0; z-index: 10;
+      backdrop-filter: blur(8px);
+    }
+    .topbar-title { font-size: 1rem; font-weight: 600; flex: 1; }
+    .content { padding: 24px 28px; flex: 1; }
+
+    /* ── Buttons ───────────────────────────────────────── */
+    .btn {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 8px 16px; border-radius: 8px; border: none; cursor: pointer;
+      font-size: 0.84rem; font-weight: 500; transition: all 0.12s;
+      font-family: inherit; white-space: nowrap;
+    }
+    .btn-primary { background: var(--accent); color: white; }
+    .btn-primary:hover { background: var(--accent-h); }
+    .btn-ghost { background: transparent; color: var(--text-muted); border: 1px solid var(--border); }
+    .btn-ghost:hover { background: var(--surface2); color: var(--text); }
+    .btn-green { background: var(--green-dim); color: var(--green); border: 1px solid rgba(34,197,94,0.3); }
+    .btn-green:hover { background: var(--green); color: white; }
+    .btn-danger { background: var(--red-dim); color: var(--red); border: 1px solid rgba(239,68,68,0.3); }
+    .btn-danger:hover { background: var(--red); color: white; }
+    .btn-sm { padding: 5px 11px; font-size: 0.78rem; border-radius: 6px; }
+    .btn-xs { padding: 3px 8px; font-size: 0.72rem; border-radius: 5px; }
+    .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+    /* ── Inputs ────────────────────────────────────────── */
+    .input {
+      background: var(--surface2); border: 1px solid var(--border);
+      color: var(--text); border-radius: 8px; padding: 9px 14px;
+      font-size: 0.875rem; font-family: inherit; outline: none;
+      transition: border-color 0.12s;
+    }
+    .input:focus { border-color: var(--accent); }
+    .input::placeholder { color: var(--text-dim); }
+    select.input option { background: var(--surface2); }
+    textarea.input { resize: vertical; }
+
+    /* ── Cards ─────────────────────────────────────────── */
+    .card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius);
+    }
+    .card-hover:hover { border-color: var(--accent); box-shadow: var(--glow); }
+
+    /* ── Stats row ─────────────────────────────────────── */
+    .stats-row {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(150px,1fr));
+      gap: 12px; margin-bottom: 24px;
+    }
+    .stat-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 18px 20px;
+      display: flex; flex-direction: column; gap: 6px;
+    }
+    .stat-label { font-size: 0.72rem; color: var(--text-muted); font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; }
+    .stat-value { font-size: 2rem; font-weight: 700; line-height: 1; }
+    .stat-value.accent { color: var(--accent); }
+    .stat-value.green  { color: var(--green); }
+    .stat-value.yellow { color: var(--yellow); }
+    .stat-value.blue   { color: var(--blue); }
+    .stat-sub { font-size: 0.72rem; color: var(--text-muted); }
+
+    /* ── Filter pills ──────────────────────────────────── */
+    .filter-bar { display: flex; gap: 7px; margin-bottom: 20px; flex-wrap: wrap; }
+    .pill {
+      padding: 5px 13px; border-radius: 99px; font-size: 0.78rem; font-weight: 500;
+      border: 1px solid var(--border); cursor: pointer; transition: all 0.12s;
+      color: var(--text-muted); background: transparent; font-family: inherit;
+    }
+    .pill:hover { border-color: var(--accent); color: var(--text); }
+    .pill.active { background: var(--accent); border-color: var(--accent); color: white; }
+
+    /* ── Series grid ───────────────────────────────────── */
+    .series-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+      gap: 16px;
+    }
+    .series-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); overflow: hidden; cursor: pointer;
+      transition: transform 0.15s, box-shadow 0.15s, border-color 0.15s;
+      position: relative;
+    }
+    .series-card:hover { transform: translateY(-3px); box-shadow: var(--shadow); border-color: var(--accent); }
+    .series-card.has-update { border-color: var(--green); box-shadow: 0 0 12px rgba(34,197,94,0.15); }
+
+    .cover-wrap {
+      width: 100%; aspect-ratio: 2/3; position: relative; overflow: hidden;
+      background: var(--surface2);
+    }
+    .cover-img {
+      width: 100%; height: 100%; object-fit: cover;
+      display: block; transition: transform 0.3s;
+    }
+    .series-card:hover .cover-img { transform: scale(1.04); }
+    .cover-placeholder {
+      width: 100%; height: 100%; display: flex;
+      align-items: center; justify-content: center; font-size: 2.8rem;
+    }
+    .cover-overlay {
+      position: absolute; bottom: 0; left: 0; right: 0;
+      background: linear-gradient(to top, rgba(0,0,0,0.85) 0%, transparent 100%);
+      padding: 20px 10px 8px;
+    }
+    .cover-rating {
+      font-size: 0.72rem; font-weight: 600; color: var(--yellow);
+      display: flex; align-items: center; gap: 3px;
+    }
+
+    .status-chip {
+      position: absolute; top: 7px; left: 7px;
+      font-size: 0.62rem; font-weight: 700; padding: 2px 7px;
+      border-radius: 5px; text-transform: uppercase; letter-spacing: 0.05em;
+    }
+    .chip-new         { background: var(--green); color: white; }
+    .chip-plan        { background: var(--blue); color: white; }
+    .chip-considering { background: var(--pink); color: white; }
+    .chip-hold        { background: var(--yellow); color: #111; }
+    .chip-dropped     { background: var(--red); color: white; }
+    .chip-done        { background: var(--text-muted); color: white; }
+    .chip-linked  { position: absolute; top: 7px; right: 7px;
+                    background: rgba(0,0,0,0.6); backdrop-filter: blur(4px);
+                    font-size: 0.6rem; padding: 2px 6px; border-radius: 4px;
+                    color: var(--accent); font-weight: 600; }
+
+    .card-body { padding: 10px 10px 8px; }
+    .card-title {
+      font-size: 0.8rem; font-weight: 600; line-height: 1.3;
+      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+      overflow: hidden; margin-bottom: 5px;
+    }
+    .card-meta { font-size: 0.7rem; color: var(--text-muted); display: flex; justify-content: space-between; align-items: center; }
+    .card-chapter { font-size: 0.7rem; color: var(--text-muted); margin-top: 3px; }
+    .card-chapter.new { color: var(--green); font-weight: 600; }
+
+    .progress-wrap { height: 2px; background: var(--surface3); border-radius: 1px; margin-top: 6px; }
+    .progress-bar { height: 100%; background: var(--accent); border-radius: 1px; max-width: 100%; transition: width 0.3s; }
+    .progress-bar.green { background: var(--green); }
+
+    /* ── Today's drops feed ────────────────────────────── */
+    .drops-section { margin-bottom: 28px; }
+    .section-header {
+      display: flex; align-items: center; gap: 10px; margin-bottom: 14px;
+    }
+    .section-title { font-size: 0.95rem; font-weight: 600; }
+    .section-badge {
+      background: var(--green-dim); color: var(--green);
+      font-size: 0.7rem; font-weight: 700; padding: 2px 8px; border-radius: 99px;
+    }
+    .section-badge.accent { background: var(--accent-dim); color: var(--accent); }
+
+    .drops-scroller {
+      display: flex; gap: 12px; overflow-x: auto; padding-bottom: 6px;
+    }
+    .drops-scroller::-webkit-scrollbar { height: 4px; }
+
+    .drop-card {
+      flex-shrink: 0; width: 140px;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 10px; overflow: hidden; cursor: pointer;
+      transition: border-color 0.12s, transform 0.12s;
+    }
+    .drop-card:hover { border-color: var(--green); transform: translateY(-2px); }
+    .drop-cover {
+      width: 100%; aspect-ratio: 3/2; object-fit: cover;
+      background: var(--surface2); display: block;
+    }
+    .drop-cover-ph { width:100%; aspect-ratio:3/2; display:flex; align-items:center; justify-content:center; background:var(--surface2); font-size:2rem; }
+    .drop-body { padding: 8px 9px; }
+    .drop-title { font-size: 0.75rem; font-weight: 600; line-height: 1.25;
+                  display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+    .drop-ch { font-size: 0.7rem; color: var(--green); font-weight: 600; margin-top: 3px; }
+    .drop-group { font-size: 0.65rem; color: var(--text-muted); margin-top: 1px; }
+
+    /* ── Search results ────────────────────────────────── */
+    .search-wrap { display: flex; gap: 10px; margin-bottom: 22px; }
+    .search-results { display: flex; flex-direction: column; gap: 10px; }
+
+    .search-result {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 14px;
+      display: flex; gap: 14px; align-items: flex-start;
+      transition: border-color 0.12s;
+    }
+    .search-result:hover { border-color: var(--accent); }
+    .search-cover-wrap { width: 56px; flex-shrink: 0; }
+    .search-cover {
+      width: 56px; aspect-ratio: 2/3; object-fit: cover;
+      border-radius: 6px; background: var(--surface2); display: block;
+    }
+    .search-info { flex: 1; min-width: 0; }
+    .search-title { font-weight: 600; font-size: 0.9rem; margin-bottom: 3px; }
+    .search-meta { font-size: 0.75rem; color: var(--text-muted); margin-bottom: 8px; display: flex; gap: 10px; flex-wrap: wrap; }
+    .genre-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 9px; }
+    .genre-chip {
+      font-size: 0.66rem; padding: 2px 7px; border-radius: 99px;
+      background: var(--surface2); color: var(--text-muted); border: 1px solid var(--border);
+    }
+    .mu-badge { background: var(--accent-dim); color: var(--accent); border-color: var(--accent); }
+
+    /* ── Releases page ─────────────────────────────────── */
+    .release-row {
+      display: flex; gap: 14px; align-items: center;
+      padding: 12px 0; border-bottom: 1px solid var(--border);
+    }
+    .release-row:last-child { border-bottom: none; }
+    .release-cover { width: 44px; height: 60px; object-fit: cover; border-radius: 5px; background: var(--surface2); flex-shrink: 0; }
+    .release-cover-ph { width:44px; height:60px; border-radius:5px; background:var(--surface2); display:flex; align-items:center; justify-content:center; font-size:1.4rem; flex-shrink:0; }
+    .release-info { flex: 1; min-width: 0; }
+    .release-title { font-weight: 600; font-size: 0.88rem; margin-bottom: 2px; }
+    .release-ch { font-size: 0.82rem; color: var(--green); font-weight: 600; }
+    .release-group { font-size: 0.75rem; color: var(--text-muted); margin-top: 1px; }
+    .release-date { font-size: 0.72rem; color: var(--text-dim); flex-shrink: 0; text-align: right; }
+
+    /* ── Notification list ─────────────────────────────── */
+    .notif-item {
+      display: flex; gap: 12px; align-items: flex-start;
+      padding: 14px 0; border-bottom: 1px solid var(--border);
+      transition: opacity 0.2s;
+    }
+    .notif-item:last-child { border-bottom: none; }
+    .notif-item.read { opacity: 0.5; }
+    .notif-icon { font-size: 1.2rem; flex-shrink: 0; margin-top: 1px; }
+    .notif-body { flex: 1; min-width: 0; }
+    .notif-series { font-size: 0.75rem; font-weight: 600; color: var(--accent); margin-bottom: 2px; }
+    .notif-msg { font-size: 0.875rem; margin-bottom: 4px; line-height: 1.45; }
+    .notif-chapter { font-size: 0.78rem; color: var(--green); font-weight: 600; margin-bottom: 3px; }
+    .notif-group { font-size: 0.75rem; color: var(--text-muted); }
+    .notif-time { font-size: 0.72rem; color: var(--text-dim); margin-top: 3px; }
+    .notif-actions { display: flex; gap: 5px; flex-shrink: 0; }
+
+    /* ── Settings ──────────────────────────────────────── */
+    .settings-block { margin-bottom: 18px; }
+    .settings-block-title {
+      font-size: 0.88rem; font-weight: 600; margin-bottom: 14px;
+      padding-bottom: 10px; border-bottom: 1px solid var(--border);
+    }
+    .settings-row { display: flex; align-items: center; gap: 14px; margin-bottom: 12px; flex-wrap: wrap; }
+    .settings-row label { width: 200px; flex-shrink: 0; font-size: 0.84rem; color: var(--text-muted); }
+
+    /* ── Modal ─────────────────────────────────────────── */
+    .overlay {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.75);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 100; padding: 20px; backdrop-filter: blur(4px);
+    }
+    .modal {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 16px; width: 100%; max-width: 700px;
+      max-height: 90vh; overflow-y: auto; box-shadow: var(--shadow);
+    }
+    .modal-head {
+      display: flex; gap: 18px; padding: 22px;
+      border-bottom: 1px solid var(--border); position: relative;
+    }
+    .modal-cover { width: 110px; flex-shrink: 0; aspect-ratio: 2/3; object-fit: cover; border-radius: 8px; background: var(--surface2); }
+    .modal-cover-ph { width:110px; flex-shrink:0; aspect-ratio:2/3; background:var(--surface2); border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:3rem; }
+    .modal-info { flex: 1; min-width: 0; }
+    .modal-title { font-size: 1.15rem; font-weight: 700; margin-bottom: 3px; line-height: 1.3; }
+    .modal-native { font-size: 0.82rem; color: var(--text-muted); margin-bottom: 10px; }
+    .modal-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 10px; }
+    .tag { font-size: 0.7rem; padding: 3px 9px; border-radius: 99px; background: var(--surface2); color: var(--text-muted); border: 1px solid var(--border); }
+    .tag.accent { background: var(--accent-dim); color: var(--accent); border-color: rgba(124,108,255,0.3); }
+    .tag.green  { background: var(--green-dim); color: var(--green); border-color: rgba(34,197,94,0.3); }
+    .tag.yellow { background: var(--yellow-dim); color: var(--yellow); border-color: rgba(245,158,11,0.3); }
+
+    .modal-body { padding: 20px 22px; }
+    .modal-desc {
+      font-size: 0.84rem; color: var(--text-muted); line-height: 1.7;
+      margin-bottom: 18px;
+      display: -webkit-box; -webkit-line-clamp: 5; -webkit-box-orient: vertical; overflow: hidden;
+    }
+    .modal-footer {
+      padding: 14px 22px; border-top: 1px solid var(--border);
+      display: flex; gap: 9px; align-items: center;
+    }
+
+    .form-group { margin-bottom: 16px; }
+    .form-label { display: block; font-size: 0.78rem; font-weight: 600; margin-bottom: 6px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
+
+    /* ── Category cloud ────────────────────────────────── */
+    .cat-cloud { display: flex; flex-wrap: wrap; gap: 4px; }
+    .cat-chip {
+      font-size: 0.66rem; padding: 2px 7px; border-radius: 99px;
+      background: var(--surface3); color: var(--text-dim);
+      border: 1px solid var(--border);
+    }
+
+    /* ── Release timeline in modal ─────────────────────── */
+    .release-timeline { display: flex; flex-direction: column; gap: 0; }
+    .tl-item {
+      display: flex; gap: 12px; align-items: flex-start;
+      padding: 8px 0; border-bottom: 1px solid var(--border);
+    }
+    .tl-item:last-child { border-bottom: none; }
+    .tl-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); margin-top: 6px; flex-shrink: 0; }
+    .tl-ch { font-size: 0.88rem; font-weight: 600; color: var(--green); }
+    .tl-meta { font-size: 0.75rem; color: var(--text-muted); margin-top: 2px; }
+
+    /* ── Status badges ─────────────────────────────────── */
+    .sb { display: inline-flex; align-items: center; gap: 4px; font-size: 0.72rem; padding: 2px 8px; border-radius: 99px; font-weight: 500; }
+    .sb-releasing { background: var(--green-dim); color: var(--green); }
+    .sb-finished  { background: var(--blue-dim); color: var(--blue); }
+    .sb-hiatus    { background: var(--yellow-dim); color: var(--yellow); }
+    .sb-cancelled { background: var(--red-dim); color: var(--red); }
+
+    /* ── Rating star ───────────────────────────────────── */
+    .rating-star { color: var(--yellow); font-size: 0.85rem; }
+    .rating-val { font-weight: 700; font-size: 0.9rem; }
+    .rating-votes { font-size: 0.72rem; color: var(--text-muted); }
+
+    /* ── Toast ─────────────────────────────────────────── */
+    .toast-wrap { position: fixed; bottom: 22px; right: 22px; z-index: 200; display: flex; flex-direction: column; gap: 7px; pointer-events: none; }
+    .toast {
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 10px; padding: 11px 16px; font-size: 0.84rem;
+      box-shadow: var(--shadow); max-width: 320px; pointer-events: auto;
+      animation: slideIn 0.2s ease; display: flex; align-items: center; gap: 9px;
+    }
+    .toast.success { border-color: var(--green); }
+    .toast.error   { border-color: var(--red); }
+    @keyframes slideIn { from { transform: translateX(20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+
+    /* ── Empty state ───────────────────────────────────── */
+    .empty { text-align: center; padding: 52px 20px; color: var(--text-muted); }
+    .empty-icon { font-size: 3.5rem; margin-bottom: 14px; }
+    .empty h3 { font-size: 1.05rem; margin-bottom: 7px; color: var(--text); }
+    .empty p { font-size: 0.84rem; max-width: 300px; margin: 0 auto 18px; line-height: 1.6; }
+
+    /* ── Spinner ───────────────────────────────────────── */
+    .spin { width: 18px; height: 18px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: rotate 0.65s linear infinite; display: inline-block; flex-shrink: 0; }
+    @keyframes rotate { to { transform: rotate(360deg); } }
+
+    /* ── Divider ───────────────────────────────────────── */
+    .divider { border: none; border-top: 1px solid var(--border); margin: 18px 0; }
+
+    /* ── Misc ──────────────────────────────────────────── */
+    .flex { display: flex; }
+    .items-center { align-items: center; }
+    .gap-2 { gap: 8px; }
+    .gap-1 { gap: 4px; }
+    .ml-auto { margin-left: auto; }
+    .text-muted { color: var(--text-muted); }
+    .text-green { color: var(--green); }
+    .text-accent { color: var(--accent); }
+    .text-yellow { color: var(--yellow); }
+    .text-sm { font-size: 0.84rem; }
+    .text-xs { font-size: 0.72rem; }
+    .fw-600 { font-weight: 600; }
+    .mt-1 { margin-top: 4px; }
+    .mt-2 { margin-top: 8px; }
+    .mb-3 { margin-bottom: 12px; }
+    .mb-4 { margin-bottom: 16px; }
+
+    /* ── Providers row ─────────────────────────────────── */
+    .provider-row { display: flex; gap: 6px; align-items: center; margin-top: 6px; }
+    .provider-chip { font-size: 0.65rem; padding: 1px 6px; border-radius: 4px; font-weight: 600; }
+    .p-mb { background: rgba(124,108,255,0.2); color: var(--accent); }
+    .p-mu { background: rgba(59,130,246,0.2); color: var(--blue); }
+
+    @media (max-width: 768px) {
+      .sidebar { display: none; }
+      .series-grid { grid-template-columns: repeat(auto-fill, minmax(140px,1fr)); }
+      .stats-row { grid-template-columns: repeat(2,1fr); }
+    }
+  </style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ── Sidebar ──────────────────────────────────────── -->
+  <nav class="sidebar">
+    <div class="sidebar-brand">
+      <span class="brand-icon">📚</span>
+      <div>
+        <div class="brand-name">Manga Tracker</div>
+        <div class="brand-sub">MB + MangaUpdates</div>
+      </div>
+    </div>
+
+    <div class="nav">
+      <div class="nav-section">Browse</div>
+      <div class="nav-item" :class="{active: page==='library'}" @click="page='library'">
+        <span class="nav-icon">🗂️</span> Library
+        <span class="nav-badge green" x-show="stats.updates > 0" x-text="stats.updates"></span>
+      </div>
+      <div class="nav-item" :class="{active: page==='releases'}" @click="page='releases'; loadReleaseFeed()">
+        <span class="nav-icon">⚡</span> Live Feed
+        <span class="nav-badge green" x-show="feedReleases.length > 0" x-text="feedReleases.length"></span>
+      </div>
+      <div class="nav-item" :class="{active: page==='search'}" @click="page='search'">
+        <span class="nav-icon">🔍</span> Search
+      </div>
+
+      <div class="nav-section">Manage</div>
+      <div class="nav-item" :class="{active: page==='notifications'}" @click="page='notifications'; loadNotifications()">
+        <span class="nav-icon">🔔</span> Notifications
+        <span class="nav-badge" x-show="unreadCount > 0" x-text="unreadCount > 99 ? '99+' : unreadCount"></span>
+      </div>
+      <div class="nav-item" :class="{active: page==='settings'}" @click="page='settings'; loadSettings()">
+        <span class="nav-icon">⚙️</span> Settings
+      </div>
+    </div>
+
+    <div class="sidebar-footer">
+      <a href="https://mangabaka.org" target="_blank">MangaBaka</a> ·
+      <a href="https://mangaupdates.com" target="_blank">MangaUpdates</a>
+    </div>
+  </nav>
+
+  <!-- ── Main ─────────────────────────────────────────── -->
+  <div class="main">
+
+    <!-- Topbar -->
+    <div class="topbar">
+      <span class="topbar-title" x-text="pageTitle()"></span>
+      <template x-if="page==='library'">
+        <button class="btn btn-ghost btn-sm" @click="pollNow()" :disabled="polling">
+          <span x-show="polling" class="spin" style="width:13px;height:13px"></span>
+          <span x-show="!polling">🔄</span>
+          <span x-text="polling ? 'Checking...' : 'Check Updates'"></span>
+        </button>
+      </template>
+      <template x-if="page==='releases'">
+        <button class="btn btn-ghost btn-sm" @click="loadReleaseFeed()">
+          <span x-show="feedLoading" class="spin" style="width:13px;height:13px"></span>
+          <span x-show="!feedLoading">🔄</span> Refresh
+        </button>
+      </template>
+      <template x-if="page==='notifications' && notifications.length > 0">
+        <button class="btn btn-ghost btn-sm" @click="markAllRead()">✓ All Read</button>
+      </template>
+    </div>
+
+    <div class="content">
+
+      <!-- ══ LIBRARY ══════════════════════════════════════ -->
+      <div x-show="page==='library'">
+
+        <!-- Stats -->
+        <div class="stats-row">
+          <div class="stat-card">
+            <div class="stat-label">Tracked</div>
+            <div class="stat-value accent" x-text="library.length"></div>
+            <div class="stat-sub">series</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Updates</div>
+            <div class="stat-value green" x-text="stats.updates"></div>
+            <div class="stat-sub">unread chapters</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Reading</div>
+            <div class="stat-value blue" x-text="stats.reading"></div>
+            <div class="stat-sub">active</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">MU Linked</div>
+            <div class="stat-value" :style="stats.mu_linked === library.length ? 'color:var(--green)' : 'color:var(--yellow)'" x-text="stats.mu_linked"></div>
+            <div class="stat-sub">of <span x-text="library.length"></span> tracked</div>
+          </div>
+        </div>
+
+        <!-- Today's Drops (from live feed) -->
+        <div class="drops-section" x-show="feedReleases.length > 0">
+          <div class="section-header">
+            <span style="font-size:1.2rem">⚡</span>
+            <span class="section-title">Today's Drops</span>
+            <span class="section-badge" x-text="feedReleases.length + ' new'"></span>
+            <button class="btn btn-ghost btn-xs ml-auto" @click="page='releases'">See all →</button>
+          </div>
+          <div class="drops-scroller">
+            <template x-for="r in feedReleases" :key="r.mu_release_id || r.series_id + r.chapter">
+              <div class="drop-card" @click="openDetailById(r.series_id)">
+                <template x-if="r.cover_url">
+                  <img class="drop-cover" :src="r.cover_url" :alt="r.series_title" loading="lazy" />
+                </template>
+                <template x-if="!r.cover_url">
+                  <div class="drop-cover-ph">📖</div>
+                </template>
+                <div class="drop-body">
+                  <div class="drop-title" x-text="r.series_title"></div>
+                  <div class="drop-ch" x-text="'Ch. ' + r.chapter"></div>
+                  <div class="drop-group" x-text="r.group_name || ''"></div>
+                </div>
+              </div>
+            </template>
+          </div>
+        </div>
+
+        <!-- Filter pills -->
+        <div class="filter-bar">
+          <button class="pill" :class="{active: filter==='all'}" @click="filter='all'">All <span x-text="'(' + library.length + ')'"></span></button>
+          <button class="pill" :class="{active: filter==='updates'}" @click="filter='updates'">🟢 Updates <span x-text="'(' + stats.updates + ')'"></span></button>
+          <button class="pill" :class="{active: filter==='reading'}" @click="filter='reading'">Reading</button>
+          <button class="pill" :class="{active: filter==='completed'}" @click="filter='completed'">Completed</button>
+          <button class="pill" :class="{active: filter==='plan_to_read'}" @click="filter='plan_to_read'">Plan to Read</button>
+          <button class="pill" :class="{active: filter==='on_hold'}" @click="filter='on_hold'">On Hold</button>
+          <button class="pill" :class="{active: filter==='considering'}" @click="filter='considering'">Considering</button>
+          <button class="pill" :class="{active: filter==='dropped'}" @click="filter='dropped'">Dropped</button>
+        </div>
+
+        <!-- Loading -->
+        <div x-show="loading" style="text-align:center;padding:40px">
+          <div class="spin" style="width:28px;height:28px;margin:0 auto"></div>
+        </div>
+
+        <!-- Empty -->
+        <div x-show="!loading && filteredLibrary().length === 0" class="empty">
+          <div class="empty-icon">📖</div>
+          <h3 x-text="library.length === 0 ? 'Your library is empty' : 'No series match this filter'"></h3>
+          <p x-show="library.length === 0">Head to Search to find and add your first series.</p>
+          <button x-show="library.length === 0" class="btn btn-primary" @click="page='search'">🔍 Search Manga</button>
+        </div>
+
+        <!-- Grid -->
+        <div class="series-grid" x-show="!loading && filteredLibrary().length > 0">
+          <template x-for="s in filteredLibrary()" :key="s.id">
+            <div class="series-card" :class="{'has-update': s.has_update}" @click="openDetail(s)">
+
+              <!-- Status chips -->
+              <div class="status-chip chip-new"     x-show="s.has_update">NEW</div>
+              <div class="status-chip chip-plan"    x-show="!s.has_update && s.reading_status==='plan_to_read'">PLAN</div>
+              <div class="status-chip chip-considering" x-show="!s.has_update && s.reading_status==='considering'">?</div>
+              <div class="status-chip chip-hold"    x-show="!s.has_update && s.reading_status==='on_hold'">HOLD</div>
+              <div class="status-chip chip-dropped" x-show="!s.has_update && s.reading_status==='dropped'">DROP</div>
+              <div class="status-chip chip-done"    x-show="!s.has_update && s.reading_status==='completed'">DONE</div>
+              <div class="chip-linked" x-show="s.mu_series_id">MU</div>
+
+              <!-- Cover -->
+              <div class="cover-wrap">
+                <template x-if="s.cover_url">
+                  <img class="cover-img" :src="s.cover_url" :alt="s.title" loading="lazy"
+                       @error="$el.style.display='none'" />
+                </template>
+                <template x-if="!s.cover_url">
+                  <div class="cover-placeholder">📖</div>
+                </template>
+                <!-- Rating overlay -->
+                <div class="cover-overlay" x-show="s.mu_rating">
+                  <div class="cover-rating">
+                    ★ <span x-text="s.mu_rating ? s.mu_rating.toFixed(1) : ''"></span>
+                    <span x-show="s.mu_rating_votes" class="rating-votes" style="font-size:0.62rem">(<span x-text="formatVotes(s.mu_rating_votes)"></span>)</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="card-body">
+                <div class="card-title" x-text="s.title"></div>
+                <div class="card-meta">
+                  <span x-text="s.series_type || 'manga'" style="text-transform:capitalize"></span>
+                  <span x-text="s.year || ''"></span>
+                </div>
+                <!-- Latest chapter info -->
+                <div class="card-chapter" :class="{'new': s.has_update}" x-show="s.latest_chapter">
+                  Ch. <span x-text="s.latest_chapter"></span>
+                  <template x-if="s.has_update">
+                    <span style="font-size:0.62rem;color:var(--text-muted)"> ← <span x-text="s.current_chapter || '0'"></span> read</span>
+                  </template>
+                </div>
+                <div x-show="s.latest_release_group" class="text-xs text-muted" style="margin-top:1px" x-text="s.latest_release_group"></div>
+
+                <!-- Progress bar -->
+                <div class="progress-wrap" x-show="s.latest_chapter && s.current_chapter">
+                  <div class="progress-bar" :class="{'green': s.has_update}" :style="`width: ${chapterProgress(s)}%`"></div>
+                </div>
+              </div>
+            </div>
+          </template>
+        </div>
+
+      </div><!-- /library -->
+
+
+      <!-- ══ LIVE FEED ════════════════════════════════════ -->
+      <div x-show="page==='releases'">
+        <div x-show="feedLoading" style="text-align:center;padding:40px">
+          <div class="spin" style="width:28px;height:28px;margin:0 auto"></div>
+          <div class="text-muted text-sm" style="margin-top:12px">Fetching today's releases from MangaUpdates…</div>
+        </div>
+
+        <div x-show="!feedLoading">
+          <template x-if="feedReleases.length === 0 && library.length === 0">
+            <div class="empty">
+              <div class="empty-icon">📡</div>
+              <h3>No series tracked yet</h3>
+              <p>Add series to your library and the Live Feed will show chapter releases here as they happen.</p>
+              <button class="btn btn-primary" @click="page='search'">🔍 Search Manga</button>
+            </div>
+          </template>
+
+          <template x-if="feedReleases.length === 0 && library.length > 0">
+            <div class="empty">
+              <div class="empty-icon">💤</div>
+              <h3>No tracked drops today</h3>
+              <p>None of your tracked series had releases on MangaUpdates today. Check back later!</p>
+            </div>
+          </template>
+
+          <template x-if="feedReleases.length > 0">
+            <div>
+              <div class="section-header mb-4">
+                <span class="section-title">Today's Releases for Your Library</span>
+                <span class="section-badge" x-text="feedReleases.length + ' releases'"></span>
+                <span class="text-xs text-muted ml-auto" x-text="'of ' + feedTotal + ' total on MU today'"></span>
+              </div>
+
+              <div class="card" style="padding:0 16px">
+                <template x-for="r in feedReleases" :key="r.mu_release_id || r.series_title+r.chapter">
+                  <div class="release-row">
+                    <template x-if="r.cover_url">
+                      <img class="release-cover" :src="r.cover_url" :alt="r.series_title" loading="lazy" />
+                    </template>
+                    <template x-if="!r.cover_url">
+                      <div class="release-cover-ph">📖</div>
+                    </template>
+
+                    <div class="release-info">
+                      <div class="release-title" x-text="r.series_title"></div>
+                      <div class="release-ch" x-text="'Chapter ' + r.chapter + (r.volume ? ' · Vol. ' + r.volume : '')"></div>
+                      <div class="release-group" x-text="r.group_name ? 'by ' + r.group_name : ''"></div>
+                      <div style="margin-top:4px">
+                        <span class="genre-chip" x-text="r.reading_status?.replace('_',' ') || ''"></span>
+                        <span x-show="r.current_chapter" class="text-xs text-muted" x-text="' · at ch. ' + r.current_chapter"></span>
+                      </div>
+                    </div>
+
+                    <div class="release-date">
+                      <div x-text="r.release_date"></div>
+                      <div x-show="r.mu_url" style="margin-top:5px">
+                        <a :href="r.mu_url" target="_blank" class="btn btn-xs btn-ghost">MU ↗</a>
+                      </div>
+                      <div style="margin-top:5px">
+                        <button class="btn btn-xs btn-green" @click.stop="openDetailById(r.series_id)">Detail</button>
+                      </div>
+                    </div>
+                  </div>
+                </template>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div><!-- /releases -->
+
+
+      <!-- ══ SEARCH ════════════════════════════════════════ -->
+      <div x-show="page==='search'">
+        <div class="search-wrap">
+          <input class="input" type="text" style="flex:1"
+                 placeholder="Search manga, manhwa, light novels…"
+                 x-model="searchQuery" @keyup.enter="doSearch()" />
+          <button class="btn btn-primary" @click="doSearch()" :disabled="searching">
+            <span x-show="searching" class="spin" style="width:13px;height:13px"></span>
+            <span x-show="!searching">🔍</span>
+            <span x-text="searching ? 'Searching…' : 'Search'"></span>
+          </button>
+        </div>
+
+        <div x-show="searching" style="text-align:center;padding:40px">
+          <div class="spin" style="width:28px;height:28px;margin:0 auto"></div>
+        </div>
+
+        <div class="search-results" x-show="!searching">
+          <template x-for="r in searchResults" :key="r.id">
+            <div class="search-result">
+              <div class="search-cover-wrap">
+                <img class="search-cover" :src="getCoverUrl(r)" :alt="r.title" loading="lazy" @error="$el.src=''" />
+              </div>
+              <div class="search-info">
+                <div class="search-title" x-text="r.title"></div>
+                <div class="search-meta">
+                  <span x-text="r.type || 'manga'" style="text-transform:capitalize"></span>
+                  <span x-show="r.year">· <span x-text="r.year"></span></span>
+                  <span x-show="r.total_chapters">· <span x-text="r.total_chapters"></span> chapters</span>
+                  <span x-show="r.status" :class="'sb sb-' + (r.status||'').toLowerCase()" x-text="r.status"></span>
+                </div>
+                <div class="genre-chips">
+                  <template x-for="g in (r.genres||[]).slice(0,6)" :key="g">
+                    <span class="genre-chip" x-text="g"></span>
+                  </template>
+                  <span class="genre-chip mu-badge" x-show="r.total_chapters">MangaBaka</span>
+                </div>
+                <div class="flex gap-2 items-center">
+                  <button x-show="!r.is_tracked" class="btn btn-primary btn-sm" @click="quickAdd(r)">+ Add to Library</button>
+                  <button x-show="r.is_tracked" class="btn btn-ghost btn-sm" disabled>✓ In Library</button>
+                  <a :href="`https://mangabaka.org/${r.id}`" target="_blank" class="btn btn-ghost btn-sm">MB ↗</a>
+                </div>
+              </div>
+            </div>
+          </template>
+
+          <!-- Pagination -->
+          <div x-show="searchResults.length > 0 && searchPagination.count > 10"
+               class="flex gap-2 items-center" style="justify-content:center;margin-top:12px">
+            <button class="btn btn-ghost btn-sm" :disabled="searchPagination.page<=1" @click="doSearch(searchPagination.page-1)">← Prev</button>
+            <span class="text-muted text-sm" x-text="`Page ${searchPagination.page} of ${Math.ceil(searchPagination.count/10)}`"></span>
+            <button class="btn btn-ghost btn-sm" :disabled="!searchPagination.next" @click="doSearch(searchPagination.page+1)">Next →</button>
+          </div>
+        </div>
+
+        <div x-show="!searching && searchResults.length===0 && hasSearched" class="empty">
+          <div class="empty-icon">🔍</div>
+          <h3>No results</h3>
+          <p>Try a different title or check the spelling.</p>
+        </div>
+        <div x-show="!hasSearched" class="empty">
+          <div class="empty-icon">📚</div>
+          <h3>Search the MangaBaka database</h3>
+          <p>Powered by MangaBaka's aggregated metadata from AniList, Kitsu, MAL, and MangaUpdates.</p>
+        </div>
+      </div><!-- /search -->
+
+
+      <!-- ══ NOTIFICATIONS ════════════════════════════════ -->
+      <div x-show="page==='notifications'">
+        <div x-show="notifications.length===0" class="empty">
+          <div class="empty-icon">🔔</div>
+          <h3>No notifications</h3>
+          <p>Chapter update alerts from MangaUpdates and news items will appear here.</p>
+        </div>
+
+        <div x-show="notifications.length>0">
+          <template x-for="n in notifications" :key="n.id">
+            <div class="notif-item" :class="{'read': n.is_read}">
+              <div class="notif-icon" x-text="n.notif_type==='chapter_update' ? '📖' : n.notif_type==='news' ? '📰' : '🔔'"></div>
+              <div class="notif-body">
+                <div class="notif-series" x-text="n.series_title" x-show="n.series_title"></div>
+                <!-- Chapter-specific rich display -->
+                <template x-if="n.notif_type==='chapter_update' && n.meta && n.meta.chapter">
+                  <div>
+                    <div class="notif-chapter" x-text="'Chapter ' + n.meta.chapter + (n.meta.volume ? ' · Vol. ' + n.meta.volume : '')"></div>
+                    <div class="notif-group" x-show="n.meta.group_name" x-text="'by ' + n.meta.group_name"></div>
+                    <div class="notif-group" x-show="n.meta.release_date" x-text="'Released ' + n.meta.release_date"></div>
+                    <div class="notif-group" x-show="n.meta.old_chapter" x-text="'Was at ch. ' + n.meta.old_chapter"></div>
+                  </div>
+                </template>
+                <template x-if="!(n.notif_type==='chapter_update' && n.meta && n.meta.chapter)">
+                  <div class="notif-msg" x-text="n.message"></div>
+                </template>
+                <div class="notif-time" x-text="relativeTime(n.created_at)"></div>
+              </div>
+              <div class="notif-actions">
+                <a x-show="n.meta && n.meta.url" :href="n.meta && n.meta.url" target="_blank"
+                   class="btn btn-ghost btn-xs">↗</a>
+                <button x-show="!n.is_read" class="btn btn-ghost btn-xs" @click="markRead(n.id)">✓</button>
+                <button class="btn btn-xs" style="color:var(--red-dim);border:none;background:none;cursor:pointer" @click="deleteNotif(n.id)">✕</button>
+              </div>
+            </div>
+          </template>
+          <div style="text-align:center;margin-top:20px">
+            <button class="btn btn-danger btn-sm" @click="clearAllNotifs()">🗑 Clear All</button>
+          </div>
+        </div>
+      </div><!-- /notifications -->
+
+
+      <!-- ══ SETTINGS ══════════════════════════════════════ -->
+      <div x-show="page==='settings'">
+
+        <!-- ── Notification Behaviour ───────────────────────── -->
+        <div class="card" style="padding:20px 24px;margin-bottom:16px">
+          <div class="settings-block-title">🔔 Notification Behaviour</div>
+
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:4px">
+
+            <div style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:14px 16px">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+                <div style="font-size:0.85rem;font-weight:600">📖 Chapter updates → Pushover</div>
+                <select class="input" x-model="sf.push_chapter_updates" style="width:100px;padding:4px 8px;font-size:0.8rem">
+                  <option value="true">On</option>
+                  <option value="false">Off</option>
+                </select>
+              </div>
+              <div class="text-xs text-muted" style="line-height:1.5">
+                When a new chapter is detected via MangaUpdates, send a Pushover push to your device.
+                This is the main notification type — recommended to keep on.
+              </div>
+            </div>
+
+            <div style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:14px 16px">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+                <div style="font-size:0.85rem;font-weight:600">📰 News items → Pushover</div>
+                <select class="input" x-model="sf.push_news" style="width:100px;padding:4px 8px;font-size:0.8rem">
+                  <option value="false">Off</option>
+                  <option value="true">On</option>
+                </select>
+              </div>
+              <div class="text-xs text-muted" style="line-height:1.5">
+                News articles about tracked series also appear in-app. Enable this only if you want
+                them pushed to your phone too — can be noisy.
+              </div>
+            </div>
+
+            <div style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:14px 16px;grid-column:1/-1">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+                <div style="font-size:0.85rem;font-weight:600">📲 Push only for "Reading" status</div>
+                <select class="input" x-model="sf.push_reading_only" style="width:100px;padding:4px 8px;font-size:0.8rem">
+                  <option value="false">All statuses</option>
+                  <option value="true">Reading only</option>
+                </select>
+              </div>
+              <div class="text-xs text-muted" style="line-height:1.5">
+                When enabled, Pushover notifications only fire for series you have marked
+                <strong>Reading</strong>. Series set to On Hold, Plan to Read, Considering, etc.
+                still create in-app notifications but won't ping your device.
+                Useful if you have a large backlog you haven't started yet.
+              </div>
+            </div>
+
+          </div>
+
+          <div class="flex gap-2 mt-2">
+            <button class="btn btn-primary btn-sm" @click="saveSettings()">💾 Save</button>
+          </div>
+        </div>
+
+        <!-- ── Pushover Credentials ─────────────────────── -->
+        <div class="card" style="padding:20px 24px;margin-bottom:16px">
+          <div class="settings-block-title">🔑 Pushover Credentials</div>
+          <div class="settings-row">
+            <label>Enable Pushover</label>
+            <select class="input" x-model="sf.pushover_enabled" style="width:130px">
+              <option value="true">Enabled</option>
+              <option value="false">Disabled</option>
+            </select>
+          </div>
+          <div class="settings-row">
+            <label>User Key</label>
+            <input class="input" type="password" style="flex:1" placeholder="Your key from pushover.net" x-model="sf.pushover_user_key" autocomplete="off" />
+          </div>
+          <div class="settings-row">
+            <label>App Token</label>
+            <input class="input" type="password" style="flex:1" placeholder="Your app/API token" x-model="sf.pushover_app_token" autocomplete="off" />
+          </div>
+          <div class="flex gap-2 mt-2">
+            <button class="btn btn-primary btn-sm" @click="saveSettings()">💾 Save</button>
+            <button class="btn btn-ghost btn-sm" @click="testPushover()">🧪 Send Test</button>
+          </div>
+          <div class="text-xs text-muted mt-2">
+            One-time $5 purchase at <a href="https://pushover.net" target="_blank" class="text-accent">pushover.net</a>. Works on iOS & Android.
+          </div>
+        </div><!-- /credentials card -->
+
+        <div class="card" style="padding:20px 24px;margin-bottom:16px">
+          <div class="settings-block-title">📡 MangaUpdates Integration</div>
+          <div class="settings-row">
+            <label>MU Release Tracking</label>
+            <select class="input" x-model="sf.mu_enabled" style="width:130px">
+              <option value="true">Enabled</option>
+              <option value="false">Disabled (MB only)</option>
+            </select>
+          </div>
+          <div class="text-xs text-muted mt-2" style="line-height:1.6">
+            When enabled, the poller uses MangaUpdates' release feed for accurate chapter-level notifications including release group names.
+            MangaUpdates requires no API token. Falls back to MangaBaka chapter counts for unlinked series.
+          </div>
+          <div class="flex gap-2 mt-2">
+            <button class="btn btn-primary btn-sm" @click="saveSettings()">💾 Save</button>
+          </div>
+        </div>
+
+        <div class="card" style="padding:20px 24px;margin-bottom:16px">
+          <div class="settings-block-title">🔄 Update Polling</div>
+          <div class="settings-row">
+            <label>Check Interval</label>
+            <select class="input" x-model="sf.poll_interval_hours" style="width:180px">
+              <option value="1">Every hour</option>
+              <option value="2">Every 2 hours</option>
+              <option value="6">Every 6 hours</option>
+              <option value="12">Every 12 hours</option>
+              <option value="24">Once a day</option>
+            </select>
+          </div>
+          <div class="flex gap-2 mt-2">
+            <button class="btn btn-primary btn-sm" @click="saveSettings()">💾 Save</button>
+            <button class="btn btn-ghost btn-sm" @click="pollNow()" :disabled="polling">
+              <span x-show="polling" class="spin" style="width:13px;height:13px"></span>
+              <span x-show="!polling">🔄</span>
+              <span x-text="polling ? 'Running…' : 'Poll Now'"></span>
+            </button>
+          </div>
+        </div>
+
+        <div class="card" style="padding:20px 24px">
+          <div class="settings-block-title">🔑 MangaBaka API</div>
+          <div class="settings-row">
+            <label>API Token</label>
+            <input class="input" type="text" style="flex:1" placeholder="mb-…" x-model="sf.mangabaka_token" />
+          </div>
+          <div class="flex gap-2 mt-2">
+            <button class="btn btn-primary btn-sm" @click="saveSettings()">💾 Save</button>
+          </div>
+          <div class="text-xs text-muted mt-2">
+            Token from <a href="https://mangabaka.org" target="_blank" class="text-accent">mangabaka.org</a>.
+            Rate limits: 30 searches/min, 120 lookups/min.
+          </div>
+        </div>
+
+      </div><!-- /settings -->
+
+    </div><!-- /content -->
+  </div><!-- /main -->
+</div><!-- /app -->
+
+
+<!-- ── Series Detail Modal ──────────────────────────────────────────── -->
+<div class="overlay" x-show="detailOpen" x-cloak @click.self="detailOpen=false">
+  <div class="modal" @click.stop x-show="detailOpen">
+    <template x-if="ds">
+      <div>
+        <div class="modal-head">
+          <template x-if="ds.cover_url">
+            <img class="modal-cover" :src="ds.cover_url" :alt="ds.title" />
+          </template>
+          <template x-if="!ds.cover_url">
+            <div class="modal-cover-ph">📖</div>
+          </template>
+
+          <div class="modal-info">
+            <div class="modal-title" x-text="ds.title"></div>
+            <div class="modal-native" x-text="ds.native_title"></div>
+
+            <div class="modal-tags">
+              <span x-show="ds.status" :class="'sb sb-' + (ds.status||'').toLowerCase()" x-text="ds.status"></span>
+              <span x-show="ds.series_type" class="tag" x-text="(ds.series_type||'').replace('_',' ')"></span>
+              <span x-show="ds.year" class="tag" x-text="ds.year"></span>
+            </div>
+
+            <!-- MU Rating -->
+            <template x-if="ds.mu_rating">
+              <div class="flex items-center gap-1 mb-3">
+                <span class="rating-star">★</span>
+                <span class="rating-val" x-text="ds.mu_rating.toFixed(2)"></span>
+                <span class="rating-votes" x-show="ds.mu_rating_votes">(<span x-text="formatVotes(ds.mu_rating_votes)"></span> votes)</span>
+                <span class="text-xs text-muted">MangaUpdates Bayesian</span>
+              </div>
+            </template>
+
+            <!-- Genres -->
+            <div class="modal-tags">
+              <template x-for="g in (ds.genres||[]).slice(0,8)" :key="g">
+                <span class="genre-chip" x-text="g"></span>
+              </template>
+            </div>
+
+            <!-- Authors / Publishers -->
+            <div class="text-xs text-muted mt-1" x-show="ds.authors && ds.authors.length">
+              By <strong x-text="(ds.authors||[]).join(', ')"></strong>
+            </div>
+            <div class="text-xs text-muted mt-1" x-show="ds.publishers && ds.publishers.length">
+              Pub. <span x-text="(ds.publishers||[]).slice(0,2).join(', ')"></span>
+            </div>
+
+            <!-- Providers -->
+            <div class="provider-row">
+              <span class="provider-chip p-mb">MangaBaka</span>
+              <span class="provider-chip p-mu" x-show="ds.mu_series_id">MangaUpdates</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-body">
+          <div class="modal-desc" x-text="stripHtml(ds.description || 'No description available.')"></div>
+
+          <!-- Latest release info -->
+          <template x-if="ds.latest_chapter">
+            <div class="card" style="padding:12px 16px;margin-bottom:18px;border-color:var(--green)" x-show="ds.latest_chapter">
+              <div class="flex items-center gap-2">
+                <span style="font-size:1.1rem">📡</span>
+                <div>
+                  <div class="text-sm fw-600 text-green">Latest: Chapter <span x-text="ds.latest_chapter"></span></div>
+                  <div class="text-xs text-muted" x-show="ds.latest_release_group">
+                    by <span x-text="ds.latest_release_group"></span>
+                    <span x-show="ds.latest_release_date"> · <span x-text="ds.latest_release_date"></span></span>
+                  </div>
+                </div>
+                <div class="ml-auto" x-show="ds.has_update">
+                  <span class="tag green">+<span x-text="unreadChapters(ds)"></span> unread</span>
+                </div>
+              </div>
+            </div>
+          </template>
+
+          <!-- Progress form -->
+          <div class="form-group">
+            <div class="form-label">Reading Status</div>
+            <select class="input" x-model="ef.reading_status" style="width:200px">
+              <option value="reading">📖 Reading</option>
+              <option value="considering">🤔 Considering</option>
+              <option value="plan_to_read">📋 Plan to Read</option>
+              <option value="on_hold">⏸ On Hold</option>
+              <option value="completed">✅ Completed</option>
+              <option value="dropped">❌ Dropped</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <div class="form-label">
+              Current Chapter
+              <span class="text-muted fw-400" x-show="ds.latest_chapter" x-text="`(latest: ${ds.latest_chapter})`"></span>
+            </div>
+            <div class="flex gap-2 items-center">
+              <input class="input" type="number" min="0" step="1" x-model="ef.current_chapter" style="width:100px" />
+              <button class="btn btn-green btn-sm" x-show="ds.latest_chapter"
+                      @click="ef.current_chapter = ds.latest_chapter">Mark Current</button>
+            </div>
+            <div class="progress-wrap mt-2" x-show="ds.latest_chapter">
+              <div class="progress-bar" :class="{'green': ds.has_update}"
+                   :style="`width: ${chapterProgress({...ds, current_chapter: ef.current_chapter})}%`"></div>
+            </div>
+            <div class="text-xs text-muted mt-1" x-show="ds.latest_chapter"
+                 x-text="`${chapterProgress({...ds, current_chapter: ef.current_chapter}).toFixed(0)}% complete`"></div>
+          </div>
+
+          <div class="form-group">
+            <div class="form-label">Notes</div>
+            <textarea class="input" rows="2" placeholder="Your notes…" x-model="ef.notes" style="width:100%"></textarea>
+          </div>
+
+          <!-- MU Categories cloud -->
+          <template x-if="ds.categories && ds.categories.length > 0">
+            <div class="mb-4">
+              <div class="form-label" style="margin-bottom:8px">Community Tags (MangaUpdates)</div>
+              <div class="cat-cloud">
+                <template x-for="c in ds.categories.slice(0, 25)" :key="c">
+                  <span class="cat-chip" x-text="c"></span>
+                </template>
+              </div>
+            </div>
+          </template>
+
+          <!-- Release history -->
+          <template x-if="detailReleases.length > 0">
+            <div>
+              <hr class="divider" />
+              <div class="form-label" style="margin-bottom:10px">Release History (MangaUpdates)</div>
+              <div class="release-timeline">
+                <template x-for="r in detailReleases.slice(0,10)" :key="r.id || r.chapter">
+                  <div class="tl-item">
+                    <div class="tl-dot"></div>
+                    <div>
+                      <div class="tl-ch" x-text="'Ch. ' + r.chapter + (r.volume ? ' · Vol. ' + r.volume : '')"></div>
+                      <div class="tl-meta">
+                        <span x-text="r.release_date || ''"></span>
+                        <span x-show="r.groups && r.groups.length"> · <span x-text="r.groups[0].name"></span></span>
+                        <span x-show="r.group_name && !r.groups"> · <span x-text="r.group_name"></span></span>
+                      </div>
+                    </div>
+                  </div>
+                </template>
+              </div>
+            </div>
+          </template>
+
+          <!-- Links -->
+          <div class="flex gap-2 mt-2">
+            <a x-show="ds.mangabaka_url" :href="ds.mangabaka_url" target="_blank" class="btn btn-ghost btn-sm">MangaBaka ↗</a>
+            <a x-show="ds.mu_url" :href="ds.mu_url" target="_blank" class="btn btn-ghost btn-sm">MangaUpdates ↗</a>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button class="btn btn-danger btn-sm" @click="removeSeries(ds.id)">🗑 Remove</button>
+          <button class="btn btn-ghost btn-sm" @click="refreshSeries(ds.id)">🔄 Refresh</button>
+          <div class="ml-auto flex gap-2">
+            <button class="btn btn-ghost" @click="detailOpen=false">Cancel</button>
+            <button class="btn btn-primary" @click="saveDetail()">💾 Save</button>
+          </div>
+        </div>
+      </div>
+    </template>
+  </div>
+</div>
+
+<!-- ── Quick Add Modal ──────────────────────────────────────────────── -->
+<div class="overlay" x-show="addOpen" x-cloak @click.self="addOpen=false">
+  <div class="modal" style="max-width:440px" @click.stop x-show="addOpen">
+    <template x-if="addTarget">
+      <div>
+        <div class="modal-head" style="padding:18px">
+          <template x-if="getCoverUrl(addTarget)">
+            <img style="width:80px;aspect-ratio:2/3;object-fit:cover;border-radius:8px;flex-shrink:0"
+                 :src="getCoverUrl(addTarget)" :alt="addTarget.title" />
+          </template>
+          <template x-if="!getCoverUrl(addTarget)">
+            <div style="width:80px;aspect-ratio:2/3;background:var(--surface2);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:2.5rem;flex-shrink:0">📖</div>
+          </template>
+          <div class="modal-info">
+            <div class="modal-title" style="font-size:1rem" x-text="addTarget.title"></div>
+            <div class="modal-native" x-text="addTarget.native_title"></div>
+            <div class="text-xs text-muted mt-1" x-show="addTarget.total_chapters">
+              <span x-text="addTarget.total_chapters"></span> chapters available
+            </div>
+            <div class="text-xs text-muted mt-1">
+              MangaUpdates ID will be linked automatically in the background.
+            </div>
+          </div>
+        </div>
+        <div class="modal-body" style="padding:14px 18px">
+          <div class="form-group">
+            <div class="form-label">Reading Status</div>
+            <select class="input" x-model="addForm.reading_status">
+              <option value="reading">📖 Reading</option>
+              <option value="considering">🤔 Considering</option>
+              <option value="plan_to_read">📋 Plan to Read</option>
+              <option value="completed">✅ Completed</option>
+              <option value="on_hold">⏸ On Hold</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <div class="form-label">Current Chapter</div>
+            <input class="input" type="number" min="0" step="1" x-model="addForm.current_chapter" style="width:100px" />
+          </div>
+        </div>
+        <div class="modal-footer" style="padding:12px 18px">
+          <button class="btn btn-ghost" @click="addOpen=false">Cancel</button>
+          <div class="ml-auto">
+            <button class="btn btn-primary" @click="confirmAdd()" :disabled="adding">
+              <span x-show="adding" class="spin" style="width:13px;height:13px"></span>
+              <span x-text="adding ? 'Adding…' : '+ Add to Library'"></span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </template>
+  </div>
+</div>
+
+<!-- ── Toasts ───────────────────────────────────────────────────────── -->
+<div class="toast-wrap">
+  <template x-for="t in toasts" :key="t.id">
+    <div class="toast" :class="t.type">
+      <span x-text="t.type==='success' ? '✓' : '✕'"></span>
+      <span x-text="t.message"></span>
+    </div>
+  </template>
+</div>
+
+<script>
+function app() {
+  return {
+    page: 'library',
+    loading: false,
+    library: [],
+    filter: 'all',
+
+    // Search
+    searchQuery: '', searchResults: [], searchPagination: {}, searching: false, hasSearched: false,
+
+    // Notifications
+    notifications: [], unreadCount: 0,
+
+    // Settings form
+    sf: { pushover_user_key:'', pushover_app_token:'', pushover_enabled:'false', push_chapter_updates:'true', push_news:'false', push_reading_only:'false', poll_interval_hours:'6', mangabaka_token:'', mu_enabled:'true' },
+
+    // Detail modal
+    detailOpen: false, ds: null, ef: {}, detailReleases: [],
+
+    // Add modal
+    addOpen: false, addTarget: null, addForm: { current_chapter:'0', reading_status:'reading' }, adding: false,
+
+    // Live feed
+    feedReleases: [], feedTotal: 0, feedLoading: false,
+
+    // Polling
+    polling: false,
+
+    // Toasts
+    toasts: [], _tid: 0,
+
+    // Computed stats
+    get stats() {
+      return {
+        updates: this.library.filter(s=>s.has_update).length,
+        reading: this.library.filter(s=>s.reading_status==='reading').length,
+        mu_linked: this.library.filter(s=>s.mu_series_id).length,
+      };
+    },
+
+    async init() {
+      await this.loadLibrary();
+      await this.pollUnreadCount();
+      // Silently prefetch feed in background
+      this.loadReleaseFeed().catch(()=>{});
+      setInterval(() => this.pollUnreadCount(), 30000);
+    },
+
+    pageTitle() {
+      return { library:'My Library', releases:'Live Feed', search:'Search', notifications:'Notifications', settings:'Settings' }[this.page] || '';
+    },
+
+    // ── Library ─────────────────────────────────────────
+    async loadLibrary() {
+      this.loading = true;
+      try { this.library = await this.api('/api/series'); }
+      catch(e) { this.toast('Failed to load library', 'error'); }
+      finally { this.loading = false; }
+    },
+
+    filteredLibrary() {
+      if (this.filter === 'all') return this.library;
+      if (this.filter === 'updates') return this.library.filter(s=>s.has_update);
+      return this.library.filter(s=>s.reading_status===this.filter);
+    },
+
+    chapterProgress(s) {
+      const latest = parseFloat(s.mu_latest_chapter || s.latest_chapter || s.total_chapters);
+      const current = parseFloat(s.current_chapter);
+      if (!latest || isNaN(latest) || isNaN(current)) return 0;
+      return Math.min(100, (current / latest) * 100);
+    },
+
+    unreadChapters(s) {
+      try {
+        const latest = parseFloat(s.latest_chapter);
+        const current = parseFloat(s.current_chapter || 0);
+        if (!isNaN(latest) && !isNaN(current)) return Math.max(0, Math.floor(latest - current));
+      } catch {}
+      return '?';
+    },
+
+    formatVotes(n) {
+      if (!n) return '';
+      if (n >= 1000) return (n/1000).toFixed(1) + 'k';
+      return n;
+    },
+
+    // ── Live Feed ────────────────────────────────────────
+    async loadReleaseFeed() {
+      this.feedLoading = true;
+      try {
+        const data = await this.api('/api/releases/feed');
+        this.feedReleases = data.releases || [];
+        this.feedTotal = data.total_in_feed || 0;
+      } catch(e) {
+        // Silently fail — feed is not critical
+      } finally {
+        this.feedLoading = false;
+      }
+    },
+
+    // ── Search ───────────────────────────────────────────
+    async doSearch(page=1) {
+      if (!this.searchQuery.trim()) return;
+      this.searching = true; this.hasSearched = true;
+      try {
+        const data = await this.api(`/api/series/search?q=${encodeURIComponent(this.searchQuery)}&page=${page}`);
+        this.searchResults = data.data || [];
+        this.searchPagination = data.pagination || {};
+      } catch(e) { this.toast('Search failed', 'error'); }
+      finally { this.searching = false; }
+    },
+
+    getCoverUrl(r) {
+      if (!r || !r.cover) return null;
+      const c = r.cover;
+      return (c.x250&&c.x250.x1)||(c.x150&&c.x150.x1)||(c.raw&&c.raw.url)||null;
+    },
+
+    quickAdd(series) {
+      this.addTarget = series;
+      this.addForm = { current_chapter:'0', reading_status:'reading' };
+      this.addOpen = true;
+    },
+
+    async confirmAdd() {
+      this.adding = true;
+      try {
+        await this.api('/api/series','POST',{
+          series_id: this.addTarget.id,
+          current_chapter: this.addForm.current_chapter,
+          reading_status: this.addForm.reading_status,
+        });
+        this.addTarget.is_tracked = true;
+        this.addOpen = false;
+        this.toast(`${this.addTarget.title} added! Linking MangaUpdates in background…`, 'success');
+        await this.loadLibrary();
+      } catch(e) {
+        this.toast(e.detail||'Failed to add series','error');
+      } finally { this.adding = false; }
+    },
+
+    // ── Detail modal ─────────────────────────────────────
+    async openDetail(series) {
+      this.ds = series;
+      this.ef = { current_chapter: series.current_chapter||'0', reading_status: series.reading_status||'reading', notes: series.notes||'' };
+      this.detailOpen = true;
+      this.detailReleases = [];
+      // Load release history in background
+      this._loadDetailReleases(series.id, series.mu_series_id);
+    },
+
+    async openDetailById(series_id) {
+      const s = this.library.find(x=>x.id===series_id);
+      if (s) this.openDetail(s);
+    },
+
+    async _loadDetailReleases(series_id, mu_series_id) {
+      try {
+        const data = await this.api(`/api/series/${series_id}/releases`);
+        const stored = data.stored || [];
+        const live = data.live || [];
+        // Merge stored + live, deduplicate by chapter
+        const seen = new Set();
+        const merged = [];
+        for (const r of [...live, ...stored]) {
+          const ch = r.chapter || r.record?.chapter;
+          if (ch && seen.has(ch)) continue;
+          if (ch) seen.add(ch);
+          merged.push(r);
+        }
+        this.detailReleases = merged.slice(0, 15);
+      } catch(e) {}
+    },
+
+    async saveDetail() {
+      try {
+        const updated = await this.api(`/api/series/${this.ds.id}`,'PATCH',{
+          current_chapter: this.ef.current_chapter,
+          reading_status: this.ef.reading_status,
+          notes: this.ef.notes,
+        });
+        const idx = this.library.findIndex(s=>s.id===updated.id);
+        if (idx!==-1) this.library[idx] = updated;
+        this.ds = updated;
+        this.detailOpen = false;
+        this.toast('Saved!','success');
+      } catch(e) { this.toast('Failed to save','error'); }
+    },
+
+    async removeSeries(id) {
+      if (!confirm('Remove this series from your library?')) return;
+      try {
+        await this.api(`/api/series/${id}`,'DELETE');
+        this.library = this.library.filter(s=>s.id!==id);
+        this.detailOpen = false;
+        this.toast('Series removed','success');
+      } catch(e) { this.toast('Failed to remove','error'); }
+    },
+
+    async refreshSeries(id) {
+      try {
+        const updated = await this.api(`/api/series/${id}/refresh`,'POST');
+        const idx = this.library.findIndex(s=>s.id===id);
+        if (idx!==-1) this.library[idx] = updated;
+        this.ds = updated;
+        this.toast('Refreshed from API','success');
+      } catch(e) { this.toast('Refresh failed','error'); }
+    },
+
+    // ── Notifications ─────────────────────────────────────
+    async pollUnreadCount() {
+      try {
+        const data = await this.api('/api/notifications?limit=1&unread_only=true');
+        this.unreadCount = data.unread_count || 0;
+      } catch(e) {}
+    },
+
+    async loadNotifications() {
+      try {
+        const data = await this.api('/api/notifications?limit=100');
+        this.notifications = data.notifications || [];
+        this.unreadCount = data.unread_count || 0;
+      } catch(e) { this.toast('Failed to load notifications','error'); }
+    },
+
+    async markRead(id) {
+      try {
+        await this.api(`/api/notifications/${id}/read`,'PATCH');
+        const n = this.notifications.find(n=>n.id===id);
+        if (n) n.is_read = true;
+        this.unreadCount = Math.max(0, this.unreadCount-1);
+      } catch(e) {}
+    },
+
+    async markAllRead() {
+      try {
+        await this.api('/api/notifications/read-all','POST');
+        this.notifications.forEach(n=>n.is_read=true);
+        this.unreadCount = 0;
+      } catch(e) { this.toast('Failed','error'); }
+    },
+
+    async deleteNotif(id) {
+      try {
+        await this.api(`/api/notifications/${id}`,'DELETE');
+        this.notifications = this.notifications.filter(n=>n.id!==id);
+      } catch(e) {}
+    },
+
+    async clearAllNotifs() {
+      if (!confirm('Clear all notifications?')) return;
+      try {
+        await this.api('/api/notifications','DELETE');
+        this.notifications = []; this.unreadCount = 0;
+      } catch(e) { this.toast('Failed','error'); }
+    },
+
+    // ── Settings ──────────────────────────────────────────
+    async loadSettings() {
+      try { const d = await this.api('/api/settings'); this.sf = {...this.sf,...d}; }
+      catch(e) { this.toast('Failed to load settings','error'); }
+    },
+
+    async saveSettings() {
+      try { await this.api('/api/settings','PATCH',this.sf); this.toast('Settings saved!','success'); }
+      catch(e) { this.toast('Failed to save settings','error'); }
+    },
+
+    async testPushover() {
+      try { const d = await this.api('/api/settings/test-pushover','POST'); this.toast(d.message||'Test sent!','success'); }
+      catch(e) { this.toast(e.detail||'Pushover test failed','error'); }
+    },
+
+    async pollNow() {
+      this.polling = true;
+      try {
+        await this.api('/api/settings/poll-now','POST');
+        this.toast('Poll started — updating shortly…','success');
+        setTimeout(async () => { await this.loadLibrary(); await this.loadReleaseFeed(); this.pollUnreadCount(); }, 6000);
+        setTimeout(() => { this.polling = false; }, 10000);
+      } catch(e) { this.toast('Poll failed','error'); this.polling=false; }
+    },
+
+    // ── Utilities ─────────────────────────────────────────
+    async api(path, method='GET', body=null) {
+      const opts = { method, headers: {'Content-Type':'application/json'} };
+      if (body) opts.body = JSON.stringify(body);
+      const resp = await fetch(path, opts);
+      const data = await resp.json().catch(()=>({}));
+      if (!resp.ok) throw data;
+      return data;
+    },
+
+    toast(message, type='success') {
+      const id = ++this._tid;
+      this.toasts.push({id, message, type});
+      setTimeout(()=>{ this.toasts = this.toasts.filter(t=>t.id!==id); }, 3500);
+    },
+
+    relativeTime(iso) {
+      if (!iso) return '';
+      const diff = Date.now() - new Date(iso + (iso.includes('Z')?'':'Z')).getTime();
+      const mins = Math.floor(diff/60000);
+      if (mins < 1) return 'just now';
+      if (mins < 60) return `${mins}m ago`;
+      const hrs = Math.floor(mins/60);
+      if (hrs < 24) return `${hrs}h ago`;
+      return `${Math.floor(hrs/24)}d ago`;
+    },
+
+    stripHtml(html) {
+      if (!html) return '';
+      return html.replace(/<[^>]*>/g,'').replace(/&[^;]+;/g,' ').replace(/\s+/g,' ').trim();
+    },
+  };
+}
+</script>
+</body>
+</html>
