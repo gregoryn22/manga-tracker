@@ -56,8 +56,8 @@ class TrackedSeries(Base):
     mu_rating_votes = Column(Integer, nullable=True)
 
     # ── Chapter / release tracking ────────────────────────────────────
-    total_chapters = Column(String, nullable=True)       # MB metadata total (rough)
-    mu_latest_chapter = Column(String, nullable=True)    # Last chapter seen via MU releases
+    total_chapters = Column(String, nullable=True)       # MB chapter count — unreliable per dev; last-resort fallback only
+    mu_latest_chapter = Column(String, nullable=True)    # Authoritative: set exclusively by MU release records
     latest_release_date = Column(String, nullable=True)  # ISO date string "2026-03-19"
     latest_release_group = Column(String, nullable=True) # Scanlation group name
 

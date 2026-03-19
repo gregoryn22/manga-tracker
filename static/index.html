@@ -1400,15 +1400,23 @@ function app() {
         const data = await this.api(`/api/series/${series_id}/releases`);
         const stored = data.stored || [];
         const live = data.live || [];
-        // Merge stored + live, deduplicate by chapter
+        // Merge stored + live, deduplicate by chapter, sort newest first
         const seen = new Set();
         const merged = [];
-        for (const r of [...live, ...stored]) {
+        for (const r of [...stored, ...live]) {
           const ch = r.chapter || r.record?.chapter;
           if (ch && seen.has(ch)) continue;
           if (ch) seen.add(ch);
           merged.push(r);
         }
+        merged.sort((a, b) => {
+          const dateA = a.release_date || a.record?.release_date || '';
+          const dateB = b.release_date || b.record?.release_date || '';
+          if (dateB !== dateA) return dateB.localeCompare(dateA);
+          const chA = parseFloat(a.chapter || a.record?.chapter || 0);
+          const chB = parseFloat(b.chapter || b.record?.chapter || 0);
+          return chB - chA;
+        });
         this.detailReleases = merged.slice(0, 15);
       } catch(e) {}
     },
