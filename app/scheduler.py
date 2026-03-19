@@ -1,7 +1,7 @@
 """
-Background scheduler — polls for chapter updates using a two-layer strategy:
+Background scheduler — polls for chapter updates using a three-layer strategy:
 
-Layer 1 (MangaUpdates releases feed — authoritative source):
+Layer 1 (MangaUpdates releases feed — authoritative for scanlated series):
   - GET /v1/releases/days  →  today's global feed, one request for ALL tracked series
   - Build a dict {mu_series_id: [releases]}
   - For each tracked series with a mu_series_id, check if any release is newer
@@ -11,12 +11,24 @@ Layer 1 (MangaUpdates releases feed — authoritative source):
     from releases/search). The MU series summary field (get_series().latest_chapter)
     is used only to seed an initial baseline, not as an ongoing update signal.
 
-Layer 2 (MangaBaka — last resort for unlinked series only):
+Layer 2 (MangaBaka — last resort for MU-unlinked series only):
   - For series that still have no MU ID after linking attempts, fall back to
     MangaBaka's total_chapters field.
   - NOTE: MangaBaka's chapter count is explicitly flagged as unreliable by the
     developer ("we don't have proper chapter count update yet, we currently pull
     them from upstream sources"). Treat updates from this path as approximate.
+
+Layer 3 (Simulpub direct — for officially licensed series dropped by scanlators):
+  - Runs AFTER Layers 1 & 2 for series with simulpub_source set.
+  - 'mangaplus': polls MangaPlus API directly (title_detailV3); no auth required.
+  - 'kmanga':    polls K Manga API; cookie-based auth with x-kmanga-hash signing.
+  - 'mangaup':   polls MangaUp! (Square Enix) via __NEXT_DATA__ HTML parsing; no auth.
+  - 'mangadex':  polls MangaDex REST API (public, no auth); UUID manga IDs.
+  - 'custom':    skipped entirely — user manages the chapter number manually.
+  - Only updates mu_latest_chapter if the simulpub source reports a higher chapter
+    than what Layers 1/2 already found (MU data is preferred when both are present).
+
+Series with simulpub_source='custom' are excluded from ALL automated polling.
 """
 import logging
 import threading
@@ -36,6 +48,17 @@ from .mangaupdates import (
     search_releases,
     search_series,
 )
+from .kmanga import (
+    KMangaAuthError,
+    KMangaClient,
+    KMangaError,
+    KMangaRegionError,
+)
+from .mangaplus import get_latest_chapter as mp_get_latest_chapter
+from .mangadex import MangaDexError, MangaDexNotFound, MangaDexRateLimited
+from .mangadex import get_latest_chapter as mdx_get_latest_chapter
+from .mangaup import MangaUpError, MangaUpNotFound
+from .mangaup import get_latest_chapter as mup_get_latest_chapter
 from .notifier import create_notification, get_pushover_creds, send_pushover
 
 logger = logging.getLogger(__name__)
@@ -81,20 +104,36 @@ def poll_updates():
 
         mu_enabled = get_setting(db, "mu_enabled", "true").lower() == "true"
 
-        all_series = db.query(TrackedSeries).filter(
+        all_active = db.query(TrackedSeries).filter(
             TrackedSeries.reading_status.in_(ACTIVE_STATUSES)
         ).all()
 
-        if not all_series:
+        if not all_active:
             logger.info("No active series to poll.")
             return
 
-        logger.info(f"Polling {len(all_series)} series (MU={'on' if mu_enabled else 'off'})")
+        # 'custom' source = fully manual; exclude from all automated layers.
+        auto_series = [s for s in all_active if s.simulpub_source != "custom"]
+        simulpub_series = [
+            s for s in all_active
+            if s.simulpub_source and s.simulpub_source != "custom" and s.simulpub_id
+        ]
 
-        if mu_enabled:
-            _poll_via_mangaupdates(db, all_series)
-        else:
-            _poll_via_mangabaka_fallback(db, all_series)
+        logger.info(
+            f"Polling {len(auto_series)} auto + {len(simulpub_series)} simulpub series "
+            f"(MU={'on' if mu_enabled else 'off'})"
+        )
+
+        # ── Layer 1 / 2 ────────────────────────────────────────────────────
+        if auto_series:
+            if mu_enabled:
+                _poll_via_mangaupdates(db, auto_series)
+            else:
+                _poll_via_mangabaka_fallback(db, auto_series)
+
+        # ── Layer 3: simulpub direct ────────────────────────────────────────
+        if simulpub_series:
+            _poll_via_simulpub(db, simulpub_series)
 
         logger.info("✓ Poll complete.")
     except Exception as e:
@@ -437,3 +476,397 @@ def _poll_via_mangabaka_fallback(db: Session, series_list: list[TrackedSeries]):
             db.commit()
         except Exception as e:
             logger.error(f"MB fallback failed for '{series.title}': {e}")
+
+
+# ── Layer 3: Simulpub direct ──────────────────────────────────────────────────
+
+def _poll_via_simulpub(db: Session, series_list: list[TrackedSeries]):
+    """
+    Poll official simulpub platforms directly for series that have gone dark on
+    MangaUpdates (e.g. scanlators dropped the title after an official pickup).
+
+    Runs after Layers 1 & 2.  Only updates mu_latest_chapter if the simulpub
+    source reports a strictly higher chapter than what earlier layers already found.
+    """
+    mp_series = [s for s in series_list if s.simulpub_source == "mangaplus"]
+    if mp_series:
+        logger.info(f"Layer 3: MangaPlus check for {len(mp_series)} series")
+        _poll_mangaplus(db, mp_series)
+
+    km_series = [s for s in series_list if s.simulpub_source == "kmanga"]
+    if km_series:
+        logger.info(f"Layer 3: K Manga check for {len(km_series)} series")
+        _poll_kmanga(db, km_series)
+
+    mup_series = [s for s in series_list if s.simulpub_source == "mangaup"]
+    if mup_series:
+        logger.info(f"Layer 3: MangaUp! check for {len(mup_series)} series")
+        _poll_mangaup(db, mup_series)
+
+    mdx_series = [s for s in series_list if s.simulpub_source == "mangadex"]
+    if mdx_series:
+        logger.info(f"Layer 3: MangaDex check for {len(mdx_series)} series")
+        _poll_mangadex(db, mdx_series)
+
+
+def _poll_mangaplus(db: Session, series_list: list[TrackedSeries]):
+    """Poll MangaPlus API for each series and notify on new chapters."""
+    for series in series_list:
+        try:
+            chapter = mp_get_latest_chapter(series.simulpub_id)
+            if not chapter:
+                logger.debug(f"MangaPlus returned nothing for '{series.title}' (id={series.simulpub_id})")
+                series.last_checked = datetime.utcnow()
+                db.commit()
+                continue
+
+            if chapter_is_newer(chapter, series.mu_latest_chapter):
+                old_chapter = series.mu_latest_chapter
+                series.mu_latest_chapter = chapter
+                series.latest_release_date = datetime.utcnow().strftime("%Y-%m-%d")
+                series.latest_release_group = "MangaPlus (simulpub)"
+
+                ch_str = f"Ch. {chapter}"
+                message = f"{series.title} — {ch_str} · MangaPlus (simulpub)"
+
+                # Log to releases table (no mu_release_id since this isn't a MU record)
+                rel = Release(
+                    series_id=series.id,
+                    mu_series_id=series.mu_series_id,
+                    series_title=series.title,
+                    chapter=chapter,
+                    volume=None,
+                    release_date=series.latest_release_date,
+                    group_name="MangaPlus (simulpub)",
+                    mu_release_id=None,
+                    cover_url=series.best_cover(),
+                    mu_url=f"https://mangaplus.shueisha.co.jp/titles/{series.simulpub_id}",
+                )
+                db.add(rel)
+
+                _send_chapter_notification(
+                    db=db,
+                    series=series,
+                    message=message,
+                    chapter=chapter,
+                    volume=None,
+                    group_name="MangaPlus (simulpub)",
+                    release_date=series.latest_release_date,
+                    old_chapter=old_chapter,
+                )
+                logger.info(f"✓ MangaPlus new chapter: {message}")
+            else:
+                logger.debug(
+                    f"MangaPlus: '{series.title}' still at Ch. {chapter} "
+                    f"(known: {series.mu_latest_chapter})"
+                )
+
+            series.last_checked = datetime.utcnow()
+            db.commit()
+        except Exception as e:
+            logger.error(f"MangaPlus poll failed for '{series.title}': {e}")
+
+
+def _poll_kmanga(db: Session, series_list: list[TrackedSeries]):
+    """
+    Poll K Manga API for each series and notify on new chapters.
+
+    Session management:
+      - Loads persisted cookies from the settings DB to avoid re-logging in.
+      - Saves updated cookies back to the DB after each poll run.
+      - On KMangaAuthError (expired session), attempts one re-login per run.
+    """
+    import json as _json
+
+    from .database import set_setting
+
+    email    = get_setting(db, "kmanga_email", "")
+    password = get_setting(db, "kmanga_password", "")
+    if not email or not password:
+        logger.warning("K Manga: credentials not configured — set kmanga_email/kmanga_password in Settings")
+        return
+
+    cookies_raw = get_setting(db, "kmanga_cookies", "")
+    try:
+        cookies = _json.loads(cookies_raw) if cookies_raw else {}
+    except Exception:
+        cookies = {}
+
+    # reCAPTCHA v3 token (optional — manually provided via Settings when re-login is needed).
+    # K Manga's /web/user/login endpoint requires this token as of early 2026.
+    # The token is short-lived (~2 min); set it in Settings just before triggering a poll
+    # when the session has expired.  It is consumed once then cleared from Settings.
+    recaptcha_token = get_setting(db, "kmanga_recaptcha_token", "") or None
+
+    client    = KMangaClient(email, password, cookies)
+    logged_in = False
+
+    def _ensure_login():
+        nonlocal logged_in, recaptcha_token
+        if not logged_in and not client.has_session():
+            try:
+                updated = client.login(recaptcha_token=recaptcha_token)
+                set_setting(db, "kmanga_cookies", _json.dumps(updated))
+                # Consume token — it's single-use / short-lived
+                if recaptcha_token:
+                    set_setting(db, "kmanga_recaptcha_token", "")
+                    recaptcha_token = None
+                logged_in = True
+            except KMangaRegionError as e:
+                logger.error(f"K Manga region block: {e}")
+                raise
+            except KMangaAuthError as e:
+                logger.error(
+                    f"K Manga login failed (code {e.code}): {e}. "
+                    f"If this is a reCAPTCHA error, go to Settings → K Manga reCAPTCHA Token, "
+                    f"log into kmanga.kodansha.com in your browser, copy the g-recaptcha-response "
+                    f"token from the login network request, paste it into the field, then re-poll."
+                )
+                raise
+            except Exception as e:
+                logger.error(f"K Manga login failed: {e}")
+                raise
+
+    try:
+        _ensure_login()
+    except Exception:
+        return  # Can't proceed without auth
+
+    for series in series_list:
+        try:
+            # Use /web/title/detail (no auth required) which returns one episode ID
+            # per CHAPTER, not per sub-episode.  episode_id_list[-1] from that
+            # endpoint gives the latest chapter directly.
+            # Falls back to authenticated /title/list scanning if needed.
+            chapter, ep_name = client.scan_latest_chapter(int(series.simulpub_id))
+
+            if ep_name:
+                logger.debug(
+                    f"K Manga: '{series.title}' latest episode_name={ep_name!r}"
+                    f" → chapter={chapter!r}"
+                )
+            if not chapter and not ep_name:
+                logger.debug(
+                    f"K Manga: scan_latest_chapter returned nothing "
+                    f"for '{series.title}' (id={series.simulpub_id})"
+                )
+
+            if not chapter:
+                logger.debug(f"K Manga: no chapter data for '{series.title}' (id={series.simulpub_id})")
+                series.last_checked = datetime.utcnow()
+                db.commit()
+                continue
+
+            if chapter_is_newer(chapter, series.mu_latest_chapter):
+                old_chapter = series.mu_latest_chapter
+                series.mu_latest_chapter    = chapter
+                series.latest_release_date  = datetime.utcnow().strftime("%Y-%m-%d")
+                series.latest_release_group = "K Manga (simulpub)"
+
+                ch_str  = f"Ch. {chapter}"
+                message = f"{series.title} — {ch_str} · K Manga (simulpub)"
+
+                km_url = f"https://kmanga.kodansha.com/title/{series.simulpub_id}"
+                rel = Release(
+                    series_id=series.id,
+                    mu_series_id=series.mu_series_id,
+                    series_title=series.title,
+                    chapter=chapter,
+                    volume=None,
+                    release_date=series.latest_release_date,
+                    group_name="K Manga (simulpub)",
+                    mu_release_id=None,
+                    cover_url=series.best_cover(),
+                    mu_url=km_url,
+                )
+                db.add(rel)
+
+                _send_chapter_notification(
+                    db=db,
+                    series=series,
+                    message=message,
+                    chapter=chapter,
+                    volume=None,
+                    group_name="K Manga (simulpub)",
+                    release_date=series.latest_release_date,
+                    old_chapter=old_chapter,
+                )
+                logger.info(f"✓ K Manga new chapter: {message}")
+            else:
+                logger.debug(
+                    f"K Manga: '{series.title}' still at Ch. {chapter} "
+                    f"(known: {series.mu_latest_chapter})"
+                )
+
+            series.last_checked = datetime.utcnow()
+            db.commit()
+
+        except KMangaAuthError:
+            # Session expired mid-run — try to re-login once and continue
+            logger.warning("K Manga session expired during poll, re-logging in…")
+            try:
+                updated = client.login()
+                set_setting(db, "kmanga_cookies", _json.dumps(updated))
+                logged_in = True
+            except Exception as e:
+                logger.error(f"K Manga re-login failed: {e}")
+                break
+        except KMangaRegionError as e:
+            logger.error(f"K Manga region block: {e} — aborting K Manga poll")
+            break
+        except KMangaError as e:
+            logger.error(f"K Manga poll failed for '{series.title}': {e}")
+        except Exception as e:
+            logger.error(f"K Manga unexpected error for '{series.title}': {e}")
+
+    # Persist latest cookies (birthday refresh, etc.) back to DB
+    set_setting(db, "kmanga_cookies", _json.dumps(client.cookies))
+
+
+def _poll_mangaup(db: Session, series_list: list[TrackedSeries]):
+    """
+    Poll MangaUp! (Square Enix Manga) for each series and notify on new chapters.
+
+    No authentication required — chapter data is scraped from the __NEXT_DATA__
+    JSON block embedded in every publicly accessible manga page.
+    """
+    for series in series_list:
+        try:
+            chapter = mup_get_latest_chapter(series.simulpub_id)
+            if not chapter:
+                logger.debug(
+                    f"MangaUp!: no chapter data for '{series.title}' (id={series.simulpub_id})"
+                )
+                series.last_checked = datetime.utcnow()
+                db.commit()
+                continue
+
+            if chapter_is_newer(chapter, series.mu_latest_chapter):
+                old_chapter = series.mu_latest_chapter
+                series.mu_latest_chapter    = chapter
+                series.latest_release_date  = datetime.utcnow().strftime("%Y-%m-%d")
+                series.latest_release_group = "MangaUp! (simulpub)"
+
+                ch_str  = f"Ch. {chapter}"
+                message = f"{series.title} — {ch_str} · MangaUp! (simulpub)"
+
+                mup_url = f"https://global.manga-up.com/en/manga/{series.simulpub_id}"
+                rel = Release(
+                    series_id=series.id,
+                    mu_series_id=series.mu_series_id,
+                    series_title=series.title,
+                    chapter=chapter,
+                    volume=None,
+                    release_date=series.latest_release_date,
+                    group_name="MangaUp! (simulpub)",
+                    mu_release_id=None,
+                    cover_url=series.best_cover(),
+                    mu_url=mup_url,
+                )
+                db.add(rel)
+
+                _send_chapter_notification(
+                    db=db,
+                    series=series,
+                    message=message,
+                    chapter=chapter,
+                    volume=None,
+                    group_name="MangaUp! (simulpub)",
+                    release_date=series.latest_release_date,
+                    old_chapter=old_chapter,
+                )
+                logger.info(f"✓ MangaUp! new chapter: {message}")
+            else:
+                logger.debug(
+                    f"MangaUp!: '{series.title}' still at Ch. {chapter} "
+                    f"(known: {series.mu_latest_chapter})"
+                )
+
+            series.last_checked = datetime.utcnow()
+            db.commit()
+
+        except MangaUpNotFound:
+            logger.error(
+                f"MangaUp! title not found for '{series.title}' (id={series.simulpub_id})"
+                f" — check the title ID in series settings"
+            )
+        except MangaUpError as e:
+            logger.error(f"MangaUp! poll failed for '{series.title}': {e}")
+        except Exception as e:
+            logger.error(f"MangaUp! unexpected error for '{series.title}': {e}")
+
+
+def _poll_mangadex(db: Session, series_list: list[TrackedSeries]):
+    """
+    Poll the MangaDex public REST API for each series and notify on new chapters.
+
+    Manga IDs are UUIDs stored in simulpub_id.  No authentication required.
+    Chapter numbers come directly from the API as strings ("68", "19.6", etc.).
+    """
+    for series in series_list:
+        try:
+            chapter = mdx_get_latest_chapter(series.simulpub_id)
+            if not chapter:
+                logger.debug(
+                    f"MangaDex: no chapter data for '{series.title}' (id={series.simulpub_id})"
+                )
+                series.last_checked = datetime.utcnow()
+                db.commit()
+                continue
+
+            if chapter_is_newer(chapter, series.mu_latest_chapter):
+                old_chapter = series.mu_latest_chapter
+                series.mu_latest_chapter    = chapter
+                series.latest_release_date  = datetime.utcnow().strftime("%Y-%m-%d")
+                series.latest_release_group = "MangaDex"
+
+                ch_str  = f"Ch. {chapter}"
+                message = f"{series.title} — {ch_str} · MangaDex"
+
+                mdx_url = f"https://mangadex.org/title/{series.simulpub_id}"
+                rel = Release(
+                    series_id=series.id,
+                    mu_series_id=series.mu_series_id,
+                    series_title=series.title,
+                    chapter=chapter,
+                    volume=None,
+                    release_date=series.latest_release_date,
+                    group_name="MangaDex",
+                    mu_release_id=None,
+                    cover_url=series.best_cover(),
+                    mu_url=mdx_url,
+                )
+                db.add(rel)
+
+                _send_chapter_notification(
+                    db=db,
+                    series=series,
+                    message=message,
+                    chapter=chapter,
+                    volume=None,
+                    group_name="MangaDex",
+                    release_date=series.latest_release_date,
+                    old_chapter=old_chapter,
+                )
+                logger.info(f"✓ MangaDex new chapter: {message}")
+            else:
+                logger.debug(
+                    f"MangaDex: '{series.title}' still at Ch. {chapter} "
+                    f"(known: {series.mu_latest_chapter})"
+                )
+
+            series.last_checked = datetime.utcnow()
+            db.commit()
+
+        except MangaDexNotFound:
+            logger.error(
+                f"MangaDex manga not found for '{series.title}' (id={series.simulpub_id})"
+                f" — check the UUID in series settings"
+            )
+        except MangaDexRateLimited:
+            logger.warning("MangaDex rate limit hit — skipping remaining series this run")
+            break
+        except MangaDexError as e:
+            logger.error(f"MangaDex poll failed for '{series.title}': {e}")
+        except Exception as e:
+            logger.error(f"MangaDex unexpected error for '{series.title}': {e}")

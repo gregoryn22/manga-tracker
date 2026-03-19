@@ -86,6 +86,10 @@ def add_series(req: AddSeriesRequest, background_tasks: BackgroundTasks, db: Ses
     api_data = resp["data"]
     flat = series_from_api(api_data)
 
+    # MB often carries the numeric MU series ID as a base36 slug in
+    # source.manga_updates.id — use it directly to avoid a fuzzy title search.
+    mu_id_from_mb = flat.get("mu_numeric_id")
+
     series = TrackedSeries(
         id=flat["id"],
         title=flat["title"],
@@ -100,6 +104,9 @@ def add_series(req: AddSeriesRequest, background_tasks: BackgroundTasks, db: Ses
         year=flat["year"],
         rating=flat["rating"],
         mangabaka_url=flat["mangabaka_url"],
+        mb_provider_ids=flat.get("mb_provider_ids"),
+        # Seed MU series ID immediately if MB already has it
+        mu_series_id=mu_id_from_mb,
         current_chapter=req.current_chapter,
         reading_status=req.reading_status,
         last_checked=datetime.utcnow(),
@@ -109,14 +116,25 @@ def add_series(req: AddSeriesRequest, background_tasks: BackgroundTasks, db: Ses
     db.commit()
     db.refresh(series)
 
-    # Enrich with MangaUpdates in the background (non-blocking)
-    background_tasks.add_task(_bg_enrich_with_mu, series.id, series.title)
+    if mu_id_from_mb:
+        # MU ID already known — skip fuzzy search, just enrich metadata
+        logger.info(f"MB provided MU ID {mu_id_from_mb} for '{series.title}' — skipping title search")
+        background_tasks.add_task(_bg_enrich_with_mu, series.id, series.title, mu_id_from_mb)
+    else:
+        # Fall back to MU title search (for series MB hasn't linked yet)
+        background_tasks.add_task(_bg_enrich_with_mu, series.id, series.title, None)
 
     return series.to_dict()
 
 
-def _bg_enrich_with_mu(series_id: int, title: str):
-    """Background task: find MU series ID and enrich metadata."""
+def _bg_enrich_with_mu(series_id: int, title: str, known_mu_id: int | None = None):
+    """
+    Background task: link MU series ID (if needed) and enrich metadata.
+
+    When known_mu_id is provided (decoded from MB's source.manga_updates.id),
+    the fuzzy title search is skipped entirely — we go straight to enrichment.
+    The title search fallback is only used when MB has no MU link.
+    """
     from ..database import SessionLocal
 
     db = SessionLocal()
@@ -125,20 +143,24 @@ def _bg_enrich_with_mu(series_id: int, title: str):
         if not series:
             return
 
-        # Search MU by title
-        resp = search_series(title, per_page=5)
-        results = resp.get("results", [])
-        best = find_best_match(title, results)
-        if not best:
-            logger.info(f"No MU match found for '{title}'")
-            return
+        mu_id = known_mu_id or series.mu_series_id
 
-        mu_id = best.get("series_id")
         if not mu_id:
-            return
-
-        series.mu_series_id = mu_id
-        series.mu_url = best.get("url")
+            # MB didn't have a MU link — fall back to fuzzy title search
+            resp    = search_series(title, per_page=5)
+            results = resp.get("results", [])
+            best    = find_best_match(title, results)
+            if not best:
+                logger.info(f"No MU match found for '{title}'")
+                return
+            mu_id = best.get("series_id")
+            if not mu_id:
+                return
+            series.mu_series_id = mu_id
+            series.mu_url       = best.get("url")
+        elif not series.mu_url:
+            # We have the ID (from MB) but no URL yet — build it from the MU response
+            series.mu_series_id = mu_id  # ensure it's set (may already be)
 
         # Pull full MU series detail
         try:
@@ -206,6 +228,11 @@ class UpdateSeriesRequest(BaseModel):
     current_chapter: str | None = None
     reading_status: str | None = None
     notes: str | None = None
+    # Simulpub source configuration
+    simulpub_source: str | None = None   # 'mangaplus' | 'custom' | '' (clear)
+    simulpub_id: str | None = None       # Platform-specific ID (e.g. MangaPlus title_id)
+    # Editable for 'custom' source — lets the user manually record the latest chapter
+    mu_latest_chapter: str | None = None
 
 
 @router.patch("/{series_id}")
@@ -219,6 +246,15 @@ def update_series(series_id: int, req: UpdateSeriesRequest, db: Session = Depend
         series.reading_status = req.reading_status
     if req.notes is not None:
         series.notes = req.notes
+    if req.simulpub_source is not None:
+        series.simulpub_source = req.simulpub_source or None
+    if req.simulpub_id is not None:
+        series.simulpub_id = req.simulpub_id or None
+    # Only allow direct mu_latest_chapter edits for custom-source series to avoid
+    # accidentally overwriting data from an automated source.
+    if req.mu_latest_chapter is not None:
+        if series.simulpub_source == "custom" or req.simulpub_source == "custom":
+            series.mu_latest_chapter = req.mu_latest_chapter or None
     db.commit()
     db.refresh(series)
     return series.to_dict()
@@ -262,10 +298,13 @@ def refresh_series(series_id: int, background_tasks: BackgroundTasks, db: Sessio
                     new_chapters=new_total,
                     mangabaka_url=series.mangabaka_url,
                 )
-            series.total_chapters = flat["total_chapters"]
-            series.status = flat["status"]
+            series.total_chapters  = flat["total_chapters"]
+            series.status          = flat["status"]
             if flat["cover_url"]:
                 series.cover_url = flat["cover_url"]
+            # Refresh provider ID map (links may have been updated since initial add)
+            if flat.get("mb_provider_ids"):
+                series.mb_provider_ids = flat["mb_provider_ids"]
     except Exception as e:
         logger.warning(f"MB refresh failed for series {series_id}: {e}")
 
@@ -277,15 +316,23 @@ def refresh_series(series_id: int, background_tasks: BackgroundTasks, db: Sessio
                 rec = r.get("record", {})
                 ch = rec.get("chapter")
                 if chapter_is_newer(ch, series.mu_latest_chapter):
-                    series.mu_latest_chapter = ch
-                    series.latest_release_date = rec.get("release_date")
+                    series.mu_latest_chapter    = ch
+                    series.latest_release_date  = rec.get("release_date")
                     groups = rec.get("groups", [])
                     series.latest_release_group = groups[0].get("name") if groups else None
         except Exception as e:
             logger.warning(f"MU refresh failed for series {series_id}: {e}")
     else:
-        # Try to link MU ID if we don't have one
-        background_tasks.add_task(_bg_enrich_with_mu, series.id, series.title)
+        # No MU ID yet — try MB source first, then fall back to fuzzy search
+        mu_id_from_mb = None
+        try:
+            from ..mangabaka import extract_mu_series_id as _emu
+            resp2 = get_mb_client(db).get_series(series_id)
+            if resp2.get("data"):
+                mu_id_from_mb = _emu(resp2["data"].get("source"))
+        except Exception:
+            pass
+        background_tasks.add_task(_bg_enrich_with_mu, series.id, series.title, mu_id_from_mb)
 
     series.last_checked = datetime.utcnow()
     db.commit()
