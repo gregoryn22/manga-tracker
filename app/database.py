@@ -12,6 +12,7 @@ from sqlalchemy import (
     String,
     Text,
     create_engine,
+    text,
 )
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
@@ -57,9 +58,17 @@ class TrackedSeries(Base):
 
     # ── Chapter / release tracking ────────────────────────────────────
     total_chapters = Column(String, nullable=True)       # MB chapter count — unreliable per dev; last-resort fallback only
-    mu_latest_chapter = Column(String, nullable=True)    # Authoritative: set exclusively by MU release records
+    mu_latest_chapter = Column(String, nullable=True)    # Authoritative: set by MU releases or simulpub polling
     latest_release_date = Column(String, nullable=True)  # ISO date string "2026-03-19"
     latest_release_group = Column(String, nullable=True) # Scanlation group name
+
+    # ── Simulpub / custom source ──────────────────────────────────────
+    # simulpub_source values:
+    #   None / ''    — standard automated tracking (MU + MB fallback)
+    #   'mangaplus'  — poll MangaPlus directly; simulpub_id = title_id integer
+    #   'custom'     — manual tracking only; user sets mu_latest_chapter by hand
+    simulpub_source = Column(String, nullable=True)
+    simulpub_id = Column(String, nullable=True)  # Platform-specific series ID
 
     # ── User progress ─────────────────────────────────────────────────
     current_chapter = Column(String, nullable=True, default="0")
@@ -112,6 +121,8 @@ class TrackedSeries(Base):
             "latest_chapter": self.display_chapter(),
             "latest_release_date": self.latest_release_date,
             "latest_release_group": self.latest_release_group,
+            "simulpub_source": self.simulpub_source or "",
+            "simulpub_id": self.simulpub_id or "",
             "current_chapter": self.current_chapter,
             "reading_status": self.reading_status,
             "notes": self.notes,
@@ -215,7 +226,33 @@ def set_setting(db: Session, key: str, value: str):
 
 def init_db():
     Base.metadata.create_all(bind=engine)
+    _migrate_db()
     _seed_settings()
+
+
+def _migrate_db():
+    """
+    Apply lightweight schema migrations for columns added after initial release.
+    SQLAlchemy's create_all() won't ALTER existing tables, so we do it manually.
+    Safe to run on every startup — each migration checks before applying.
+    """
+    import logging as _logging
+    _log = _logging.getLogger(__name__)
+
+    # Columns to add: (table, column_name, DDL_type)
+    migrations = [
+        ("tracked_series", "simulpub_source", "VARCHAR"),
+        ("tracked_series", "simulpub_id",     "VARCHAR"),
+    ]
+
+    with engine.connect() as conn:
+        for table, col, col_type in migrations:
+            rows = conn.execute(text(f"PRAGMA table_info({table})")).fetchall()
+            existing = {row[1] for row in rows}
+            if col not in existing:
+                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}"))
+                _log.info(f"DB migration: added {table}.{col}")
+        conn.commit()
 
 
 def _seed_settings():
@@ -232,6 +269,10 @@ def _seed_settings():
             "push_chapter_updates": "true",   # chapter drops → Pushover
             "push_news": "false",             # news items → Pushover
             "push_reading_only": "false",     # if true, only "reading" status series push
+            # K Manga simulpub credentials
+            "kmanga_email": os.getenv("KMANGA_EMAIL", ""),
+            "kmanga_password": os.getenv("KMANGA_PASSWORD", ""),
+            "kmanga_cookies": "",             # JSON cookie dict — auto-managed, not user-editable
         }
         for k, v in defaults.items():
             if not db.query(Settings).filter(Settings.key == k).first():

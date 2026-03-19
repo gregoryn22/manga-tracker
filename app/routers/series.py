@@ -206,6 +206,11 @@ class UpdateSeriesRequest(BaseModel):
     current_chapter: str | None = None
     reading_status: str | None = None
     notes: str | None = None
+    # Simulpub source configuration
+    simulpub_source: str | None = None   # 'mangaplus' | 'custom' | '' (clear)
+    simulpub_id: str | None = None       # Platform-specific ID (e.g. MangaPlus title_id)
+    # Editable for 'custom' source — lets the user manually record the latest chapter
+    mu_latest_chapter: str | None = None
 
 
 @router.patch("/{series_id}")
@@ -219,6 +224,15 @@ def update_series(series_id: int, req: UpdateSeriesRequest, db: Session = Depend
         series.reading_status = req.reading_status
     if req.notes is not None:
         series.notes = req.notes
+    if req.simulpub_source is not None:
+        series.simulpub_source = req.simulpub_source or None
+    if req.simulpub_id is not None:
+        series.simulpub_id = req.simulpub_id or None
+    # Only allow direct mu_latest_chapter edits for custom-source series to avoid
+    # accidentally overwriting data from an automated source.
+    if req.mu_latest_chapter is not None:
+        if series.simulpub_source == "custom" or req.simulpub_source == "custom":
+            series.mu_latest_chapter = req.mu_latest_chapter or None
     db.commit()
     db.refresh(series)
     return series.to_dict()

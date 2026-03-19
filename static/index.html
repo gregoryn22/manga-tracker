@@ -457,6 +457,10 @@
     .provider-chip { font-size: 0.65rem; padding: 1px 6px; border-radius: 4px; font-weight: 600; }
     .p-mb { background: rgba(124,108,255,0.2); color: var(--accent); }
     .p-mu { background: rgba(59,130,246,0.2); color: var(--blue); }
+    .p-mp  { background: rgba(255,100,30,0.2);  color: #ff7a3d; }
+    .p-km  { background: rgba(30,120,255,0.2);  color: #4d9dff; }
+    .p-mup { background: rgba(0,190,100,0.2);   color: #2ed87a; }
+    .p-custom { background: rgba(150,150,150,0.2); color: var(--text-muted); }
 
     @media (max-width: 768px) {
       .sidebar { display: none; }
@@ -982,6 +986,27 @@
         </div>
 
         <div class="card" style="padding:20px 24px">
+          <div class="settings-block-title">🔵 K Manga / Kodansha</div>
+          <div class="settings-row">
+            <label>Email</label>
+            <input class="input" type="email" style="flex:1" placeholder="your@email.com"
+                   x-model="sf.kmanga_email" autocomplete="off" />
+          </div>
+          <div class="settings-row">
+            <label>Password</label>
+            <input class="input" type="password" style="flex:1" placeholder="K Manga password"
+                   x-model="sf.kmanga_password" autocomplete="new-password" />
+          </div>
+          <div class="flex gap-2 mt-2">
+            <button class="btn btn-primary btn-sm" @click="saveSettings()">💾 Save</button>
+          </div>
+          <div class="text-xs text-muted mt-2">
+            Used to poll official Kodansha simulpub releases via the K Manga API.
+            US-based IP required. Credentials are stored locally and never sent anywhere except K Manga's own servers.
+          </div>
+        </div>
+
+        <div class="card" style="padding:20px 24px">
           <div class="settings-block-title">🔑 MangaBaka API</div>
           <div class="settings-row">
             <label>API Token</label>
@@ -1055,6 +1080,10 @@
             <div class="provider-row">
               <span class="provider-chip p-mb">MangaBaka</span>
               <span class="provider-chip p-mu" x-show="ds.mu_series_id">MangaUpdates</span>
+              <span class="provider-chip p-mp"  x-show="ds.simulpub_source === 'mangaplus'">MangaPlus</span>
+              <span class="provider-chip p-km"  x-show="ds.simulpub_source === 'kmanga'">K Manga</span>
+              <span class="provider-chip p-mup" x-show="ds.simulpub_source === 'mangaup'">MangaUp!</span>
+              <span class="provider-chip p-custom" x-show="ds.simulpub_source === 'custom'">Manual</span>
             </div>
           </div>
         </div>
@@ -1117,6 +1146,91 @@
             <textarea class="input" rows="2" placeholder="Your notes…" x-model="ef.notes" style="width:100%"></textarea>
           </div>
 
+          <!-- Simulpub source config -->
+          <div class="form-group">
+            <div class="form-label">Chapter Source
+              <span class="text-muted fw-400" style="font-size:0.75rem"> — override for officially licensed / simulpub titles</span>
+            </div>
+            <select class="input" x-model="ef.simulpub_source" style="width:220px">
+              <option value="">🔄 Automatic (MU + MangaBaka)</option>
+              <option value="mangaplus">🟠 MangaPlus (simulpub)</option>
+              <option value="kmanga">🔵 K Manga / Kodansha (simulpub)</option>
+              <option value="mangaup">🟢 MangaUp! / Square Enix (simulpub)</option>
+              <option value="custom">✏️ Manual / Custom</option>
+            </select>
+
+            <!-- MangaPlus title ID input -->
+            <template x-if="ef.simulpub_source === 'mangaplus'">
+              <div style="margin-top:10px">
+                <div class="text-xs text-muted mb-1">
+                  MangaPlus Title ID — the number in the URL:
+                  <code style="background:var(--surface2);padding:1px 5px;border-radius:3px">mangaplus.shueisha.co.jp/titles/<strong>100191</strong></code>
+                </div>
+                <div class="flex gap-2 items-center">
+                  <input class="input" type="text" inputmode="numeric" pattern="[0-9]*"
+                         placeholder="e.g. 100191" x-model="ef.simulpub_id" style="width:140px" />
+                  <a x-show="ef.simulpub_id"
+                     :href="`https://mangaplus.shueisha.co.jp/titles/${ef.simulpub_id}`"
+                     target="_blank" class="btn btn-ghost btn-sm">MangaPlus ↗</a>
+                </div>
+              </div>
+            </template>
+
+            <!-- K Manga title ID input -->
+            <template x-if="ef.simulpub_source === 'kmanga'">
+              <div style="margin-top:10px">
+                <div class="text-xs text-muted mb-1">
+                  K Manga Title ID — the number in the URL:
+                  <code style="background:var(--surface2);padding:1px 5px;border-radius:3px">kmanga.kodansha.com/title/<strong>12345</strong></code>
+                </div>
+                <div class="flex gap-2 items-center">
+                  <input class="input" type="text" inputmode="numeric" pattern="[0-9]*"
+                         placeholder="e.g. 12345" x-model="ef.simulpub_id" style="width:140px" />
+                  <a x-show="ef.simulpub_id"
+                     :href="`https://kmanga.kodansha.com/title/${ef.simulpub_id}`"
+                     target="_blank" class="btn btn-ghost btn-sm">K Manga ↗</a>
+                </div>
+                <div class="text-xs text-muted mt-1" x-show="!$store?.kmanga_configured">
+                  Requires K Manga credentials in Settings.
+                </div>
+              </div>
+            </template>
+
+            <!-- MangaUp! title ID input -->
+            <template x-if="ef.simulpub_source === 'mangaup'">
+              <div style="margin-top:10px">
+                <div class="text-xs text-muted mb-1">
+                  MangaUp! Title ID — the number in the URL:
+                  <code style="background:var(--surface2);padding:1px 5px;border-radius:3px">global.manga-up.com/en/manga/<strong>616</strong></code>
+                </div>
+                <div class="flex gap-2 items-center">
+                  <input class="input" type="text" inputmode="numeric" pattern="[0-9]*"
+                         placeholder="e.g. 616" x-model="ef.simulpub_id" style="width:140px" />
+                  <a x-show="ef.simulpub_id"
+                     :href="`https://global.manga-up.com/en/manga/${ef.simulpub_id}`"
+                     target="_blank" class="btn btn-ghost btn-sm">MangaUp! ↗</a>
+                </div>
+                <div class="text-xs text-muted mt-1">No account required — publicly accessible.</div>
+              </div>
+            </template>
+
+            <!-- Custom / manual chapter input -->
+            <template x-if="ef.simulpub_source === 'custom'">
+              <div style="margin-top:10px">
+                <div class="text-xs text-muted mb-1">
+                  Set the latest known chapter manually. Automated polling is disabled for this series.
+                </div>
+                <div class="flex gap-2 items-center">
+                  <input class="input" type="number" min="0" step="0.5"
+                         placeholder="Latest chapter #" x-model="ef.mu_latest_chapter_manual" style="width:140px" />
+                  <span class="text-xs text-muted" x-show="ds.mu_latest_chapter">
+                    currently: <strong x-text="ds.mu_latest_chapter"></strong>
+                  </span>
+                </div>
+              </div>
+            </template>
+          </div>
+
           <!-- MU Categories cloud -->
           <template x-if="ds.categories && ds.categories.length > 0">
             <div class="mb-4">
@@ -1156,6 +1270,15 @@
           <div class="flex gap-2 mt-2">
             <a x-show="ds.mangabaka_url" :href="ds.mangabaka_url" target="_blank" class="btn btn-ghost btn-sm">MangaBaka ↗</a>
             <a x-show="ds.mu_url" :href="ds.mu_url" target="_blank" class="btn btn-ghost btn-sm">MangaUpdates ↗</a>
+            <a x-show="ds.simulpub_source === 'mangaplus' && ds.simulpub_id"
+               :href="`https://mangaplus.shueisha.co.jp/titles/${ds.simulpub_id}`"
+               target="_blank" class="btn btn-ghost btn-sm">MangaPlus ↗</a>
+            <a x-show="ds.simulpub_source === 'kmanga' && ds.simulpub_id"
+               :href="`https://kmanga.kodansha.com/title/${ds.simulpub_id}`"
+               target="_blank" class="btn btn-ghost btn-sm">K Manga ↗</a>
+            <a x-show="ds.simulpub_source === 'mangaup' && ds.simulpub_id"
+               :href="`https://global.manga-up.com/en/manga/${ds.simulpub_id}`"
+               target="_blank" class="btn btn-ghost btn-sm">MangaUp! ↗</a>
           </div>
         </div>
 
@@ -1251,7 +1374,7 @@ function app() {
     notifications: [], unreadCount: 0,
 
     // Settings form
-    sf: { pushover_user_key:'', pushover_app_token:'', pushover_enabled:'false', push_chapter_updates:'true', push_news:'false', push_reading_only:'false', poll_interval_hours:'6', mangabaka_token:'', mu_enabled:'true' },
+    sf: { pushover_user_key:'', pushover_app_token:'', pushover_enabled:'false', push_chapter_updates:'true', push_news:'false', push_reading_only:'false', poll_interval_hours:'6', mangabaka_token:'', mu_enabled:'true', kmanga_email:'', kmanga_password:'' },
 
     // Detail modal
     detailOpen: false, ds: null, ef: {}, detailReleases: [],
@@ -1383,7 +1506,14 @@ function app() {
     // ── Detail modal ─────────────────────────────────────
     async openDetail(series) {
       this.ds = series;
-      this.ef = { current_chapter: series.current_chapter||'0', reading_status: series.reading_status||'reading', notes: series.notes||'' };
+      this.ef = {
+        current_chapter: series.current_chapter||'0',
+        reading_status: series.reading_status||'reading',
+        notes: series.notes||'',
+        simulpub_source: series.simulpub_source||'',
+        simulpub_id: series.simulpub_id||'',
+        mu_latest_chapter_manual: series.mu_latest_chapter||'',
+      };
       this.detailOpen = true;
       this.detailReleases = [];
       // Load release history in background
@@ -1423,11 +1553,17 @@ function app() {
 
     async saveDetail() {
       try {
-        const updated = await this.api(`/api/series/${this.ds.id}`,'PATCH',{
+        const body = {
           current_chapter: this.ef.current_chapter,
           reading_status: this.ef.reading_status,
           notes: this.ef.notes,
-        });
+          simulpub_source: this.ef.simulpub_source,
+          simulpub_id: this.ef.simulpub_id,
+        };
+        if (this.ef.simulpub_source === 'custom') {
+          body.mu_latest_chapter = this.ef.mu_latest_chapter_manual;
+        }
+        const updated = await this.api(`/api/series/${this.ds.id}`,'PATCH', body);
         const idx = this.library.findIndex(s=>s.id===updated.id);
         if (idx!==-1) this.library[idx] = updated;
         this.ds = updated;

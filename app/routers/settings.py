@@ -23,6 +23,8 @@ EXPOSED_KEYS = [
     "poll_interval_hours",
     "mangabaka_token",
     "mu_enabled",
+    "kmanga_email",
+    "kmanga_password",   # returned masked; full value stored in DB
 ]
 
 
@@ -30,10 +32,13 @@ EXPOSED_KEYS = [
 def get_settings(db: Session = Depends(get_db)):
     rows = db.query(Settings).filter(Settings.key.in_(EXPOSED_KEYS)).all()
     result = {r.key: r.value for r in rows}
-    # Mask token in response (show only first/last 6 chars)
+    # Mask sensitive values in response
     token = result.get("mangabaka_token", "")
     if token and len(token) > 12:
         result["mangabaka_token"] = token[:6] + "..." + token[-6:]
+    pw = result.get("kmanga_password", "")
+    if pw:
+        result["kmanga_password"] = "••••••••"
     return result
 
 
@@ -47,6 +52,8 @@ class UpdateSettingsRequest(BaseModel):
     poll_interval_hours: str | None = None
     mangabaka_token: str | None = None
     mu_enabled: str | None = None
+    kmanga_email: str | None = None
+    kmanga_password: str | None = None
 
 
 @router.patch("")
@@ -55,6 +62,11 @@ def update_settings(req: UpdateSettingsRequest, db: Session = Depends(get_db)):
     for key, value in updates.items():
         if key in EXPOSED_KEYS:
             set_setting(db, key, value)
+
+    # If K Manga credentials changed, clear cached session cookies so next poll re-logs in
+    if "kmanga_email" in updates or "kmanga_password" in updates:
+        set_setting(db, "kmanga_cookies", "")
+        logger.info("K Manga credentials updated — session cookies cleared")
 
     # If poll interval changed, reschedule
     if "poll_interval_hours" in updates:
