@@ -4,12 +4,12 @@ name: Build & Publish Docker Image
 on:
   push:
     branches:
-      - main          # publish latest on every merge to main
+      - master          # publish latest on every merge to main
     tags:
       - "v*.*.*"      # publish a versioned tag when you push e.g. v1.2.0
   pull_request:
     branches:
-      - main          # build-only (no push) on PRs to catch broken Dockerfiles early
+      - master          # build-only (no push) on PRs to catch broken Dockerfiles early
   workflow_dispatch:  # allow one-click manual runs from the Actions tab
 
 # ── Permissions ───────────────────────────────────────────────────────────────
