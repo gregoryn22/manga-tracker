@@ -1,16 +1,22 @@
 """
 Background scheduler — polls for chapter updates using a two-layer strategy:
 
-Layer 1 (MangaUpdates — primary):
+Layer 1 (MangaUpdates releases feed — authoritative source):
   - GET /v1/releases/days  →  today's global feed, one request for ALL tracked series
   - Build a dict {mu_series_id: [releases]}
   - For each tracked series with a mu_series_id, check if any release is newer
     than the last known chapter. If so, log it and notify.
   - For series without a mu_series_id, attempt to link one via title search.
+  - mu_latest_chapter is ONLY ever set by real release records (from the feed or
+    from releases/search). The MU series summary field (get_series().latest_chapter)
+    is used only to seed an initial baseline, not as an ongoing update signal.
 
-Layer 2 (MangaBaka — fallback):
-  - For series that still have no MU ID, compare total_chapters as before.
-  - Also re-fetches metadata to keep cover/status current.
+Layer 2 (MangaBaka — last resort for unlinked series only):
+  - For series that still have no MU ID after linking attempts, fall back to
+    MangaBaka's total_chapters field.
+  - NOTE: MangaBaka's chapter count is explicitly flagged as unreliable by the
+    developer ("we don't have proper chapter count update yet, we currently pull
+    them from upstream sources"). Treat updates from this path as approximate.
 """
 import logging
 import threading
@@ -192,10 +198,14 @@ def _enrich_from_mu(db: Session, series: TrackedSeries, mu_id: int):
     series.mu_rating = detail.get("bayesian_rating")
     series.mu_rating_votes = detail.get("rating_votes")
 
-    # Latest chapter from MU series record
-    latest = str(detail.get("latest_chapter") or "")
-    if latest and chapter_is_newer(latest, series.mu_latest_chapter):
-        series.mu_latest_chapter = latest
+    # Seed mu_latest_chapter from the MU series summary ONLY when we have no
+    # release-derived value yet. Once real release records have established a
+    # baseline we stop trusting the summary field — the releases feed is authoritative.
+    if not series.mu_latest_chapter:
+        latest = str(detail.get("latest_chapter") or "")
+        if latest:
+            series.mu_latest_chapter = latest
+            logger.debug(f"Seeded mu_latest_chapter={latest!r} for '{series.title}' from MU series summary")
 
     # Authors
     if not series.authors or series.authors == "[]":
@@ -371,7 +381,12 @@ def _send_chapter_notification(
 
 def _poll_via_mangabaka_fallback(db: Session, series_list: list[TrackedSeries]):
     """
-    Classic total_chapters polling via MangaBaka for series we couldn't link to MU.
+    Last-resort chapter detection via MangaBaka for series we couldn't link to MU.
+
+    MangaBaka's total_chapters field is acknowledged by its developer as unreliable
+    (pulled from upstream sources, not a proper chapter tracking system). We use it
+    only when there is no MU link and no existing mu_latest_chapter baseline.
+    A change in total_chapters triggers a notification marked as approximate.
     """
     mb_token = get_setting(db, "mangabaka_token", "")
     if not mb_token:
@@ -389,17 +404,33 @@ def _poll_via_mangabaka_fallback(db: Session, series_list: list[TrackedSeries]):
             if new_total and new_total != series.total_chapters:
                 old = series.total_chapters
                 series.total_chapters = new_total
-                message = f"{series.title} — now {new_total} chapters (was {old or '?'})"
-                _send_chapter_notification(
-                    db=db,
-                    series=series,
-                    message=message,
-                    chapter=new_total,
-                    volume=None,
-                    group_name=None,
-                    release_date=None,
-                    old_chapter=old,
-                )
+                # Only notify if this is a genuine numeric increase, not just a
+                # data-quality correction from MB's upstream scraping.
+                try:
+                    increased = float(new_total) > float(old or 0)
+                except (TypeError, ValueError):
+                    increased = False
+
+                if increased:
+                    message = (
+                        f"{series.title} — chapter count updated to {new_total}"
+                        f" (was {old or '?'}) · via MangaBaka (approximate)"
+                    )
+                    _send_chapter_notification(
+                        db=db,
+                        series=series,
+                        message=message,
+                        chapter=new_total,
+                        volume=None,
+                        group_name=None,
+                        release_date=None,
+                        old_chapter=old,
+                    )
+                else:
+                    logger.debug(
+                        f"MB total_chapters changed non-numerically for '{series.title}': "
+                        f"{old!r} → {new_total!r} (skipping notification)"
+                    )
 
             series.status = api_data.get("status", series.status)
             series.last_checked = datetime.utcnow()
