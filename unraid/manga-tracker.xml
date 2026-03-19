@@ -26,7 +26,7 @@
   <Category>MediaApp:Other Tools:Utilities</Category>
   <WebUI>http://[IP]:[PORT:8765]/</WebUI>
 
-  <Icon>https://raw.githubusercontent.com/gregoryn22/manga-tracker/main/unraid/icon.png</Icon>
+  <Icon>https://raw.githubusercontent.com/gregoryn22/manga-tracker/refs/heads/master/unraid/icon.png</Icon>
 
   <TemplateURL>https://raw.githubusercontent.com/gregoryn22/manga-tracker/main/unraid/manga-tracker.xml</TemplateURL>
 
