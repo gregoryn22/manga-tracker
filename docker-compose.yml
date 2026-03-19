@@ -1,0 +1,26 @@
+version: "3.9"
+
+services:
+  manga-tracker:
+    build: .
+    container_name: manga-tracker
+    restart: unless-stopped
+    ports:
+      - "8765:8000"   # Host port 8765 → container port 8000. Change left side as needed.
+    volumes:
+      - ./data:/data  # Persistent SQLite database storage
+    environment:
+      # ── MangaBaka API token ──────────────────────────────────────────
+      - MANGABAKA_TOKEN=             # ← paste your MangaBaka API token here
+
+      # ── Pushover (optional — can also be set via the Settings UI) ────
+      - PUSHOVER_USER_KEY=
+      - PUSHOVER_APP_TOKEN=
+
+      # ── Poll interval in hours (default: 6) ─────────────────────────
+      - POLL_INTERVAL_HOURS=6
+
+      # ── Database path inside the container ──────────────────────────
+      - DB_PATH=/data/manga_tracker.db
+    labels:
+      - "com.unraid.docker.icon=https://cdn.mangabaka.dev/imgproxy/plain/x150@1/aHR0cHM6Ly9tYW5nYWJha2Eub3JnL2Zhdmljb24ucG5n"
