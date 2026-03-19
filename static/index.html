@@ -460,6 +460,7 @@
     .p-mp  { background: rgba(255,100,30,0.2);  color: #ff7a3d; }
     .p-km  { background: rgba(30,120,255,0.2);  color: #4d9dff; }
     .p-mup { background: rgba(0,190,100,0.2);   color: #2ed87a; }
+    .p-mdx { background: rgba(240,60,40,0.2);   color: #f05a46; }
     .p-custom { background: rgba(150,150,150,0.2); color: var(--text-muted); }
 
     @media (max-width: 768px) {
@@ -1083,6 +1084,7 @@
               <span class="provider-chip p-mp"  x-show="ds.simulpub_source === 'mangaplus'">MangaPlus</span>
               <span class="provider-chip p-km"  x-show="ds.simulpub_source === 'kmanga'">K Manga</span>
               <span class="provider-chip p-mup" x-show="ds.simulpub_source === 'mangaup'">MangaUp!</span>
+              <span class="provider-chip p-mdx" x-show="ds.simulpub_source === 'mangadex'">MangaDex</span>
               <span class="provider-chip p-custom" x-show="ds.simulpub_source === 'custom'">Manual</span>
             </div>
           </div>
@@ -1156,6 +1158,7 @@
               <option value="mangaplus">🟠 MangaPlus (simulpub)</option>
               <option value="kmanga">🔵 K Manga / Kodansha (simulpub)</option>
               <option value="mangaup">🟢 MangaUp! / Square Enix (simulpub)</option>
+              <option value="mangadex">🔴 MangaDex</option>
               <option value="custom">✏️ Manual / Custom</option>
             </select>
 
@@ -1211,6 +1214,25 @@
                      target="_blank" class="btn btn-ghost btn-sm">MangaUp! ↗</a>
                 </div>
                 <div class="text-xs text-muted mt-1">No account required — publicly accessible.</div>
+              </div>
+            </template>
+
+            <!-- MangaDex manga ID input -->
+            <template x-if="ef.simulpub_source === 'mangadex'">
+              <div style="margin-top:10px">
+                <div class="text-xs text-muted mb-1">
+                  MangaDex Manga UUID — the ID in the URL:
+                  <code style="background:var(--surface2);padding:1px 5px;border-radius:3px">mangadex.org/title/<strong>76424fe0-ec26-400c-a0c9-93a17114a4ae</strong></code>
+                </div>
+                <div class="flex gap-2 items-center">
+                  <input class="input" type="text" spellcheck="false"
+                         placeholder="e.g. 76424fe0-ec26-400c-a0c9-93a17114a4ae"
+                         x-model="ef.simulpub_id" style="width:310px;font-size:0.8rem" />
+                  <a x-show="ef.simulpub_id"
+                     :href="`https://mangadex.org/title/${ef.simulpub_id}`"
+                     target="_blank" class="btn btn-ghost btn-sm">MangaDex ↗</a>
+                </div>
+                <div class="text-xs text-muted mt-1">No account required — public API.</div>
               </div>
             </template>
 
@@ -1279,6 +1301,9 @@
             <a x-show="ds.simulpub_source === 'mangaup' && ds.simulpub_id"
                :href="`https://global.manga-up.com/en/manga/${ds.simulpub_id}`"
                target="_blank" class="btn btn-ghost btn-sm">MangaUp! ↗</a>
+            <a x-show="ds.simulpub_source === 'mangadex' && ds.simulpub_id"
+               :href="`https://mangadex.org/title/${ds.simulpub_id}`"
+               target="_blank" class="btn btn-ghost btn-sm">MangaDex ↗</a>
           </div>
         </div>
 
