@@ -320,12 +320,16 @@ def get_series_releases_endpoint(series_id: int, db: Session = Depends(get_db)):
     series = db.query(TrackedSeries).filter(TrackedSeries.id == series_id).first()
     mu_id = series.mu_series_id if series else None
 
-    # Also hit MU live if we have an ID
+    # Also hit MU live if we have an ID — sort newest first
     live_releases = []
     if mu_id:
         try:
             resp = search_releases(series_id=mu_id, per_page=20)
             live_releases = [r.get("record", {}) for r in resp.get("results", [])]
+            live_releases.sort(
+                key=lambda r: (r.get("release_date") or "", r.get("id") or 0),
+                reverse=True,
+            )
         except Exception:
             pass
 
