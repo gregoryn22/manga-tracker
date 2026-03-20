@@ -70,6 +70,13 @@ class TrackedSeries(Base):
     simulpub_source = Column(String, nullable=True)
     simulpub_id = Column(String, nullable=True)  # Platform-specific series ID
 
+    # ── Detected provider IDs (from MangaBaka metadata) ───────────────
+    # JSON dict populated at add/refresh time from MB's source + links fields.
+    # Keys: mu_id (base36), kmanga_id, mangaplus_id, mangaup_id, mangadex_id.
+    # Read-only from the UI — used to pre-fill the simulpub ID field
+    # when the user selects a provider source.
+    mb_provider_ids = Column(Text, nullable=True)
+
     # ── User progress ─────────────────────────────────────────────────
     current_chapter = Column(String, nullable=True, default="0")
     reading_status = Column(String, default="reading")
@@ -123,6 +130,7 @@ class TrackedSeries(Base):
             "latest_release_group": self.latest_release_group,
             "simulpub_source": self.simulpub_source or "",
             "simulpub_id": self.simulpub_id or "",
+            "mb_provider_ids": json.loads(self.mb_provider_ids) if self.mb_provider_ids else {},
             "current_chapter": self.current_chapter,
             "reading_status": self.reading_status,
             "notes": self.notes,
@@ -241,8 +249,9 @@ def _migrate_db():
 
     # Columns to add: (table, column_name, DDL_type)
     migrations = [
-        ("tracked_series", "simulpub_source", "VARCHAR"),
-        ("tracked_series", "simulpub_id",     "VARCHAR"),
+        ("tracked_series", "simulpub_source",   "VARCHAR"),
+        ("tracked_series", "simulpub_id",        "VARCHAR"),
+        ("tracked_series", "mb_provider_ids",    "TEXT"),
     ]
 
     with engine.connect() as conn:

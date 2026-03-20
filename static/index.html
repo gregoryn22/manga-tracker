@@ -1153,7 +1153,19 @@
             <div class="form-label">Chapter Source
               <span class="text-muted fw-400" style="font-size:0.75rem"> — override for officially licensed / simulpub titles</span>
             </div>
-            <select class="input" x-model="ef.simulpub_source" style="width:220px">
+            <select class="input" x-model="ef.simulpub_source" style="width:220px"
+                    @change="
+                      const pids = ds.mb_provider_ids || {};
+                      const map = {
+                        mangaplus: pids.mangaplus_id,
+                        kmanga:    pids.kmanga_id,
+                        mangaup:   pids.mangaup_id,
+                        mangadex:  pids.mangadex_id,
+                      };
+                      if (!ef.simulpub_id && map[$event.target.value]) {
+                        ef.simulpub_id = map[$event.target.value];
+                      }
+                    ">
               <option value="">🔄 Automatic (MU + MangaBaka)</option>
               <option value="mangaplus">🟠 MangaPlus (simulpub)</option>
               <option value="kmanga">🔵 K Manga / Kodansha (simulpub)</option>
@@ -1161,6 +1173,35 @@
               <option value="mangadex">🔴 MangaDex</option>
               <option value="custom">✏️ Manual / Custom</option>
             </select>
+            <!-- Detected provider hint badges -->
+            <div class="flex gap-1 mt-1" style="flex-wrap:wrap"
+                 x-show="Object.keys(ds.mb_provider_ids || {}).some(k => k !== 'mu_id')">
+              <span class="text-xs text-muted" style="align-self:center">Detected:</span>
+              <template x-if="(ds.mb_provider_ids||{}).mangaplus_id">
+                <button class="btn btn-ghost btn-sm" style="font-size:0.65rem;padding:1px 6px"
+                        @click="ef.simulpub_source='mangaplus'; ef.simulpub_id=(ds.mb_provider_ids||{}).mangaplus_id">
+                  🟠 MangaPlus&nbsp;<strong x-text="(ds.mb_provider_ids||{}).mangaplus_id"></strong>
+                </button>
+              </template>
+              <template x-if="(ds.mb_provider_ids||{}).kmanga_id">
+                <button class="btn btn-ghost btn-sm" style="font-size:0.65rem;padding:1px 6px"
+                        @click="ef.simulpub_source='kmanga'; ef.simulpub_id=(ds.mb_provider_ids||{}).kmanga_id">
+                  🔵 K Manga&nbsp;<strong x-text="(ds.mb_provider_ids||{}).kmanga_id"></strong>
+                </button>
+              </template>
+              <template x-if="(ds.mb_provider_ids||{}).mangaup_id">
+                <button class="btn btn-ghost btn-sm" style="font-size:0.65rem;padding:1px 6px"
+                        @click="ef.simulpub_source='mangaup'; ef.simulpub_id=(ds.mb_provider_ids||{}).mangaup_id">
+                  🟢 MangaUp!&nbsp;<strong x-text="(ds.mb_provider_ids||{}).mangaup_id"></strong>
+                </button>
+              </template>
+              <template x-if="(ds.mb_provider_ids||{}).mangadex_id">
+                <button class="btn btn-ghost btn-sm" style="font-size:0.65rem;padding:1px 6px"
+                        @click="ef.simulpub_source='mangadex'; ef.simulpub_id=(ds.mb_provider_ids||{}).mangadex_id">
+                  🔴 MangaDex
+                </button>
+              </template>
+            </div>
 
             <!-- MangaPlus title ID input -->
             <template x-if="ef.simulpub_source === 'mangaplus'">
