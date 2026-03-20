@@ -618,19 +618,28 @@ def _poll_kmanga(db: Session, series_list: list[TrackedSeries]):
     for series in series_list:
         try:
             title_data = client.get_title(int(series.simulpub_id))
-            total      = title_data.get("total_episode_count") or 0
-            ep_id      = title_data.get("latest_free_episode_id")
 
-            # Try to get the real chapter label (e.g. "Ch. 68") from the episode
+            # Resolve the episode ID that best represents the latest chapter.
+            # episode_id_list[-1] is the absolute newest episode (paid or free).
+            # IMPORTANT: total_episode_count is the count of web episodes, NOT
+            # the chapter number — never use it as a chapter proxy.
+            ep_id = client.get_latest_episode_id(title_data)
+
             chapter = None
             if ep_id:
                 ep_name = client.get_episode_name(int(ep_id))
                 if ep_name:
                     chapter = parse_chapter_from_episode_name(ep_name)
-
-            # Fall back to total episode count as chapter proxy
-            if not chapter and total:
-                chapter = str(int(total))
+                    if not chapter:
+                        logger.debug(
+                            f"K Manga: could not parse chapter from episode_name "
+                            f"{ep_name!r} for '{series.title}'"
+                        )
+                else:
+                    logger.debug(
+                        f"K Manga: get_episode_name returned None for "
+                        f"ep_id={ep_id} ('{series.title}')"
+                    )
 
             if not chapter:
                 logger.debug(f"K Manga: no chapter data for '{series.title}' (id={series.simulpub_id})")

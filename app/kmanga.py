@@ -200,11 +200,13 @@ class KMangaClient:
     def get_title(self, title_id: int) -> dict:
         """
         Return title metadata for a single title_id.
-        Key fields:
-          total_episode_count   — total chapters published
-          latest_free_episode_id — episode ID of the newest free chapter
-          episode_free_updated  — ISO-ish date of last free episode update
-          episode_paid_updated  — ISO-ish date of last paid episode update
+
+        Key fields from the response:
+          episode_id_list        — ALL episode IDs in release order (newest last)
+          latest_free_episode_id — integer; newest episode free to read
+          latest_paid_episode_id — list of integers; newest paid episode(s)
+          total_episode_count    — count of uploaded web episodes (NOT chapter count;
+                                   do not use as a chapter number proxy)
         """
         data   = self._request("GET", "/title/list", {"title_id_list": str(title_id)})
         titles = data.get("title_list", [])
@@ -214,15 +216,47 @@ class KMangaClient:
 
     def get_episode_name(self, episode_id: int) -> str | None:
         """
-        Resolve an episode_id to its display name (e.g. "Ch. 68", "第68話").
-        Returns None if the episode is not accessible or not found.
+        Resolve an episode_id to its display name using GET /web/episode.
+
+        This endpoint is more reliable for single-episode lookups than the
+        POST /episode/list bulk endpoint.  Returns None if the episode is
+        not accessible or not found.
+
+        Typical return values:
+          "Chapter 68 My Title Here"
+          "Chapter 1.5 Side Story"
+          "第68話 タイトル"
         """
         try:
-            data     = self._request("POST", "/episode/list", {"episode_id_list": str(episode_id)})
-            episodes = data.get("episode_list", [])
-            return episodes[0].get("episode_name") if episodes else None
+            data = self._request("GET", "/web/episode", {"episode_id": str(episode_id)})
+            ep   = data.get("episode", {})
+            return ep.get("episode_name") or None
         except (KMangaNotFound, KMangaAPIError):
             return None
+
+    def get_latest_episode_id(self, title_data: dict) -> int | None:
+        """
+        Determine the best episode ID to use for chapter-name resolution.
+
+        Priority:
+          1. Last element of episode_id_list  — the absolute newest episode
+             regardless of paid/free status (most accurate).
+          2. Last element of latest_paid_episode_id (list) — if episode_id_list
+             is absent.
+          3. latest_free_episode_id (integer) — last resort.
+
+        Returns None if no episode ID can be determined.
+        """
+        ep_id_list = title_data.get("episode_id_list") or []
+        if ep_id_list:
+            return ep_id_list[-1]
+
+        paid_ids = title_data.get("latest_paid_episode_id") or []
+        if paid_ids:
+            return paid_ids[-1]
+
+        free_id = title_data.get("latest_free_episode_id")
+        return int(free_id) if free_id else None
 
     def get_updated_titles(self, base_date: str | None = None) -> list[dict]:
         """
@@ -240,14 +274,49 @@ class KMangaClient:
 
 def parse_chapter_from_episode_name(episode_name: str) -> str | None:
     """
-    Extract a numeric chapter identifier from a K Manga episode name string.
-    Handles:  "Ch. 68"  |  "Chapter 68"  |  "第68話"  |  "68"  |  "68.5"
-    Returns the number as a string, or None if no number is found.
+    Extract a chapter number from a K Manga episode name string.
+
+    Tries patterns in priority order so that episode-counter numbers
+    embedded in series titles (e.g. "Season 2 Chapter 3") don't shadow
+    the real chapter number:
+
+      1. "Chapter N" / "chapter N" / "Chap. N" / "Ch. N" / "Ch N"
+         → e.g.  "Chapter 68 My Title Here"      → "68"
+                 "Ch. 1.5 Side Story"              → "1.5"
+      2. Japanese "第N話" or "第N回"
+         → e.g.  "第68話"                         → "68"
+      3. Generic first number in the string (last resort, may be wrong
+         for titles with numbers in the subtitle)
+         → e.g.  "68"                             → "68"
+
+    Returns the chapter number as a string ("68", "1.5"), or None if
+    nothing parseable is found.
     """
     if not episode_name:
         return None
-    m = re.search(r"(\d+(?:\.\d+)?)", episode_name)
-    if not m:
-        return None
-    val = float(m.group(1))
-    return str(int(val)) if val == int(val) else str(val)
+
+    def _fmt(m: re.Match) -> str:
+        val = float(m.group(1))
+        return str(int(val)) if val == int(val) else str(val)
+
+    # Priority 1 — English "Chapter" / "Ch." prefix
+    m = re.search(r'[Cc]h(?:apter|ap\.?|\.?)\s*(\d+(?:\.\d+)?)', episode_name)
+    if m:
+        return _fmt(m)
+
+    # Priority 2 — Japanese 第N話 / 第N回
+    m = re.search(r'第\s*(\d+(?:\.\d+)?)\s*[話回]', episode_name)
+    if m:
+        return _fmt(m)
+
+    # Priority 3 — any leading bare number (e.g. "68 - Title Here")
+    m = re.match(r'(\d+(?:\.\d+)?)\s*[-–—\s]', episode_name)
+    if m:
+        return _fmt(m)
+
+    # Last resort — first number anywhere in the string
+    m = re.search(r'(\d+(?:\.\d+)?)', episode_name)
+    if m:
+        return _fmt(m)
+
+    return None
