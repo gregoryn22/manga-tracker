@@ -634,16 +634,11 @@ def _poll_kmanga(db: Session, series_list: list[TrackedSeries]):
 
     for series in series_list:
         try:
-            title_data = client.get_title(int(series.simulpub_id))
-
-            # Scan the last several episodes to find the highest canonical
-            # chapter number ("Chapter N" / "第N話").  This is more robust than
-            # blindly taking episode_id_list[-1] because K Manga sometimes
-            # appends campaign/teaser/anniversary episodes after the real latest
-            # chapter, and their names may carry misleading bare numbers.
-            # IMPORTANT: total_episode_count is the count of web episodes, NOT
-            # the chapter number — never use it as a chapter proxy.
-            chapter, ep_name = client.scan_latest_chapter(title_data)
+            # Use /web/title/detail (no auth required) which returns one episode ID
+            # per CHAPTER, not per sub-episode.  episode_id_list[-1] from that
+            # endpoint gives the latest chapter directly.
+            # Falls back to authenticated /title/list scanning if needed.
+            chapter, ep_name = client.scan_latest_chapter(int(series.simulpub_id))
 
             if ep_name:
                 logger.debug(

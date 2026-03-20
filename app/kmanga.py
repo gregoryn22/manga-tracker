@@ -19,6 +19,27 @@ x-kmanga-hash algorithm (reverse-engineered from py-kapi/pykapi/kapi.py):
   birthday_hash = SHA256(birthday_dict["value"]) + "_" + SHA512(birthday_dict["expires"])
   final_hash = SHA512(param_digest + birthday_hash)
 
+Chapter detection — two API tiers:
+
+  PRIMARY (no auth required):
+    GET /web/title/detail?title_id=N
+      → Returns "web_title" object with:
+        episode_id_list     — ONE entry per CHAPTER (compiled chapter, not sub-episode)
+        total_episode_count — The true chapter count (e.g. 68)
+      Use episode_id_list[-1] to get the latest chapter's episode ID, then call
+      /web/episode to get the episode_name and parse the chapter number.
+      Only the default birthday cookie is needed — no login required.
+
+  FALLBACK (requires auth):
+    GET /title/list?title_id_list=N
+      → Returns ALL raw episodes (e.g. 195 sub-episodes for 68 chapters).
+        episode_id_list[-1] here points to a sub-episode, not a chapter.
+        total_episode_count here counts sub-episodes, NOT chapters.
+      Used as a fallback for titles behind a paywall or not publicly listed.
+
+  Key insight: /web/title/detail is the correct endpoint.  /title/list returns
+  sub-episode granularity which is inappropriate for chapter tracking.
+
 Session management:
   - On first use (or when uwt cookie is absent), call login() to authenticate.
   - Cookies (birthday + uwt) are returned from login() as a dict for the caller
@@ -133,7 +154,55 @@ class KMangaClient:
         """True if we have a uwt session cookie (i.e. logged in)."""
         return bool(self.cookies.get("uwt"))
 
-    # ── Low-level request ─────────────────────────────────────────────────────
+    # ── Low-level requests ────────────────────────────────────────────────────
+
+    def _web_request(self, endpoint: str, params: dict) -> dict:
+        """
+        GET request for /web/* endpoints that use a different signing convention.
+
+        Signing differences from _request():
+          • Hash is computed from ONLY the business params (e.g. just title_id).
+            version and platform are NOT included in the hash or query string.
+          • Platform is sent as the x-kmanga-platform HEADER, not a query param.
+          • x-kmanga-is-crawler header is added (value: "false").
+
+        This matches the behaviour observed in K Manga's Nuxt JS bundle
+        (e.g. getWebTitleDetail, getWebEpisode).
+        """
+        # Only business params go into hash/query — not version/platform
+        str_params = {k: str(v) for k, v in params.items()}
+        xhash = _generate_xhash(str_params, self.cookies["birthday"])
+        headers = {
+            **_DEFAULT_HEADERS,
+            "x-kmanga-hash":        xhash,
+            "x-kmanga-is-crawler":  "false",
+            "x-kmanga-platform":    _PLATFORM,
+        }
+        url = _API_BASE + endpoint
+
+        with httpx.Client(timeout=15, follow_redirects=True) as client:
+            resp = client.get(url, params=str_params, headers=headers, cookies=self.cookies)
+
+        if resp.status_code == 403:
+            raise KMangaRegionError(
+                "K Manga returned 403 — likely a US-only geographic restriction"
+            )
+        resp.raise_for_status()
+
+        data = resp.json()
+        for k, v in resp.cookies.items():
+            self.cookies[k] = v
+
+        if data.get("status") != "success":
+            code = data.get("response_code", 0)
+            msg  = data.get("error_message", "")
+            if code in (2002, 1101, 1001):
+                raise KMangaAuthError(code, msg)
+            if code in (3104, 3100, 3000):
+                raise KMangaNotFound(msg)
+            raise KMangaAPIError(code, msg)
+
+        return data
 
     def _request(self, method: str, endpoint: str, extra: dict | None = None) -> dict:
         payload: dict[str, str] = {
@@ -212,16 +281,40 @@ class KMangaClient:
 
     # ── Chapter tracking ─────────────────────────────────────────────────────
 
+    def get_title_detail(self, title_id: int) -> dict:
+        """
+        Return web-tier title metadata via GET /web/title/detail.
+
+        PREFERRED over get_title() for chapter tracking.  Does NOT require
+        authentication — only the default birthday cookie is needed.
+
+        Key fields from the response's "web_title" dict:
+          episode_id_list     — ONE entry PER CHAPTER (not per sub-episode).
+                                 episode_id_list[-1] is the latest chapter.
+          total_episode_count — TRUE chapter count (e.g. 68, not 195).
+          title_name          — English display title.
+
+        Episode names returned by /web/episode for these IDs typically look like:
+          "CHAPTER 68 HUNTING BUGS WITH A FEMALE KNIGHT"
+          "CHAPTER 1 I FOUND A FEMALE KNIGHT IN MY PADDY"
+        Note the ALL-CAPS format — parsers must be case-insensitive.
+        """
+        data = self._web_request("/web/title/detail", {"title_id": str(title_id)})
+        wt = data.get("web_title")
+        if not wt:
+            raise KMangaNotFound(f"No web_title in response for id={title_id}")
+        return wt
+
     def get_title(self, title_id: int) -> dict:
         """
-        Return title metadata for a single title_id.
+        Return raw title metadata via GET /title/list.
 
-        Key fields from the response:
-          episode_id_list        — ALL episode IDs in release order (newest last)
-          latest_free_episode_id — integer; newest episode free to read
-          latest_paid_episode_id — list of integers; newest paid episode(s)
-          total_episode_count    — count of uploaded web episodes (NOT chapter count;
-                                   do not use as a chapter number proxy)
+        NOTE: Prefer get_title_detail() for chapter tracking.
+        This endpoint returns ALL sub-episodes (e.g. 195 for a 68-chapter series)
+        and its episode_id_list[-1] points to a sub-episode part, NOT a chapter.
+        total_episode_count here counts sub-episodes, not chapters.
+
+        Retained for compatibility / fallback use.
         """
         data   = self._request("GET", "/title/list", {"title_id_list": str(title_id)})
         titles = data.get("title_list", [])
@@ -243,7 +336,7 @@ class KMangaClient:
           "第68話 タイトル"
         """
         try:
-            data = self._request("GET", "/web/episode", {"episode_id": str(episode_id)})
+            data = self._web_request("/web/episode", {"episode_id": str(episode_id)})
             ep   = data.get("episode", {})
             return ep.get("episode_name") or None
         except (KMangaNotFound, KMangaAPIError):
@@ -275,74 +368,102 @@ class KMangaClient:
 
     def scan_latest_chapter(
         self,
-        title_data: dict,
-        scan_window: int = 8,
+        title_id: int,
+        scan_window: int = 5,
     ) -> tuple[str | None, str | None]:
         """
-        Scan the last *scan_window* episodes and return the best (chapter, episode_name).
+        Return the latest chapter number and raw episode name for a title.
 
-        Strategy:
-          1. Walk episode_id_list from the tail (newest) backwards, up to scan_window.
-          2. For each episode, fetch its episode_name and try canonical parsing
-             (priority 1: "Chapter N" / "Ch. N"; priority 2: "第N話/回").
-          3. Keep the HIGHEST canonically-named chapter seen. This guards against
-             campaign/teaser/anniversary episodes appended after the latest real
-             chapter that might carry a misleading bare number.
-          4. If no canonical match is found within the window, fall back to the
-             single latest episode and use full parse_chapter_from_episode_name
-             (including bare-number fallbacks).
+        PRIMARY PATH — /web/title/detail (no auth required):
+          This endpoint returns one episode ID per CHAPTER (not per sub-episode).
+          episode_id_list[-1] is the latest chapter's representative episode.
+          Example: 68-chapter series → 68 items, last = episode 363822
+                   = "CHAPTER 68 HUNTING BUGS WITH A FEMALE KNIGHT"
+
+        FALLBACK — scan window from /title/list data:
+          If /web/title/detail is unavailable (paywall, error), falls back to
+          scanning the last *scan_window* sub-episodes from a pre-fetched
+          title_data dict (from get_title()), preferring canonical "Chapter N"
+          names to avoid misparses.
 
         Returns (chapter_str | None, raw_episode_name | None).
-        Callers should log the episode_name for transparency.
-
-        Falls back gracefully to the paid/free IDs if episode_id_list is absent.
         """
+        # ── Primary: /web/title/detail (no auth, chapter-level list) ──────────
+        try:
+            wt = self.get_title_detail(title_id)
+            ep_id_list = wt.get("episode_id_list") or []
+            if ep_id_list:
+                latest_ep_id = ep_id_list[-1]
+                ep_name = self.get_episode_name(int(latest_ep_id))
+                if ep_name:
+                    chapter = parse_chapter_from_episode_name(ep_name)
+                    if chapter is not None:
+                        logger.debug(
+                            f"K Manga: /web/title/detail ep={latest_ep_id} "
+                            f"name={ep_name!r} → chapter={chapter!r}"
+                        )
+                        return chapter, ep_name
+                    # Couldn't parse from primary — scan last few for backup
+                    logger.debug(
+                        f"K Manga: /web/title/detail last ep name unparseable: "
+                        f"{ep_name!r} — scanning {scan_window} more episodes"
+                    )
+                    for ep_id in reversed(ep_id_list[-(scan_window + 1):-1]):
+                        name = self.get_episode_name(int(ep_id))
+                        if name:
+                            ch = parse_chapter_from_episode_name(name)
+                            if ch is not None:
+                                return ch, name
+        except (KMangaNotFound, KMangaAPIError) as e:
+            logger.debug(f"K Manga: /web/title/detail failed ({e}), using fallback scan")
+        except Exception as e:
+            logger.warning(f"K Manga: /web/title/detail unexpected error ({e}), using fallback scan")
+
+        # ── Fallback: scan window from authenticated /title/list data ──────────
+        # Caller must pre-fetch title_data via get_title() and pass title_id so
+        # we can still make the episode name requests.
+        # This path is only taken if the primary fails.
+        logger.debug(
+            f"K Manga: falling back to /title/list scan for title_id={title_id}"
+        )
+        try:
+            title_data = self.get_title(title_id)
+        except Exception as e:
+            logger.warning(f"K Manga: get_title fallback also failed: {e}")
+            return None, None
+
         ep_id_list = title_data.get("episode_id_list") or []
         if not ep_id_list:
-            # No list — fall back to single latest episode from old method
             ep_id = self.get_latest_episode_id(title_data)
             if not ep_id:
                 return None, None
             ep_name = self.get_episode_name(int(ep_id))
             return parse_chapter_from_episode_name(ep_name), ep_name
 
-        tail = list(reversed(ep_id_list[-scan_window:]))  # newest first
-
+        tail = list(reversed(ep_id_list[-scan_window:]))
         best_chapter: str | None = None
         best_name:    str | None = None
-        fallback_chapter: str | None = None
-        fallback_name:    str | None = None
 
         for ep_id in tail:
             ep_name = self.get_episode_name(int(ep_id))
             if not ep_name:
                 continue
-
-            # Try canonical patterns only (no ambiguous bare-number fallbacks)
             canonical = _parse_chapter_canonical(ep_name)
             if canonical is not None:
                 if best_chapter is None or float(canonical) > float(best_chapter):
                     best_chapter = canonical
                     best_name    = ep_name
-                # Once we've found a canonical match in the scan window we can
-                # stop going further back — earlier episodes will only be older.
-                # (We walked newest→oldest so the first canonical hit is the latest;
-                #  we keep scanning to guard against a misparse that inflated the number.)
-            elif fallback_chapter is None:
-                # Save first episode that has *any* parseable number as a safety net
-                fallback_chapter = parse_chapter_from_episode_name(ep_name)
-                fallback_name    = ep_name
 
         if best_chapter is not None:
             return best_chapter, best_name
 
-        # Canonical scan came up empty — use the full fallback parser on the first
-        # episode we looked at (newest)
-        first_name = self.get_episode_name(int(tail[0])) if tail else None
-        if first_name:
-            return parse_chapter_from_episode_name(first_name), first_name
+        # Last resort: first number from the newest episode
+        if tail:
+            ep_name = self.get_episode_name(int(tail[0]))
+            if ep_name:
+                return parse_chapter_from_episode_name(ep_name), ep_name
 
-        return fallback_chapter, fallback_name
+        return None, None
 
     def get_updated_titles(self, base_date: str | None = None) -> list[dict]:
         """
@@ -363,12 +484,16 @@ def _parse_chapter_canonical(episode_name: str) -> str | None:
     Strict canonical chapter extraction — only matches unambiguous patterns.
 
     Accepts:
-      • "Chapter N" / "Ch. N" / "Ch N" / "Chap. N" (English, case-insensitive)
+      • "Chapter N" / "CHAPTER N" / "Ch. N" / "CH. N" / "Chap. N" (case-insensitive)
       • "第N話" / "第N回" (Japanese)
 
     Deliberately rejects bare numbers and any other heuristic matches.
     Used by scan_latest_chapter() when we need high confidence that the number
     really is the chapter number, not a volume number or campaign counter.
+
+    K Manga's /web/episode endpoint returns episode names in ALL-CAPS:
+      "CHAPTER 68 HUNTING BUGS WITH A FEMALE KNIGHT"
+    so case-insensitive matching is required here.
 
     Returns the chapter number as a string ("68", "1.5"), or None.
     """
@@ -379,8 +504,8 @@ def _parse_chapter_canonical(episode_name: str) -> str | None:
         val = float(m.group(1))
         return str(int(val)) if val == int(val) else str(val)
 
-    # English "Chapter" / "Ch." / "Chap." prefix
-    m = re.search(r'[Cc]h(?:apter|ap\.?|\.?)\s*(\d+(?:\.\d+)?)', episode_name)
+    # English "Chapter" / "Ch." / "Chap." prefix — case-insensitive
+    m = re.search(r'[Cc][Hh](?:[Aa][Pp][Tt][Ee][Rr]|[Aa][Pp]\.?|\.?)\s*(\d+(?:\.\d+)?)', episode_name)
     if m:
         return _fmt(m)
 
@@ -419,8 +544,8 @@ def parse_chapter_from_episode_name(episode_name: str) -> str | None:
         val = float(m.group(1))
         return str(int(val)) if val == int(val) else str(val)
 
-    # Priority 1 — English "Chapter" / "Ch." prefix
-    m = re.search(r'[Cc]h(?:apter|ap\.?|\.?)\s*(\d+(?:\.\d+)?)', episode_name)
+    # Priority 1 — English "Chapter" / "Ch." prefix (case-insensitive for K Manga's ALL-CAPS)
+    m = re.search(r'[Cc][Hh](?:[Aa][Pp][Tt][Ee][Rr]|[Aa][Pp]\.?|\.?)\s*(\d+(?:\.\d+)?)', episode_name)
     if m:
         return _fmt(m)
 
