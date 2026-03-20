@@ -183,15 +183,30 @@ class KMangaClient:
 
     # ── Auth ──────────────────────────────────────────────────────────────────
 
-    def login(self) -> dict[str, str]:
+    def login(self, recaptcha_token: str | None = None) -> dict[str, str]:
         """
         Authenticate with email/password. Updates internal cookies and
         returns the full cookie dict for the caller to persist.
+
+        recaptcha_token:
+          K Manga's web login endpoint now requires a reCAPTCHA v3 token.
+          Without it the server returns code 1001 ("request parameter is invalid").
+          When provided, this token is forwarded as the ``g-recaptcha-response``
+          field.  If omitted the request is attempted anyway (it may still work
+          if Kodansha relaxes the requirement or the token becomes optional on
+          trusted IPs / mobile platforms).
+
+          To obtain a valid token: in a browser visit https://kmanga.kodansha.com,
+          open DevTools → Network, log in, and copy the ``g-recaptcha-response``
+          POST parameter from the login request.  The token is short-lived (~2 min).
+
+          Long-term: the Settings page exposes a ``kmanga_recaptcha_token`` field
+          for manual input; the scheduler passes it automatically when present.
         """
-        self._request("POST", "/web/user/login", {
-            "email":    self.email,
-            "password": self.password,
-        })
+        extra: dict = {"email": self.email, "password": self.password}
+        if recaptcha_token:
+            extra["g-recaptcha-response"] = recaptcha_token
+        self._request("POST", "/web/user/login", extra)
         logger.info("K Manga: login successful")
         return dict(self.cookies)
 
@@ -258,6 +273,77 @@ class KMangaClient:
         free_id = title_data.get("latest_free_episode_id")
         return int(free_id) if free_id else None
 
+    def scan_latest_chapter(
+        self,
+        title_data: dict,
+        scan_window: int = 8,
+    ) -> tuple[str | None, str | None]:
+        """
+        Scan the last *scan_window* episodes and return the best (chapter, episode_name).
+
+        Strategy:
+          1. Walk episode_id_list from the tail (newest) backwards, up to scan_window.
+          2. For each episode, fetch its episode_name and try canonical parsing
+             (priority 1: "Chapter N" / "Ch. N"; priority 2: "第N話/回").
+          3. Keep the HIGHEST canonically-named chapter seen. This guards against
+             campaign/teaser/anniversary episodes appended after the latest real
+             chapter that might carry a misleading bare number.
+          4. If no canonical match is found within the window, fall back to the
+             single latest episode and use full parse_chapter_from_episode_name
+             (including bare-number fallbacks).
+
+        Returns (chapter_str | None, raw_episode_name | None).
+        Callers should log the episode_name for transparency.
+
+        Falls back gracefully to the paid/free IDs if episode_id_list is absent.
+        """
+        ep_id_list = title_data.get("episode_id_list") or []
+        if not ep_id_list:
+            # No list — fall back to single latest episode from old method
+            ep_id = self.get_latest_episode_id(title_data)
+            if not ep_id:
+                return None, None
+            ep_name = self.get_episode_name(int(ep_id))
+            return parse_chapter_from_episode_name(ep_name), ep_name
+
+        tail = list(reversed(ep_id_list[-scan_window:]))  # newest first
+
+        best_chapter: str | None = None
+        best_name:    str | None = None
+        fallback_chapter: str | None = None
+        fallback_name:    str | None = None
+
+        for ep_id in tail:
+            ep_name = self.get_episode_name(int(ep_id))
+            if not ep_name:
+                continue
+
+            # Try canonical patterns only (no ambiguous bare-number fallbacks)
+            canonical = _parse_chapter_canonical(ep_name)
+            if canonical is not None:
+                if best_chapter is None or float(canonical) > float(best_chapter):
+                    best_chapter = canonical
+                    best_name    = ep_name
+                # Once we've found a canonical match in the scan window we can
+                # stop going further back — earlier episodes will only be older.
+                # (We walked newest→oldest so the first canonical hit is the latest;
+                #  we keep scanning to guard against a misparse that inflated the number.)
+            elif fallback_chapter is None:
+                # Save first episode that has *any* parseable number as a safety net
+                fallback_chapter = parse_chapter_from_episode_name(ep_name)
+                fallback_name    = ep_name
+
+        if best_chapter is not None:
+            return best_chapter, best_name
+
+        # Canonical scan came up empty — use the full fallback parser on the first
+        # episode we looked at (newest)
+        first_name = self.get_episode_name(int(tail[0])) if tail else None
+        if first_name:
+            return parse_chapter_from_episode_name(first_name), first_name
+
+        return fallback_chapter, fallback_name
+
     def get_updated_titles(self, base_date: str | None = None) -> list[dict]:
         """
         Return titles updated since base_date (YYYY-MM-DD string).
@@ -271,6 +357,40 @@ class KMangaClient:
 
 
 # ── Chapter number helpers ─────────────────────────────────────────────────────
+
+def _parse_chapter_canonical(episode_name: str) -> str | None:
+    """
+    Strict canonical chapter extraction — only matches unambiguous patterns.
+
+    Accepts:
+      • "Chapter N" / "Ch. N" / "Ch N" / "Chap. N" (English, case-insensitive)
+      • "第N話" / "第N回" (Japanese)
+
+    Deliberately rejects bare numbers and any other heuristic matches.
+    Used by scan_latest_chapter() when we need high confidence that the number
+    really is the chapter number, not a volume number or campaign counter.
+
+    Returns the chapter number as a string ("68", "1.5"), or None.
+    """
+    if not episode_name:
+        return None
+
+    def _fmt(m: re.Match) -> str:
+        val = float(m.group(1))
+        return str(int(val)) if val == int(val) else str(val)
+
+    # English "Chapter" / "Ch." / "Chap." prefix
+    m = re.search(r'[Cc]h(?:apter|ap\.?|\.?)\s*(\d+(?:\.\d+)?)', episode_name)
+    if m:
+        return _fmt(m)
+
+    # Japanese 第N話 / 第N回
+    m = re.search(r'第\s*(\d+(?:\.\d+)?)\s*[話回]', episode_name)
+    if m:
+        return _fmt(m)
+
+    return None
+
 
 def parse_chapter_from_episode_name(episode_name: str) -> str | None:
     """

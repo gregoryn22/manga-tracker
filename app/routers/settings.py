@@ -24,7 +24,8 @@ EXPOSED_KEYS = [
     "mangabaka_token",
     "mu_enabled",
     "kmanga_email",
-    "kmanga_password",   # returned masked; full value stored in DB
+    "kmanga_password",          # returned masked; full value stored in DB
+    "kmanga_recaptcha_token",   # short-lived reCAPTCHA v3 token for re-login
 ]
 
 
@@ -54,6 +55,7 @@ class UpdateSettingsRequest(BaseModel):
     mu_enabled: str | None = None
     kmanga_email: str | None = None
     kmanga_password: str | None = None
+    kmanga_recaptcha_token: str | None = None
 
 
 @router.patch("")

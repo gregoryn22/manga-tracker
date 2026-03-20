@@ -282,6 +282,9 @@ def _seed_settings():
             "kmanga_email": os.getenv("KMANGA_EMAIL", ""),
             "kmanga_password": os.getenv("KMANGA_PASSWORD", ""),
             "kmanga_cookies": "",             # JSON cookie dict — auto-managed, not user-editable
+            # reCAPTCHA v3 token for K Manga re-login (short-lived, consumed on use).
+            # Paste a fresh token from the browser login flow when the session expires.
+            "kmanga_recaptcha_token": "",
         }
         for k, v in defaults.items():
             if not db.query(Settings).filter(Settings.key == k).first():

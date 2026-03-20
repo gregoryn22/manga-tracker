@@ -998,6 +998,20 @@
             <input class="input" type="password" style="flex:1" placeholder="K Manga password"
                    x-model="sf.kmanga_password" autocomplete="new-password" />
           </div>
+          <div class="settings-row" style="align-items:flex-start; flex-direction:column; gap:6px">
+            <label style="font-size:0.8rem; font-weight:600">reCAPTCHA Token <span style="font-weight:400; color:var(--text-muted)">(for re-login only)</span></label>
+            <input class="input" type="text" style="width:100%; font-size:0.75rem; font-family:monospace"
+                   placeholder="Paste g-recaptcha-response token here if session expired"
+                   x-model="sf.kmanga_recaptcha_token" autocomplete="off" />
+            <p class="text-xs text-muted" style="margin:0; line-height:1.5">
+              K Manga now requires a reCAPTCHA v3 token when logging in fresh.
+              You only need this if the session expires. Steps: log in at
+              <a href="https://kmanga.kodansha.com" target="_blank" style="color:var(--accent)">kmanga.kodansha.com</a>
+              in your browser, open DevTools → Network, find the login POST request,
+              copy the <code>g-recaptcha-response</code> field value, paste it here,
+              save, then click Poll Now. The token is consumed once and cleared automatically.
+            </p>
+          </div>
           <div class="flex gap-2 mt-2">
             <button class="btn btn-primary btn-sm" @click="saveSettings()">💾 Save</button>
           </div>
@@ -1440,7 +1454,7 @@ function app() {
     notifications: [], unreadCount: 0,
 
     // Settings form
-    sf: { pushover_user_key:'', pushover_app_token:'', pushover_enabled:'false', push_chapter_updates:'true', push_news:'false', push_reading_only:'false', poll_interval_hours:'6', mangabaka_token:'', mu_enabled:'true', kmanga_email:'', kmanga_password:'' },
+    sf: { pushover_user_key:'', pushover_app_token:'', pushover_enabled:'false', push_chapter_updates:'true', push_news:'false', push_reading_only:'false', poll_interval_hours:'6', mangabaka_token:'', mu_enabled:'true', kmanga_email:'', kmanga_password:'', kmanga_recaptcha_token:'' },
 
     // Detail modal
     detailOpen: false, ds: null, ef: {}, detailReleases: [],

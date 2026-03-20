@@ -53,7 +53,6 @@ from .kmanga import (
     KMangaClient,
     KMangaError,
     KMangaRegionError,
-    parse_chapter_from_episode_name,
 )
 from .mangaplus import get_latest_chapter as mp_get_latest_chapter
 from .mangadex import MangaDexError, MangaDexNotFound, MangaDexRateLimited
@@ -593,18 +592,36 @@ def _poll_kmanga(db: Session, series_list: list[TrackedSeries]):
     except Exception:
         cookies = {}
 
-    client  = KMangaClient(email, password, cookies)
+    # reCAPTCHA v3 token (optional — manually provided via Settings when re-login is needed).
+    # K Manga's /web/user/login endpoint requires this token as of early 2026.
+    # The token is short-lived (~2 min); set it in Settings just before triggering a poll
+    # when the session has expired.  It is consumed once then cleared from Settings.
+    recaptcha_token = get_setting(db, "kmanga_recaptcha_token", "") or None
+
+    client    = KMangaClient(email, password, cookies)
     logged_in = False
 
     def _ensure_login():
-        nonlocal logged_in
+        nonlocal logged_in, recaptcha_token
         if not logged_in and not client.has_session():
             try:
-                updated = client.login()
+                updated = client.login(recaptcha_token=recaptcha_token)
                 set_setting(db, "kmanga_cookies", _json.dumps(updated))
+                # Consume token — it's single-use / short-lived
+                if recaptcha_token:
+                    set_setting(db, "kmanga_recaptcha_token", "")
+                    recaptcha_token = None
                 logged_in = True
             except KMangaRegionError as e:
                 logger.error(f"K Manga region block: {e}")
+                raise
+            except KMangaAuthError as e:
+                logger.error(
+                    f"K Manga login failed (code {e.code}): {e}. "
+                    f"If this is a reCAPTCHA error, go to Settings → K Manga reCAPTCHA Token, "
+                    f"log into kmanga.kodansha.com in your browser, copy the g-recaptcha-response "
+                    f"token from the login network request, paste it into the field, then re-poll."
+                )
                 raise
             except Exception as e:
                 logger.error(f"K Manga login failed: {e}")
@@ -619,27 +636,25 @@ def _poll_kmanga(db: Session, series_list: list[TrackedSeries]):
         try:
             title_data = client.get_title(int(series.simulpub_id))
 
-            # Resolve the episode ID that best represents the latest chapter.
-            # episode_id_list[-1] is the absolute newest episode (paid or free).
+            # Scan the last several episodes to find the highest canonical
+            # chapter number ("Chapter N" / "第N話").  This is more robust than
+            # blindly taking episode_id_list[-1] because K Manga sometimes
+            # appends campaign/teaser/anniversary episodes after the real latest
+            # chapter, and their names may carry misleading bare numbers.
             # IMPORTANT: total_episode_count is the count of web episodes, NOT
             # the chapter number — never use it as a chapter proxy.
-            ep_id = client.get_latest_episode_id(title_data)
+            chapter, ep_name = client.scan_latest_chapter(title_data)
 
-            chapter = None
-            if ep_id:
-                ep_name = client.get_episode_name(int(ep_id))
-                if ep_name:
-                    chapter = parse_chapter_from_episode_name(ep_name)
-                    if not chapter:
-                        logger.debug(
-                            f"K Manga: could not parse chapter from episode_name "
-                            f"{ep_name!r} for '{series.title}'"
-                        )
-                else:
-                    logger.debug(
-                        f"K Manga: get_episode_name returned None for "
-                        f"ep_id={ep_id} ('{series.title}')"
-                    )
+            if ep_name:
+                logger.debug(
+                    f"K Manga: '{series.title}' latest episode_name={ep_name!r}"
+                    f" → chapter={chapter!r}"
+                )
+            if not chapter and not ep_name:
+                logger.debug(
+                    f"K Manga: scan_latest_chapter returned nothing "
+                    f"for '{series.title}' (id={series.simulpub_id})"
+                )
 
             if not chapter:
                 logger.debug(f"K Manga: no chapter data for '{series.title}' (id={series.simulpub_id})")
