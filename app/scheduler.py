@@ -69,6 +69,43 @@ _JOB_ID = "poll_updates"
 ACTIVE_STATUSES = {"reading", "on_hold"}
 
 
+def _titles_plausibly_match(tracked_title: str, release_title: str) -> bool:
+    """
+    Quick sanity check that a release record plausibly belongs to a tracked series.
+
+    MU uses different title forms in different places (English vs Japanese,
+    abbreviations, subtitles) so this is intentionally lenient.  It only rejects
+    releases that are clearly from a different franchise.
+
+    Strategy:
+      1. Exact (case-insensitive) match → True.
+      2. One title is a substring of the other → True.
+      3. Split both into word-sets; if they share ≥40% of their words → True.
+      4. Otherwise → False.
+    """
+    a = tracked_title.lower().strip()
+    b = release_title.lower().strip()
+
+    if a == b:
+        return True
+    if a in b or b in a:
+        return True
+
+    # Word overlap — generous threshold to handle English/Japanese title differences
+    words_a = set(a.split())
+    words_b = set(b.split())
+    if not words_a or not words_b:
+        return True  # can't compare empty word sets → let it through
+
+    # Use the smaller word set as denominator so short titles don't get penalised
+    min_len = min(len(words_a), len(words_b))
+    overlap = len(words_a & words_b)
+    if overlap >= max(1, min_len * 0.4):
+        return True
+
+    return False
+
+
 # ── Public API ────────────────────────────────────────────────────────────────
 
 def start_scheduler(interval_hours: float = 6.0):
@@ -299,13 +336,15 @@ def _check_mu_series(
     candidates = []
 
     if new_releases_in_feed:
-        # Great — it's in today's feed
+        # Great — it's in today's feed (already matched by mu_series_id)
         for item in new_releases_in_feed:
             rec = item["record"]
             candidates.append(rec)
         logger.debug(f"'{series.title}' in today's feed: {len(candidates)} releases")
     else:
-        # Not in today's feed — query historical releases
+        # Not in today's feed — query historical releases.
+        # NOTE: search_releases uses search_type=series which filters by series_id
+        # on the server side.  We still validate results below as a safety net.
         try:
             resp = search_releases(series_id=series.mu_series_id, per_page=5)
             for r in resp.get("results", []):
@@ -314,6 +353,16 @@ def _check_mu_series(
             logger.debug(f"Historical release query failed for '{series.title}': {e}")
 
     for rec in candidates:
+        # Safety guard: if the release record contains a title that is wildly
+        # different from our tracked series, skip it.  This prevents cross-series
+        # contamination if the MU API ever returns unfiltered results.
+        release_title = (rec.get("title") or "").strip()
+        if release_title and not _titles_plausibly_match(series.title, release_title):
+            logger.warning(
+                f"Skipping release '{release_title}' ch={rec.get('chapter')!r} — "
+                f"does not match tracked series '{series.title}'"
+            )
+            continue
         _process_release(db, series, rec)
 
     series.last_checked = datetime.utcnow()

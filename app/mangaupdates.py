@@ -74,12 +74,22 @@ def search_releases(
     series_id: int | None = None,
     per_page: int = 10,
 ) -> dict[str, Any]:
-    """Search releases by title and/or series_id filter."""
+    """
+    Search releases by title text and/or series_id filter.
+
+    IMPORTANT: The MU ``/releases/search`` endpoint silently ignores a bare
+    ``series_id`` field in the POST body — it returns ALL global releases
+    unfiltered.  To filter by series you MUST use ``search_type: "series"``
+    with ``search: str(series_id)`` instead.  This is the API-documented
+    method and is what we now use here.
+    """
     body: dict = {"perpage": per_page}
-    if title:
-        body["search"] = title
     if series_id:
-        body["series_id"] = series_id
+        # Correct way to filter releases by series — use search_type + search
+        body["search_type"] = "series"
+        body["search"] = str(series_id)
+    elif title:
+        body["search"] = title
     return _post("/releases/search", body)
 
 

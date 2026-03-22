@@ -7,7 +7,7 @@ app and documented by open-source projects like Tachiyomi/Mihon.
 This client ONLY reads chapter metadata to check for new releases.
 It does not fetch page images or require account credentials.
 
-API base:  https://jumpg-api.tokyo-cdn.com/api
+API base:  https://jumpg-webapi.tokyo-cdn.com/api
 Protocol:  HTTPS, responses are gzip-compressed protobuf binaries.
 Auth:      No account required for series metadata.  Requests mimic the
            Android app via User-Agent + Referer headers.
@@ -45,7 +45,7 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-_API_BASE = "https://jumpg-api.tokyo-cdn.com/api"
+_API_BASE = "https://jumpg-webapi.tokyo-cdn.com/api"
 _WEB_BASE = "https://mangaplus.shueisha.co.jp"
 
 _HEADERS = {
@@ -144,10 +144,11 @@ def _collect_chapter_names(obj: Any) -> list[str]:
     """
     Recursively walk a decoded blackboxprotobuf dict tree and collect any
     string values that match a chapter-name pattern:
-      "Ch. 68"  |  "Ch.68"  |  "#68"  |  "68"  |  "Chapter 68"  |  "68.5"
+      "Ch. 68"  |  "Ch.68"  |  "#68"  |  "Chapter 68"  |  "#68.5"
 
-    Integers and large numeric IDs are naturally excluded by the regex —
-    they're encoded as ints in protobuf, not strings.
+    A prefix (``#``, ``Ch.``, ``Chapter``) is **required** to avoid matching
+    bare-number metadata fields (e.g. group-level episode counts that the
+    MangaPlus API includes as string values at ``ChapterListGroup.1``).
     """
     results: list[str] = []
     if isinstance(obj, dict):
@@ -159,9 +160,10 @@ def _collect_chapter_names(obj: Any) -> list[str]:
     elif isinstance(obj, (str, bytes)):
         s = obj.decode("utf-8", errors="ignore") if isinstance(obj, bytes) else obj
         s = s.strip()
-        # fullmatch: optional word prefix, then 1-4 digit number with optional decimal
+        # fullmatch: REQUIRED prefix + 1-4 digit number with optional decimal.
+        # Prefix is mandatory to filter out bare-number metadata fields.
         if re.fullmatch(
-            r"(?:Ch\.?\s*|Chapter\s*|#)?(\d{1,4}(?:\.\d{1,2})?)",
+            r"(?:Ch\.?\s*|Chapter\s*|#)(\d{1,4}(?:\.\d{1,2})?)",
             s,
             re.IGNORECASE,
         ):
