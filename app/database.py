@@ -104,6 +104,16 @@ class TrackedSeries(Base):
             pass
         return False
 
+    @staticmethod
+    def _safe_json(raw: str | None, default=None):
+        """Parse a JSON string, returning *default* if parsing fails."""
+        if not raw:
+            return default if default is not None else []
+        try:
+            return json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            return default if default is not None else []
+
     def to_dict(self):
         return {
             "id": self.id,
@@ -116,10 +126,10 @@ class TrackedSeries(Base):
             "status": self.status,
             "series_type": self.series_type,
             "year": self.year,
-            "genres": json.loads(self.genres) if self.genres else [],
-            "categories": json.loads(self.categories) if self.categories else [],
-            "authors": json.loads(self.authors) if self.authors else [],
-            "publishers": json.loads(self.publishers) if self.publishers else [],
+            "genres": self._safe_json(self.genres),
+            "categories": self._safe_json(self.categories),
+            "authors": self._safe_json(self.authors),
+            "publishers": self._safe_json(self.publishers),
             "rating": self.rating,
             "mu_rating": self.mu_rating,
             "mu_rating_votes": self.mu_rating_votes,
@@ -130,7 +140,7 @@ class TrackedSeries(Base):
             "latest_release_group": self.latest_release_group,
             "simulpub_source": self.simulpub_source or "",
             "simulpub_id": self.simulpub_id or "",
-            "mb_provider_ids": json.loads(self.mb_provider_ids) if self.mb_provider_ids else {},
+            "mb_provider_ids": self._safe_json(self.mb_provider_ids, default={}),
             "current_chapter": self.current_chapter,
             "reading_status": self.reading_status,
             "notes": self.notes,
@@ -149,11 +159,15 @@ class Notification(Base):
     series_title = Column(String, nullable=True)
     message = Column(Text, nullable=False)
     notif_type = Column(String, default="chapter_update")  # chapter_update | news | system
-    is_read = Column(Boolean, default=False)
+    is_read = Column(Boolean, default=False, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     meta = Column(Text, nullable=True)  # JSON: url, chapter, group, cover_url, etc.
 
     def to_dict(self):
+        try:
+            meta = json.loads(self.meta) if self.meta else {}
+        except (json.JSONDecodeError, TypeError):
+            meta = {}
         return {
             "id": self.id,
             "series_id": self.series_id,
@@ -162,7 +176,7 @@ class Notification(Base):
             "notif_type": self.notif_type,
             "is_read": self.is_read,
             "created_at": self.created_at.isoformat() if self.created_at else None,
-            "meta": json.loads(self.meta) if self.meta else {},
+            "meta": meta,
         }
 
 
@@ -179,7 +193,7 @@ class Release(Base):
     series_title = Column(String, nullable=True)
     chapter = Column(String, nullable=True)
     volume = Column(String, nullable=True)
-    release_date = Column(String, nullable=True)                 # "2026-03-19"
+    release_date = Column(String, nullable=True, index=True)      # "2026-03-19"
     group_name = Column(String, nullable=True)
     mu_release_id = Column(Integer, nullable=True, unique=True)  # MU's own release ID
     cover_url = Column(String, nullable=True)
@@ -254,6 +268,13 @@ def _migrate_db():
         ("tracked_series", "mb_provider_ids",    "TEXT"),
     ]
 
+    # Indexes to ensure on hot query columns (idempotent — CREATE IF NOT EXISTS)
+    indexes = [
+        ("idx_notifications_is_read", "notifications", "is_read"),
+        ("idx_releases_release_date", "releases", "release_date"),
+        ("idx_releases_series_chapter_group", "releases", "series_id, chapter, group_name"),
+    ]
+
     with engine.connect() as conn:
         for table, col, col_type in migrations:
             rows = conn.execute(text(f"PRAGMA table_info({table})")).fetchall()
@@ -261,6 +282,12 @@ def _migrate_db():
             if col not in existing:
                 conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}"))
                 _log.info(f"DB migration: added {table}.{col}")
+
+        for idx_name, table, columns in indexes:
+            conn.execute(text(
+                f"CREATE INDEX IF NOT EXISTS {idx_name} ON {table} ({columns})"
+            ))
+
         conn.commit()
 
 

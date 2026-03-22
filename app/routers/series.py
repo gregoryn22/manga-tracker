@@ -4,8 +4,8 @@ MU enrichment runs automatically when a series is added.
 """
 import json
 import logging
+import re
 from datetime import datetime
-from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel
@@ -24,6 +24,30 @@ from ..mangaupdates import (
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/series", tags=["series"])
+
+# MangaDex UUIDs look like: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+_UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE)
+
+_SIMULPUB_ID_VALIDATORS: dict[str, tuple[str, callable]] = {
+    "mangaplus": ("an integer (MangaPlus title ID)", lambda v: v.isdigit()),
+    "kmanga":    ("an integer (K Manga title ID)",    lambda v: v.isdigit()),
+    "mangaup":   ("an integer (MangaUp manga ID)",    lambda v: v.isdigit()),
+    "mangadex":  ("a UUID (MangaDex manga ID)",       lambda v: bool(_UUID_RE.match(v))),
+}
+
+
+def _validate_simulpub_id(source: str | None, sid: str | None):
+    """Raise HTTPException if simulpub_id format is wrong for the source."""
+    if not source or not sid or source in ("custom", ""):
+        return
+    validator = _SIMULPUB_ID_VALIDATORS.get(source)
+    if validator:
+        desc, check = validator
+        if not check(sid.strip()):
+            raise HTTPException(
+                status_code=422,
+                detail=f"simulpub_id for '{source}' must be {desc}, got: {sid!r}",
+            )
 
 
 def get_mb_client(db: Session = Depends(get_db)) -> MangaBakaClient:
@@ -249,6 +273,9 @@ def update_series(series_id: int, req: UpdateSeriesRequest, db: Session = Depend
     if req.simulpub_source is not None:
         series.simulpub_source = req.simulpub_source or None
     if req.simulpub_id is not None:
+        # Validate the ID format matches the source platform
+        effective_source = req.simulpub_source if req.simulpub_source is not None else series.simulpub_source
+        _validate_simulpub_id(effective_source, req.simulpub_id)
         series.simulpub_id = req.simulpub_id or None
     # Only allow direct mu_latest_chapter edits for custom-source series to avoid
     # accidentally overwriting data from an automated source.
@@ -264,9 +291,16 @@ def update_series(series_id: int, req: UpdateSeriesRequest, db: Session = Depend
 
 @router.delete("/{series_id}")
 def remove_series(series_id: int, db: Session = Depends(get_db)):
+    from ..database import Notification, Release
+
     series = db.query(TrackedSeries).filter(TrackedSeries.id == series_id).first()
     if not series:
         raise HTTPException(status_code=404, detail="Series not tracked")
+
+    # Clean up related records to avoid orphans
+    db.query(Release).filter(Release.series_id == series_id).delete()
+    db.query(Notification).filter(Notification.series_id == series_id).delete()
+
     db.delete(series)
     db.commit()
     return {"success": True}

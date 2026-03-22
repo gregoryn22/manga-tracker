@@ -51,7 +51,7 @@ Session management:
 import hashlib
 import json
 import logging
-import re
+
 
 import httpx
 
@@ -481,87 +481,26 @@ class KMangaClient:
 
 def _parse_chapter_canonical(episode_name: str) -> str | None:
     """
-    Strict canonical chapter extraction — only matches unambiguous patterns.
+    Strict canonical chapter extraction — delegates to shared chapter_utils.
 
-    Accepts:
-      • "Chapter N" / "CHAPTER N" / "Ch. N" / "CH. N" / "Chap. N" (case-insensitive)
-      • "第N話" / "第N回" (Japanese)
+    Only matches unambiguous patterns (Chapter/Ch./Chap./#/第N話). Rejects
+    bare numbers.  Used by scan_latest_chapter() when we need high confidence.
 
-    Deliberately rejects bare numbers and any other heuristic matches.
-    Used by scan_latest_chapter() when we need high confidence that the number
-    really is the chapter number, not a volume number or campaign counter.
-
-    K Manga's /web/episode endpoint returns episode names in ALL-CAPS:
-      "CHAPTER 68 HUNTING BUGS WITH A FEMALE KNIGHT"
-    so case-insensitive matching is required here.
-
-    Returns the chapter number as a string ("68", "1.5"), or None.
+    K Manga's /web/episode endpoint returns episode names in ALL-CAPS
+    (e.g. "CHAPTER 68 HUNTING BUGS WITH A FEMALE KNIGHT"), which the shared
+    regex handles via re.IGNORECASE.
     """
-    if not episode_name:
-        return None
-
-    def _fmt(m: re.Match) -> str:
-        val = float(m.group(1))
-        return str(int(val)) if val == int(val) else str(val)
-
-    # English "Chapter" / "Ch." / "Chap." prefix — case-insensitive
-    m = re.search(r'[Cc][Hh](?:[Aa][Pp][Tt][Ee][Rr]|[Aa][Pp]\.?|\.?)\s*(\d+(?:\.\d+)?)', episode_name)
-    if m:
-        return _fmt(m)
-
-    # Japanese 第N話 / 第N回
-    m = re.search(r'第\s*(\d+(?:\.\d+)?)\s*[話回]', episode_name)
-    if m:
-        return _fmt(m)
-
-    return None
+    from .chapter_utils import parse_chapter_strict
+    return parse_chapter_strict(episode_name) if episode_name else None
 
 
 def parse_chapter_from_episode_name(episode_name: str) -> str | None:
     """
     Extract a chapter number from a K Manga episode name string.
 
-    Tries patterns in priority order so that episode-counter numbers
-    embedded in series titles (e.g. "Season 2 Chapter 3") don't shadow
-    the real chapter number:
-
-      1. "Chapter N" / "chapter N" / "Chap. N" / "Ch. N" / "Ch N"
-         → e.g.  "Chapter 68 My Title Here"      → "68"
-                 "Ch. 1.5 Side Story"              → "1.5"
-      2. Japanese "第N話" or "第N回"
-         → e.g.  "第68話"                         → "68"
-      3. Generic first number in the string (last resort, may be wrong
-         for titles with numbers in the subtitle)
-         → e.g.  "68"                             → "68"
-
-    Returns the chapter number as a string ("68", "1.5"), or None if
-    nothing parseable is found.
+    Tries strict canonical patterns first (Chapter/Ch./#/第N話), then
+    falls back to the first number in the string as a last resort.
+    Delegates to shared chapter_utils to keep regexes in sync across providers.
     """
-    if not episode_name:
-        return None
-
-    def _fmt(m: re.Match) -> str:
-        val = float(m.group(1))
-        return str(int(val)) if val == int(val) else str(val)
-
-    # Priority 1 — English "Chapter" / "Ch." prefix (case-insensitive for K Manga's ALL-CAPS)
-    m = re.search(r'[Cc][Hh](?:[Aa][Pp][Tt][Ee][Rr]|[Aa][Pp]\.?|\.?)\s*(\d+(?:\.\d+)?)', episode_name)
-    if m:
-        return _fmt(m)
-
-    # Priority 2 — Japanese 第N話 / 第N回
-    m = re.search(r'第\s*(\d+(?:\.\d+)?)\s*[話回]', episode_name)
-    if m:
-        return _fmt(m)
-
-    # Priority 3 — any leading bare number (e.g. "68 - Title Here")
-    m = re.match(r'(\d+(?:\.\d+)?)\s*[-–—\s]', episode_name)
-    if m:
-        return _fmt(m)
-
-    # Last resort — first number anywhere in the string
-    m = re.search(r'(\d+(?:\.\d+)?)', episode_name)
-    if m:
-        return _fmt(m)
-
-    return None
+    from .chapter_utils import parse_chapter_loose
+    return parse_chapter_loose(episode_name) if episode_name else None
