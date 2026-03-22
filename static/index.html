@@ -237,6 +237,32 @@
     .progress-bar { height: 100%; background: var(--accent); border-radius: 1px; max-width: 100%; transition: width 0.3s; }
     .progress-bar.green { background: var(--green); }
 
+    /* ── Inline chapter controls on cards ──────────────── */
+    .card-chapter-controls {
+      display: flex; align-items: center; gap: 4px; margin-top: 6px;
+      font-size: 0.65rem;
+    }
+    .card-chapter-controls .ch-read-input {
+      width: 46px; padding: 2px 4px; font-size: 0.65rem;
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 3px; color: var(--text); text-align: center;
+      outline: none; -moz-appearance: textfield;
+    }
+    .card-chapter-controls .ch-read-input::-webkit-outer-spin-button,
+    .card-chapter-controls .ch-read-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+    .card-chapter-controls .ch-read-input:focus { border-color: var(--accent); }
+    .card-chapter-controls .ch-btn {
+      padding: 2px 5px; font-size: 0.6rem; font-weight: 600;
+      border: 1px solid var(--border); border-radius: 3px;
+      background: var(--surface2); color: var(--text-muted);
+      cursor: pointer; white-space: nowrap; line-height: 1.2;
+      transition: background 0.15s, border-color 0.15s, color 0.15s;
+    }
+    .card-chapter-controls .ch-btn:hover { background: var(--surface3); border-color: var(--accent); color: var(--text); }
+    .card-chapter-controls .ch-btn.catch-up { color: var(--green); border-color: var(--green); }
+    .card-chapter-controls .ch-btn.catch-up:hover { background: var(--green); color: #fff; }
+    .card-chapter-controls .ch-label { color: var(--text-muted); }
+
     /* ── Today's drops feed ────────────────────────────── */
     .drops-section { margin-bottom: 28px; }
     .section-header {
@@ -668,6 +694,19 @@
                 <!-- Progress bar -->
                 <div class="progress-wrap" x-show="s.latest_chapter && s.current_chapter">
                   <div class="progress-bar" :class="{'green': s.has_update}" :style="`width: ${chapterProgress(s)}%`"></div>
+                </div>
+
+                <!-- Inline chapter controls -->
+                <div class="card-chapter-controls" @click.stop x-show="s.latest_chapter">
+                  <span class="ch-label">Read:</span>
+                  <input class="ch-read-input" type="number" min="0" step="1"
+                         :value="s.current_chapter || '0'"
+                         @keydown.enter="quickSetChapter(s, $event.target.value); $event.target.blur()"
+                         @blur="quickSetChapter(s, $event.target.value)"
+                         @focus="$event.target.select()" />
+                  <button class="ch-btn catch-up" x-show="s.has_update"
+                          @click="markCaughtUp(s)"
+                          title="Mark as caught up">✓ Catch up</button>
                 </div>
               </div>
             </div>
@@ -1520,6 +1559,32 @@ function app() {
         if (!isNaN(latest) && !isNaN(current)) return Math.max(0, Math.floor(latest - current));
       } catch {}
       return '?';
+    },
+
+    // ── Inline chapter controls ──────────────────────────
+    async quickSetChapter(s, value) {
+      const val = String(value).trim();
+      if (val === (s.current_chapter || '0')) return; // no change
+      if (val === '' || isNaN(parseFloat(val)) || parseFloat(val) < 0) return; // invalid
+      try {
+        await this.api(`/api/series/${s.id}`, 'PATCH', { current_chapter: val });
+        // Update local state so the card re-renders immediately
+        const idx = this.library.findIndex(x => x.id === s.id);
+        if (idx !== -1) {
+          this.library[idx].current_chapter = val;
+          const latest = parseFloat(this.library[idx].latest_chapter || 0);
+          const current = parseFloat(val);
+          this.library[idx].has_update = latest > 0 && current < latest;
+        }
+        this.toast(`${s.title} → Ch. ${val} read`, 'success');
+      } catch(e) {
+        this.toast('Failed to update chapter', 'error');
+      }
+    },
+
+    async markCaughtUp(s) {
+      if (!s.latest_chapter) return;
+      await this.quickSetChapter(s, s.latest_chapter);
     },
 
     formatVotes(n) {
