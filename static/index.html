@@ -489,6 +489,43 @@
     .p-mdx { background: rgba(240,60,40,0.2);   color: #f05a46; }
     .p-custom { background: rgba(150,150,150,0.2); color: var(--text-muted); }
 
+    /* ── List view ─────────────────────────────────────── */
+    .series-list { display: flex; flex-direction: column; gap: 0; }
+    .series-list-item {
+      display: flex; align-items: center; gap: 14px;
+      padding: 10px 14px; border-bottom: 1px solid var(--border);
+      cursor: pointer; transition: background 0.1s;
+    }
+    .series-list-item:last-child { border-bottom: none; }
+    .series-list-item:hover { background: var(--surface2); }
+    .series-list-item.has-update { border-left: 3px solid var(--green); }
+    .series-list-item.selected { background: var(--accent-dim); }
+    .list-cover { width: 40px; height: 56px; object-fit: cover; border-radius: 5px; background: var(--surface2); flex-shrink: 0; }
+    .list-cover-ph { width: 40px; height: 56px; border-radius: 5px; background: var(--surface2); display: flex; align-items: center; justify-content: center; font-size: 1.3rem; flex-shrink: 0; }
+    .list-info { flex: 1; min-width: 0; }
+    .list-title { font-size: 0.88rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .list-sub { font-size: 0.75rem; color: var(--text-muted); display: flex; gap: 10px; align-items: center; margin-top: 2px; flex-wrap: wrap; }
+    .list-chapter { font-size: 0.78rem; color: var(--green); font-weight: 600; white-space: nowrap; }
+    .list-progress { width: 80px; flex-shrink: 0; }
+    .list-controls { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+    .list-controls .ch-read-input { width: 50px; padding: 3px 5px; font-size: 0.72rem; }
+    .list-status-chip {
+      font-size: 0.62rem; font-weight: 700; padding: 2px 6px;
+      border-radius: 4px; text-transform: uppercase; white-space: nowrap;
+    }
+    .list-rating { font-size: 0.75rem; color: var(--yellow); white-space: nowrap; }
+
+    /* ── View toggle buttons ──────────────────────────── */
+    .view-toggle { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+    .view-toggle button {
+      padding: 5px 10px; background: transparent; border: none;
+      color: var(--text-muted); cursor: pointer; font-size: 0.85rem;
+      transition: background 0.1s, color 0.1s;
+    }
+    .view-toggle button:not(:last-child) { border-right: 1px solid var(--border); }
+    .view-toggle button.active { background: var(--accent); color: white; }
+    .view-toggle button:hover:not(.active) { background: var(--surface2); color: var(--text); }
+
     /* ── Skeleton loading ────────────────────────────── */
     @keyframes shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
     .skeleton {
@@ -749,6 +786,10 @@
               <option :value="a" x-text="a"></option>
             </template>
           </select>
+          <div class="view-toggle">
+            <button :class="{active: viewMode==='grid'}" @click="viewMode='grid'" title="Grid view">▦</button>
+            <button :class="{active: viewMode==='list'}" @click="viewMode='list'" title="List view">☰</button>
+          </div>
           <button class="btn btn-ghost btn-sm" @click="bulkMode=!bulkMode; bulkSelected=[]"
                   :class="{'btn-primary': bulkMode}">
             <span x-text="bulkMode ? '✕ Cancel' : '☑ Bulk'"></span>
@@ -793,8 +834,8 @@
           <button x-show="library.length === 0" class="btn btn-primary" @click="page='search'">🔍 Search Manga</button>
         </div>
 
-        <!-- Grid -->
-        <div class="series-grid" x-show="!loading && filteredLibrary().length > 0">
+        <!-- Grid view -->
+        <div class="series-grid" x-show="!loading && filteredLibrary().length > 0 && viewMode==='grid'">
           <template x-for="s in filteredLibrary()" :key="s.id">
             <div class="series-card" :class="{'has-update': s.has_update, 'selected': bulkSelected.includes(s.id)}"
                  @click="bulkMode ? toggleBulk(s.id) : openDetail(s)">
@@ -867,6 +908,79 @@
                           @click="markCaughtUp(s)"
                           title="Mark as caught up">✓ Catch up</button>
                 </div>
+              </div>
+            </div>
+          </template>
+        </div>
+
+        <!-- List view -->
+        <div class="card series-list" x-show="!loading && filteredLibrary().length > 0 && viewMode==='list'" style="padding:0">
+          <template x-for="s in filteredLibrary()" :key="s.id">
+            <div class="series-list-item" :class="{'has-update': s.has_update, 'selected': bulkSelected.includes(s.id)}"
+                 @click="bulkMode ? toggleBulk(s.id) : openDetail(s)">
+
+              <!-- Bulk checkbox -->
+              <input type="checkbox" x-show="bulkMode" style="flex-shrink:0;accent-color:var(--accent)"
+                     :checked="bulkSelected.includes(s.id)"
+                     @click.stop="toggleBulk(s.id)" />
+
+              <!-- Cover thumbnail -->
+              <template x-if="s.cover_url">
+                <img class="list-cover" :src="s.cover_url" :alt="s.title" loading="lazy" />
+              </template>
+              <template x-if="!s.cover_url">
+                <div class="list-cover-ph">📖</div>
+              </template>
+
+              <!-- Info -->
+              <div class="list-info">
+                <div class="list-title" x-text="s.title"></div>
+                <div class="list-sub">
+                  <span class="list-status-chip"
+                        :class="{
+                          'chip-new': s.has_update,
+                          'chip-plan': !s.has_update && s.reading_status==='plan_to_read',
+                          'chip-hold': !s.has_update && s.reading_status==='on_hold',
+                          'chip-dropped': !s.has_update && s.reading_status==='dropped',
+                          'chip-done': !s.has_update && s.reading_status==='completed',
+                          'chip-considering': !s.has_update && s.reading_status==='considering',
+                        }"
+                        x-text="s.has_update ? 'NEW' : (s.reading_status||'').replace('_',' ')"></span>
+                  <span x-text="(s.series_type || 'manga')" style="text-transform:capitalize"></span>
+                  <span x-show="s.year" x-text="s.year"></span>
+                  <span class="list-rating" x-show="s.mu_rating">★ <span x-text="s.mu_rating ? s.mu_rating.toFixed(1) : ''"></span></span>
+                  <span x-show="s.mu_series_id" style="font-size:0.65rem;color:var(--accent);font-weight:600">
+                    MU <span class="poll-health" :class="pollHealthClass(s)"></span>
+                  </span>
+                  <span class="chip-idle list-status-chip" x-show="isIdle(s) && sf.idle_detection_enabled==='true'">💤 idle</span>
+                </div>
+              </div>
+
+              <!-- Chapter info -->
+              <div style="text-align:right;flex-shrink:0;min-width:90px">
+                <div class="list-chapter" x-show="s.latest_chapter" x-text="'Ch. ' + s.latest_chapter"></div>
+                <div class="text-xs text-muted" x-show="s.latest_chapter && s.current_chapter"
+                     x-text="s.current_chapter + ' / ' + s.latest_chapter + ' read'"></div>
+              </div>
+
+              <!-- Progress -->
+              <div class="list-progress" x-show="s.latest_chapter && s.current_chapter">
+                <div class="progress-wrap">
+                  <div class="progress-bar" :class="{'green': s.has_update}" :style="`width: ${chapterProgress(s)}%`"></div>
+                </div>
+              </div>
+
+              <!-- Inline controls -->
+              <div class="list-controls" @click.stop x-show="s.latest_chapter">
+                <input class="ch-read-input" type="number" min="0" step="1"
+                       :value="s.current_chapter || '0'"
+                       @keydown.enter="quickSetChapter(s, $event.target.value); $event.target.blur()"
+                       @blur="quickSetChapter(s, $event.target.value)"
+                       @focus="$event.target.select()"
+                       style="width:50px;padding:3px 5px;font-size:0.72rem;background:var(--surface2);border:1px solid var(--border);border-radius:3px;color:var(--text);text-align:center;outline:none" />
+                <button class="ch-btn catch-up" x-show="s.has_update"
+                        @click="markCaughtUp(s)"
+                        title="Mark as caught up" style="font-size:0.65rem">✓</button>
               </div>
             </div>
           </template>
@@ -1771,6 +1885,7 @@ function app() {
     loading: false,
     library: [],
     filters: ['all'],  // multi-select: ['all'], ['reading','on_hold'], ['updates','reading'], etc.
+    viewMode: 'grid',  // 'grid' or 'list'
 
     // Library toolbar
     librarySearch: '',
