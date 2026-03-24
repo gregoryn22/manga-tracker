@@ -113,7 +113,11 @@ def system_status(db: Session = Depends(get_db)):
         if not email or not password:
             warnings.append({
                 "source": "K Manga",
-                "message": f"{km_series} series use K Manga but credentials are not configured.",
+                "message": (
+                    f"{km_series} series use K Manga. Chapter tracking works without credentials, "
+                    "but login credentials enable fallback access to paywalled titles."
+                ),
+                "level": "info",
             })
 
     token = get_setting(db, "mangabaka_token", "")

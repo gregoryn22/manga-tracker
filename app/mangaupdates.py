@@ -132,17 +132,32 @@ def extract_mu_cover(image_data: dict | None) -> str | None:
 
 def normalize_chapter(chapter_str: str | None) -> float | None:
     """
-    Parse a chapter string like '121', '12.5', '1-3' into a comparable float.
-    For ranges, takes the last value.
+    Parse a chapter string into a comparable float, taking the highest number.
+
+    Handles MangaUpdates formats including:
+      '121'           → 121.0
+      '12.5'          → 12.5
+      '23-24'         → 24.0   (simple range)
+      'c23-c24'       → 24.0   (prefixed range)
+      'Ch. 23 - Ch. 24' → 24.0 (verbose range)
+      'v3 c23'        → 23.0   (volume + chapter)
+      'vol.3 ch.23-24' → 24.0  (volume + chapter range)
+
+    Strategy: extract ALL numbers from the string, return the highest.
+    This is safe because for chapter tracking we always want the latest
+    (highest) chapter number regardless of how the range is formatted.
     """
     if not chapter_str:
         return None
-    try:
-        # Handle ranges like "12-14" or "12.5"
-        parts = str(chapter_str).replace(" ", "").split("-")
-        return float(parts[-1])
-    except (ValueError, IndexError):
+    import re
+    # Find all decimal numbers in the string (e.g. 12, 12.5, 3)
+    numbers = re.findall(r"\d+(?:\.\d+)?", str(chapter_str))
+    if not numbers:
         return None
+    # Return the max — for "v3 c23-24" this gives 24.0 not 3.0
+    # Volume numbers are typically small (1-30) while chapter numbers
+    # are larger, so max() naturally picks the chapter number.
+    return max(float(n) for n in numbers)
 
 
 def chapter_is_newer(new_ch: str | None, known_ch: str | None) -> bool:
