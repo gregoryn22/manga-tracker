@@ -669,9 +669,7 @@ def _poll_kmanga(db: Session, series_list: list[TrackedSeries]):
 
     email    = get_setting(db, "kmanga_email", "")
     password = get_setting(db, "kmanga_password", "")
-    if not email or not password:
-        logger.warning("K Manga: credentials not configured — set kmanga_email/kmanga_password in Settings")
-        return
+    has_creds = bool(email and password)
 
     cookies_raw = get_setting(db, "kmanga_cookies", "")
     try:
@@ -685,11 +683,15 @@ def _poll_kmanga(db: Session, series_list: list[TrackedSeries]):
     # when the session has expired.  It is consumed once then cleared from Settings.
     recaptcha_token = get_setting(db, "kmanga_recaptcha_token", "") or None
 
-    client    = KMangaClient(email, password, cookies)
+    client    = KMangaClient(email or "", password or "", cookies)
     logged_in = False
 
     def _ensure_login():
+        """Attempt login only if credentials are configured."""
         nonlocal logged_in, recaptcha_token
+        if not has_creds:
+            logger.debug("K Manga: no credentials configured — using no-auth /web endpoints only")
+            return
         if not logged_in and not client.has_session():
             try:
                 updated = client.login(recaptcha_token=recaptcha_token)
@@ -717,7 +719,8 @@ def _poll_kmanga(db: Session, series_list: list[TrackedSeries]):
     try:
         _ensure_login()
     except Exception:
-        return  # Can't proceed without auth
+        # Auth failed, but primary /web/title/detail doesn't need auth — continue anyway
+        logger.warning("K Manga: login failed but continuing with no-auth /web endpoints")
 
     for series in series_list:
         try:

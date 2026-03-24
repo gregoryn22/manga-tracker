@@ -392,6 +392,9 @@ def update_series(series_id: int, req: UpdateSeriesRequest, db: Session = Depend
         series.reading_status = req.reading_status
     if req.notes is not None:
         series.notes = req.notes
+    # ── Simulpub source change — reset stale polling state ──────────────────
+    old_source = series.simulpub_source
+    old_sim_id = series.simulpub_id
     if req.simulpub_source is not None:
         series.simulpub_source = req.simulpub_source or None
     if req.simulpub_id is not None:
@@ -399,6 +402,27 @@ def update_series(series_id: int, req: UpdateSeriesRequest, db: Session = Depend
         effective_source = req.simulpub_source if req.simulpub_source is not None else series.simulpub_source
         _validate_simulpub_id(effective_source, req.simulpub_id)
         series.simulpub_id = req.simulpub_id or None
+
+    source_changed = (
+        (req.simulpub_source is not None and req.simulpub_source != (old_source or ""))
+        or (req.simulpub_id is not None and req.simulpub_id != (old_sim_id or ""))
+    )
+    if source_changed:
+        # Reset poll health — old errors/successes don't apply to the new source
+        series.poll_failures = 0
+        series.last_poll_error = None
+        series.last_poll_success = None
+        # Reset source-specific release metadata so the new source isn't blocked
+        # by stale chapter numbers from the old source
+        series.latest_release_group = None
+        # Log the source change in the activity log
+        detail = f"Simulpub source changed: {old_source or 'none'}({old_sim_id or '?'}) → {series.simulpub_source or 'none'}({series.simulpub_id or '?'})"
+        db.add(ReadingLog(
+            series_id=series.id, series_title=series.title,
+            old_chapter=None, new_chapter=None,
+            action="source_change", detail=detail, created_at=datetime.utcnow(),
+        ))
+
     # Only allow direct mu_latest_chapter edits for custom-source series to avoid
     # accidentally overwriting data from an automated source.
     if req.mu_latest_chapter is not None:
