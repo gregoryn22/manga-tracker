@@ -81,6 +81,43 @@ def update_settings(req: UpdateSettingsRequest, db: Session = Depends(get_db)):
     return {"success": True}
 
 
+@router.get("/status")
+def system_status(db: Session = Depends(get_db)):
+    """Return system health warnings for display in the settings page."""
+    warnings = []
+
+    from ..mangaplus import available as mp_available
+    if not mp_available():
+        warnings.append({
+            "source": "MangaPlus",
+            "message": (
+                "blackboxprotobuf is not installed — MangaPlus chapter tracking is disabled. "
+                "Install it with: pip install blackboxprotobuf"
+            ),
+        })
+
+    # Check if any simulpub series are configured but missing credentials
+    from ..database import TrackedSeries
+    km_series = db.query(TrackedSeries).filter(TrackedSeries.simulpub_source == "kmanga").count()
+    if km_series > 0:
+        email = get_setting(db, "kmanga_email", "")
+        password = get_setting(db, "kmanga_password", "")
+        if not email or not password:
+            warnings.append({
+                "source": "K Manga",
+                "message": f"{km_series} series use K Manga but credentials are not configured.",
+            })
+
+    token = get_setting(db, "mangabaka_token", "")
+    if not token:
+        warnings.append({
+            "source": "MangaBaka",
+            "message": "API token not configured — series search and add will not work.",
+        })
+
+    return {"warnings": warnings}
+
+
 @router.post("/test-pushover")
 def test_pushover(db: Session = Depends(get_db)):
     """Send a test Pushover notification."""

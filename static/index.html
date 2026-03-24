@@ -901,6 +901,19 @@
       <!-- ══ SETTINGS ══════════════════════════════════════ -->
       <div x-show="page==='settings'">
 
+        <!-- ── System warnings ───────────────────────────────── -->
+        <template x-if="systemWarnings.length > 0">
+          <div class="card" style="padding:16px 20px;margin-bottom:16px;border-color:var(--yellow,#f59e0b)">
+            <div style="font-size:0.85rem;font-weight:600;margin-bottom:8px">⚠️ System Warnings</div>
+            <template x-for="w in systemWarnings" :key="w.message">
+              <div style="font-size:0.78rem;color:var(--text-muted);padding:4px 0;border-top:1px solid var(--border)">
+                <strong x-text="w.source" style="color:var(--yellow,#f59e0b)"></strong>:
+                <span x-text="w.message"></span>
+              </div>
+            </template>
+          </div>
+        </template>
+
         <!-- ── Notification Behaviour ───────────────────────── -->
         <div class="card" style="padding:20px 24px;margin-bottom:16px">
           <div class="settings-block-title">🔔 Notification Behaviour</div>
@@ -1507,6 +1520,9 @@ function app() {
     // Polling
     polling: false,
 
+    // System warnings
+    systemWarnings: [],
+
     // Toasts
     toasts: [], _tid: 0,
 
@@ -1789,6 +1805,9 @@ function app() {
     async loadSettings() {
       try { const d = await this.api('/api/settings'); this.sf = {...this.sf,...d}; }
       catch(e) { this.toast('Failed to load settings','error'); }
+      // Load system warnings (non-blocking)
+      try { const s = await this.api('/api/settings/status'); this.systemWarnings = s.warnings || []; }
+      catch(e) {}
     },
 
     async saveSettings() {

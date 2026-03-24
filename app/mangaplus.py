@@ -32,10 +32,11 @@ strings matching chapter-number patterns and returns the maximum found.
 This makes the parser resilient to minor schema changes.
 """
 import logging
-import re
 from typing import Any
 
 import httpx
+
+from .chapter_utils import CHAPTER_CANONICAL_RE
 
 try:
     import blackboxprotobuf
@@ -149,6 +150,8 @@ def _collect_chapter_names(obj: Any) -> list[str]:
     A prefix (``#``, ``Ch.``, ``Chapter``) is **required** to avoid matching
     bare-number metadata fields (e.g. group-level episode counts that the
     MangaPlus API includes as string values at ``ChapterListGroup.1``).
+
+    Uses the shared CHAPTER_CANONICAL_RE from chapter_utils.
     """
     results: list[str] = []
     if isinstance(obj, dict):
@@ -160,17 +163,13 @@ def _collect_chapter_names(obj: Any) -> list[str]:
     elif isinstance(obj, (str, bytes)):
         s = obj.decode("utf-8", errors="ignore") if isinstance(obj, bytes) else obj
         s = s.strip()
-        # fullmatch: REQUIRED prefix + 1-4 digit number with optional decimal.
-        # Prefix is mandatory to filter out bare-number metadata fields.
-        if re.fullmatch(
-            r"(?:Ch\.?\s*|Chapter\s*|#)(\d{1,4}(?:\.\d{1,2})?)",
-            s,
-            re.IGNORECASE,
-        ):
+        # Only match strings that are ENTIRELY a chapter reference (with prefix).
+        # This filters out bare-number metadata fields like group episode counts.
+        if CHAPTER_CANONICAL_RE.fullmatch(s):
             results.append(s)
     return results
 
 
 def _extract_number(name: str) -> float | None:
-    m = re.search(r"(\d+(?:\.\d+)?)", name)
+    m = CHAPTER_CANONICAL_RE.search(name)
     return float(m.group(1)) if m else None

@@ -22,19 +22,39 @@ logger = logging.getLogger(__name__)
 
 PUSHOVER_API_URL = "https://api.pushover.net/1/messages.json"
 
+# ── Per-poll settings cache ───────────────────────────────────────────────────
+# Avoids re-querying the settings table on every notification within a single
+# poll cycle.  Call clear_settings_cache() at the start of each poll run.
+
+_settings_cache: dict[str, str] | None = None
+
+
+def _load_settings(db: Session) -> dict[str, str]:
+    """Load all settings from DB, caching for the duration of a poll cycle."""
+    global _settings_cache
+    if _settings_cache is None:
+        _settings_cache = {r.key: r.value for r in db.query(Settings).all()}
+    return _settings_cache
+
+
+def clear_settings_cache():
+    """Call at the start of each poll cycle to refresh cached settings."""
+    global _settings_cache
+    _settings_cache = None
+
 
 # ── Settings helpers ──────────────────────────────────────────────────────────
 
 def get_pushover_creds(db: Session) -> tuple[str | None, str | None, bool]:
     """Return (user_key, app_token, enabled) from settings."""
-    rows = {r.key: r.value for r in db.query(Settings).all()}
+    rows = _load_settings(db)
     enabled = rows.get("pushover_enabled", "false").lower() == "true"
     return rows.get("pushover_user_key"), rows.get("pushover_app_token"), enabled
 
 
 def _get_push_settings(db: Session) -> dict:
     """Return all push-control settings as a dict of booleans."""
-    rows = {r.key: r.value for r in db.query(Settings).all()}
+    rows = _load_settings(db)
     return {
         "push_chapter_updates": rows.get("push_chapter_updates", "true").lower() == "true",
         "push_news":            rows.get("push_news", "false").lower() == "true",

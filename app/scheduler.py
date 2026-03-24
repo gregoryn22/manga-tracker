@@ -59,7 +59,7 @@ from .mangadex import MangaDexError, MangaDexNotFound, MangaDexRateLimited
 from .mangadex import get_latest_chapter as mdx_get_latest_chapter
 from .mangaup import MangaUpError, MangaUpNotFound
 from .mangaup import get_latest_chapter as mup_get_latest_chapter
-from .notifier import create_notification, get_pushover_creds, send_pushover
+from .notifier import clear_settings_cache, create_notification, get_pushover_creds, send_pushover
 
 logger = logging.getLogger(__name__)
 
@@ -80,8 +80,10 @@ def _titles_plausibly_match(tracked_title: str, release_title: str) -> bool:
     Strategy:
       1. Exact (case-insensitive) match → True.
       2. One title is a substring of the other → True.
-      3. Split both into word-sets; if they share ≥40% of their words → True.
-      4. Otherwise → False.
+      3. For very short titles (1-2 words): require exact or substring match only —
+         word-overlap is too unreliable for short titles.
+      4. For longer titles: split into word-sets; if they share ≥40% of their words → True.
+      5. Otherwise → False.
     """
     a = tracked_title.lower().strip()
     b = release_title.lower().strip()
@@ -97,11 +99,26 @@ def _titles_plausibly_match(tracked_title: str, release_title: str) -> bool:
     if not words_a or not words_b:
         return True  # can't compare empty word sets → let it through
 
-    # Use the smaller word set as denominator so short titles don't get penalised
+    # Short titles (1-2 words) must match via exact or substring (checked above).
+    # Word-overlap is too unreliable for short titles.
     min_len = min(len(words_a), len(words_b))
-    overlap = len(words_a & words_b)
-    if overlap >= max(1, min_len * 0.4):
-        return True
+    if min_len <= 2:
+        return False
+
+    # Filter out common stop-words that inflate overlap scores for short titles
+    _STOP = {"a", "an", "the", "no", "of", "on", "in", "to", "de", "wa", "ga", "ni"}
+    content_a = words_a - _STOP
+    content_b = words_b - _STOP
+    if content_a and content_b:
+        content_overlap = len(content_a & content_b)
+        content_min = min(len(content_a), len(content_b))
+        if content_overlap >= max(2, content_min * 0.5):
+            return True
+    else:
+        # All words were stop-words — fall back to raw overlap
+        overlap = len(words_a & words_b)
+        if overlap >= max(2, min_len * 0.5):
+            return True
 
     return False
 
@@ -137,6 +154,7 @@ def trigger_manual_poll():
 def poll_updates():
     db: Session = SessionLocal()
     try:
+        clear_settings_cache()  # Fresh settings for this poll cycle
         logger.info("▶ Starting update poll...")
 
         mu_enabled = get_setting(db, "mu_enabled", "true").lower() == "true"
@@ -265,6 +283,10 @@ def _enrich_from_mu(db: Session, series: TrackedSeries, mu_id: int):
     """Pull MU series detail and fill in enriched fields."""
     import json
     detail = get_series(mu_id)
+
+    # Ensure mu_url is always set when we have an MU ID
+    if not series.mu_url:
+        series.mu_url = detail.get("url") or f"https://www.mangaupdates.com/series/{mu_id}"
 
     # Cover (fallback if MangaBaka CDN cover is missing)
     if not series.cover_url:
@@ -529,6 +551,16 @@ def _poll_via_mangabaka_fallback(db: Session, series_list: list[TrackedSeries]):
 
 # ── Layer 3: Simulpub direct ──────────────────────────────────────────────────
 
+
+def _simulpub_release_exists(db: Session, series_id: int, chapter: str, group_name: str) -> bool:
+    """Check if a simulpub release was already logged (dedup without mu_release_id)."""
+    return db.query(Release).filter(
+        Release.series_id == series_id,
+        Release.chapter == chapter,
+        Release.group_name == group_name,
+    ).first() is not None
+
+
 def _poll_via_simulpub(db: Session, series_list: list[TrackedSeries]):
     """
     Poll official simulpub platforms directly for series that have gone dark on
@@ -570,6 +602,13 @@ def _poll_mangaplus(db: Session, series_list: list[TrackedSeries]):
                 continue
 
             if chapter_is_newer(chapter, series.mu_latest_chapter):
+                # Dedup: skip if this exact release was already logged
+                if _simulpub_release_exists(db, series.id, chapter, "MangaPlus (simulpub)"):
+                    logger.debug(f"MangaPlus: release already logged for '{series.title}' Ch. {chapter}")
+                    series.last_checked = datetime.utcnow()
+                    db.commit()
+                    continue
+
                 old_chapter = series.mu_latest_chapter
                 series.mu_latest_chapter = chapter
                 series.latest_release_date = datetime.utcnow().strftime("%Y-%m-%d")
@@ -578,7 +617,6 @@ def _poll_mangaplus(db: Session, series_list: list[TrackedSeries]):
                 ch_str = f"Ch. {chapter}"
                 message = f"{series.title} — {ch_str} · MangaPlus (simulpub)"
 
-                # Log to releases table (no mu_release_id since this isn't a MU record)
                 rel = Release(
                     series_id=series.id,
                     mu_series_id=series.mu_series_id,
@@ -707,6 +745,13 @@ def _poll_kmanga(db: Session, series_list: list[TrackedSeries]):
                 continue
 
             if chapter_is_newer(chapter, series.mu_latest_chapter):
+                # Dedup: skip if this exact release was already logged
+                if _simulpub_release_exists(db, series.id, chapter, "K Manga (simulpub)"):
+                    logger.debug(f"K Manga: release already logged for '{series.title}' Ch. {chapter}")
+                    series.last_checked = datetime.utcnow()
+                    db.commit()
+                    continue
+
                 old_chapter = series.mu_latest_chapter
                 series.mu_latest_chapter    = chapter
                 series.latest_release_date  = datetime.utcnow().strftime("%Y-%m-%d")
@@ -791,6 +836,12 @@ def _poll_mangaup(db: Session, series_list: list[TrackedSeries]):
                 continue
 
             if chapter_is_newer(chapter, series.mu_latest_chapter):
+                if _simulpub_release_exists(db, series.id, chapter, "MangaUp! (simulpub)"):
+                    logger.debug(f"MangaUp!: release already logged for '{series.title}' Ch. {chapter}")
+                    series.last_checked = datetime.utcnow()
+                    db.commit()
+                    continue
+
                 old_chapter = series.mu_latest_chapter
                 series.mu_latest_chapter    = chapter
                 series.latest_release_date  = datetime.utcnow().strftime("%Y-%m-%d")
@@ -864,6 +915,12 @@ def _poll_mangadex(db: Session, series_list: list[TrackedSeries]):
                 continue
 
             if chapter_is_newer(chapter, series.mu_latest_chapter):
+                if _simulpub_release_exists(db, series.id, chapter, "MangaDex"):
+                    logger.debug(f"MangaDex: release already logged for '{series.title}' Ch. {chapter}")
+                    series.last_checked = datetime.utcnow()
+                    db.commit()
+                    continue
+
                 old_chapter = series.mu_latest_chapter
                 series.mu_latest_chapter    = chapter
                 series.latest_release_date  = datetime.utcnow().strftime("%Y-%m-%d")
