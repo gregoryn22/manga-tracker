@@ -705,17 +705,17 @@
           </div>
         </div>
 
-        <!-- Filter pills -->
+        <!-- Filter pills (multi-select: click to toggle, "All" resets) -->
         <div class="filter-bar">
-          <button class="pill" :class="{active: filter==='all'}" @click="filter='all'">All <span x-text="'(' + library.length + ')'"></span></button>
-          <button class="pill" :class="{active: filter==='updates'}" @click="filter='updates'">🟢 Updates <span x-text="'(' + stats.updates + ')'"></span></button>
-          <button class="pill" :class="{active: filter==='reading'}" @click="filter='reading'">Reading</button>
-          <button class="pill" :class="{active: filter==='completed'}" @click="filter='completed'">Completed</button>
-          <button class="pill" :class="{active: filter==='plan_to_read'}" @click="filter='plan_to_read'">Plan to Read</button>
-          <button class="pill" :class="{active: filter==='on_hold'}" @click="filter='on_hold'">On Hold</button>
-          <button class="pill" :class="{active: filter==='considering'}" @click="filter='considering'">Considering</button>
-          <button class="pill" :class="{active: filter==='dropped'}" @click="filter='dropped'">Dropped</button>
-          <button class="pill" :class="{active: filter==='idle'}" @click="filter='idle'"
+          <button class="pill" :class="{active: filters.includes('all')}" @click="toggleFilter('all')">All <span x-text="'(' + library.length + ')'"></span></button>
+          <button class="pill" :class="{active: filters.includes('updates')}" @click="toggleFilter('updates')">🟢 Updates <span x-text="'(' + stats.updates + ')'"></span></button>
+          <button class="pill" :class="{active: filters.includes('reading')}" @click="toggleFilter('reading')">Reading</button>
+          <button class="pill" :class="{active: filters.includes('completed')}" @click="toggleFilter('completed')">Completed</button>
+          <button class="pill" :class="{active: filters.includes('plan_to_read')}" @click="toggleFilter('plan_to_read')">Plan to Read</button>
+          <button class="pill" :class="{active: filters.includes('on_hold')}" @click="toggleFilter('on_hold')">On Hold</button>
+          <button class="pill" :class="{active: filters.includes('considering')}" @click="toggleFilter('considering')">Considering</button>
+          <button class="pill" :class="{active: filters.includes('dropped')}" @click="toggleFilter('dropped')">Dropped</button>
+          <button class="pill" :class="{active: filters.includes('idle')}" @click="toggleFilter('idle')"
                   x-show="sf.idle_detection_enabled==='true'"
                   title="Series with no releases in the configured idle threshold">💤 Idle</button>
         </div>
@@ -1770,7 +1770,7 @@ function app() {
     page: 'library',
     loading: false,
     library: [],
-    filter: 'all',
+    filters: ['all'],  // multi-select: ['all'], ['reading','on_hold'], ['updates','reading'], etc.
 
     // Library toolbar
     librarySearch: '',
@@ -1862,13 +1862,38 @@ function app() {
       finally { this.loading = false; }
     },
 
+    toggleFilter(f) {
+      if (f === 'all') {
+        // "All" resets to show everything
+        this.filters = ['all'];
+        return;
+      }
+      // Remove 'all' if selecting a specific filter
+      let arr = this.filters.filter(x => x !== 'all');
+      const idx = arr.indexOf(f);
+      if (idx === -1) {
+        arr.push(f);
+      } else {
+        arr.splice(idx, 1);
+      }
+      // If nothing selected, revert to 'all'
+      this.filters = arr.length > 0 ? arr : ['all'];
+    },
+
     filteredLibrary() {
       let list = this.library;
 
-      // Status / update / idle filter
-      if (this.filter === 'updates') list = list.filter(s=>s.has_update);
-      else if (this.filter === 'idle') list = list.filter(s=>this.isIdle(s));
-      else if (this.filter !== 'all') list = list.filter(s=>s.reading_status===this.filter);
+      // Multi-select status / update / idle filter
+      if (!this.filters.includes('all')) {
+        list = list.filter(s => {
+          for (const f of this.filters) {
+            if (f === 'updates' && s.has_update) return true;
+            if (f === 'idle' && this.isIdle(s)) return true;
+            if (s.reading_status === f) return true;
+          }
+          return false;
+        });
+      }
 
       // Text search
       if (this.librarySearch.trim()) {
