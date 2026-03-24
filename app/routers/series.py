@@ -6,12 +6,14 @@ import json
 import logging
 import re
 from datetime import datetime
+from typing import List
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from ..database import TrackedSeries, get_db, get_setting
+from ..database import ReadingLog, TrackedSeries, get_db, get_setting
 from ..mangabaka import MangaBakaClient, series_from_api
 from ..mangaupdates import (
     chapter_is_newer,
@@ -236,6 +238,113 @@ def _bg_enrich_with_mu(series_id: int, title: str, known_mu_id: int | None = Non
         db.close()
 
 
+# ── Bulk status change ────────────────────────────────────────────────
+
+class BulkStatusRequest(BaseModel):
+    series_ids: List[int]
+    reading_status: str
+
+
+@router.post("/bulk/status")
+def bulk_status(req: BulkStatusRequest, db: Session = Depends(get_db)):
+    """Change reading_status for multiple series at once."""
+    updated = 0
+    for sid in req.series_ids:
+        series = db.query(TrackedSeries).filter(TrackedSeries.id == sid).first()
+        if series and series.reading_status != req.reading_status:
+            db.add(ReadingLog(
+                series_id=series.id, series_title=series.title,
+                old_chapter=series.reading_status, new_chapter=req.reading_status,
+                action="status_change", created_at=datetime.utcnow(),
+            ))
+            series.reading_status = req.reading_status
+            updated += 1
+    db.commit()
+    return {"success": True, "updated": updated}
+
+
+# ── Export / Import library ──────────────────────────────────────────
+
+@router.get("/export/json")
+def export_library(db: Session = Depends(get_db)):
+    """Export entire library as JSON (for backup / migration)."""
+    series = db.query(TrackedSeries).order_by(TrackedSeries.added_at.desc()).all()
+    return JSONResponse(content={
+        "version": 1,
+        "exported_at": datetime.utcnow().isoformat(),
+        "series": [s.to_dict() for s in series],
+    })
+
+
+class ImportRequest(BaseModel):
+    series: list
+
+
+@router.post("/import/json")
+def import_library(req: ImportRequest, db: Session = Depends(get_db)):
+    """Import series from a previously exported JSON. Skips duplicates."""
+    imported = 0
+    skipped = 0
+    for item in req.series:
+        sid = item.get("id")
+        if not sid:
+            skipped += 1
+            continue
+        existing = db.query(TrackedSeries).filter(TrackedSeries.id == sid).first()
+        if existing:
+            skipped += 1
+            continue
+        s = TrackedSeries(
+            id=sid,
+            title=item.get("title", "Unknown"),
+            native_title=item.get("native_title"),
+            cover_url=item.get("cover_url"),
+            description=item.get("description"),
+            status=item.get("status"),
+            series_type=item.get("series_type"),
+            total_chapters=item.get("total_chapters"),
+            genres=json.dumps(item.get("genres", [])),
+            authors=json.dumps(item.get("authors", [])),
+            publishers=json.dumps(item.get("publishers", [])),
+            categories=json.dumps(item.get("categories", [])),
+            year=item.get("year"),
+            rating=item.get("rating"),
+            mu_series_id=item.get("mu_series_id"),
+            mu_url=item.get("mu_url"),
+            mu_rating=item.get("mu_rating"),
+            mu_rating_votes=item.get("mu_rating_votes"),
+            mu_latest_chapter=item.get("mu_latest_chapter"),
+            latest_release_date=item.get("latest_release_date"),
+            latest_release_group=item.get("latest_release_group"),
+            simulpub_source=item.get("simulpub_source"),
+            simulpub_id=item.get("simulpub_id"),
+            mb_provider_ids=json.dumps(item.get("mb_provider_ids", {})),
+            current_chapter=item.get("current_chapter", "0"),
+            reading_status=item.get("reading_status", "reading"),
+            notes=item.get("notes"),
+            mangabaka_url=item.get("mangabaka_url"),
+            added_at=datetime.utcnow(),
+        )
+        db.add(s)
+        imported += 1
+    db.commit()
+    return {"success": True, "imported": imported, "skipped": skipped}
+
+
+# ── Reading activity log ─────────────────────────────────────────────
+
+@router.get("/activity/log")
+def get_activity_log(limit: int = 100, db: Session = Depends(get_db)):
+    """Return recent reading activity (chapter changes, status changes)."""
+    entries = (
+        db.query(ReadingLog)
+        .order_by(ReadingLog.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+    return [e.to_dict() for e in entries]
+
+
 # ── Get single series ─────────────────────────────────────────────────────────
 
 @router.get("/{series_id}")
@@ -265,8 +374,21 @@ def update_series(series_id: int, req: UpdateSeriesRequest, db: Session = Depend
     if not series:
         raise HTTPException(status_code=404, detail="Series not tracked")
     if req.current_chapter is not None:
+        old_ch = series.current_chapter
+        if req.current_chapter != old_ch:
+            db.add(ReadingLog(
+                series_id=series.id, series_title=series.title,
+                old_chapter=old_ch, new_chapter=req.current_chapter,
+                action="chapter_update", created_at=datetime.utcnow(),
+            ))
         series.current_chapter = req.current_chapter
     if req.reading_status is not None:
+        if req.reading_status != series.reading_status:
+            db.add(ReadingLog(
+                series_id=series.id, series_title=series.title,
+                old_chapter=series.reading_status, new_chapter=req.reading_status,
+                action="status_change", created_at=datetime.utcnow(),
+            ))
         series.reading_status = req.reading_status
     if req.notes is not None:
         series.notes = req.notes

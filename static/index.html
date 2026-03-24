@@ -489,8 +489,81 @@
     .p-mdx { background: rgba(240,60,40,0.2);   color: #f05a46; }
     .p-custom { background: rgba(150,150,150,0.2); color: var(--text-muted); }
 
+    /* ── Skeleton loading ────────────────────────────── */
+    @keyframes shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
+    .skeleton {
+      background: linear-gradient(90deg, var(--surface2) 25%, var(--surface3) 50%, var(--surface2) 75%);
+      background-size: 200% 100%; animation: shimmer 1.5s infinite;
+      border-radius: var(--radius); border: 1px solid var(--border);
+    }
+    .skel-card { height: 280px; }
+    .skel-stat { height: 90px; }
+    .skel-row  { height: 70px; margin-bottom: 8px; border-radius: 8px; }
+
+    /* ── Hamburger menu ───────────────────────────────── */
+    .hamburger {
+      display: none; background: none; border: none; color: var(--text);
+      font-size: 1.3rem; cursor: pointer; padding: 4px 8px; margin-right: 4px;
+    }
+    .sidebar-overlay {
+      display: none; position: fixed; inset: 0;
+      background: rgba(0,0,0,0.6); z-index: 49;
+    }
+
+    /* ── Bulk select mode ─────────────────────────────── */
+    .bulk-checkbox {
+      position: absolute; top: 7px; right: 7px; z-index: 5;
+      width: 20px; height: 20px; accent-color: var(--accent);
+      cursor: pointer;
+    }
+    .series-card.selected { border-color: var(--accent); box-shadow: 0 0 12px rgba(124,108,255,0.25); }
+    .bulk-bar {
+      display: flex; align-items: center; gap: 10px; padding: 10px 16px;
+      background: var(--surface2); border: 1px solid var(--accent);
+      border-radius: 10px; margin-bottom: 16px;
+    }
+
+    /* ── Sort/Search toolbar ──────────────────────────── */
+    .library-toolbar {
+      display: flex; align-items: center; gap: 10px; margin-bottom: 16px; flex-wrap: wrap;
+    }
+    .library-toolbar .search-input {
+      flex: 1; min-width: 160px; max-width: 300px;
+    }
+
+    /* ── Activity log ─────────────────────────────────── */
+    .log-item {
+      display: flex; gap: 10px; align-items: center;
+      padding: 10px 0; border-bottom: 1px solid var(--border);
+      font-size: 0.84rem;
+    }
+    .log-item:last-child { border-bottom: none; }
+    .log-icon { font-size: 1.1rem; flex-shrink: 0; }
+    .log-time { font-size: 0.72rem; color: var(--text-dim); margin-left: auto; white-space: nowrap; }
+
+    /* ── Idle chip ─────────────────────────────────────── */
+    .chip-idle { background: rgba(245,158,11,0.15); color: var(--yellow); }
+
+    /* ── Poll health indicator ────────────────────────── */
+    .poll-health { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-left: 4px; vertical-align: middle; }
+    .ph-ok    { background: var(--green); }
+    .ph-warn  { background: var(--yellow); }
+    .ph-error { background: var(--red); }
+
+    /* ── Feed grouping ────────────────────────────────── */
+    .feed-group-header {
+      font-size: 0.9rem; font-weight: 600; padding: 12px 0 6px;
+      border-bottom: 1px solid var(--border); margin-top: 8px;
+      display: flex; align-items: center; gap: 10px;
+    }
+    .feed-group-header:first-child { margin-top: 0; }
+    .feed-group-cover { width: 32px; height: 44px; object-fit: cover; border-radius: 4px; flex-shrink: 0; }
+
     @media (max-width: 768px) {
-      .sidebar { display: none; }
+      .sidebar { display: none; position: fixed; left: 0; top: 0; bottom: 0; z-index: 50; }
+      .sidebar.open { display: flex; }
+      .sidebar-overlay.open { display: block; }
+      .hamburger { display: block; }
       .series-grid { grid-template-columns: repeat(auto-fill, minmax(140px,1fr)); }
       .stats-row { grid-template-columns: repeat(2,1fr); }
     }
@@ -499,8 +572,11 @@
 <body>
 <div class="app">
 
+  <!-- Mobile sidebar overlay -->
+  <div class="sidebar-overlay" :class="{open: sidebarOpen}" @click="sidebarOpen=false"></div>
+
   <!-- ── Sidebar ──────────────────────────────────────── -->
-  <nav class="sidebar">
+  <nav class="sidebar" :class="{open: sidebarOpen}">
     <div class="sidebar-brand">
       <span class="brand-icon">📚</span>
       <div>
@@ -511,24 +587,27 @@
 
     <div class="nav">
       <div class="nav-section">Browse</div>
-      <div class="nav-item" :class="{active: page==='library'}" @click="page='library'">
+      <div class="nav-item" :class="{active: page==='library'}" @click="page='library'; sidebarOpen=false">
         <span class="nav-icon">🗂️</span> Library
         <span class="nav-badge green" x-show="stats.updates > 0" x-text="stats.updates"></span>
       </div>
-      <div class="nav-item" :class="{active: page==='releases'}" @click="page='releases'; loadReleaseFeed()">
+      <div class="nav-item" :class="{active: page==='releases'}" @click="page='releases'; loadReleaseFeed(); sidebarOpen=false">
         <span class="nav-icon">⚡</span> Live Feed
         <span class="nav-badge green" x-show="feedReleases.length > 0" x-text="feedReleases.length"></span>
       </div>
-      <div class="nav-item" :class="{active: page==='search'}" @click="page='search'">
+      <div class="nav-item" :class="{active: page==='search'}" @click="page='search'; sidebarOpen=false">
         <span class="nav-icon">🔍</span> Search
       </div>
 
       <div class="nav-section">Manage</div>
-      <div class="nav-item" :class="{active: page==='notifications'}" @click="page='notifications'; loadNotifications()">
+      <div class="nav-item" :class="{active: page==='notifications'}" @click="page='notifications'; loadNotifications(); sidebarOpen=false">
         <span class="nav-icon">🔔</span> Notifications
         <span class="nav-badge" x-show="unreadCount > 0" x-text="unreadCount > 99 ? '99+' : unreadCount"></span>
       </div>
-      <div class="nav-item" :class="{active: page==='settings'}" @click="page='settings'; loadSettings()">
+      <div class="nav-item" :class="{active: page==='activity'}" @click="page='activity'; loadActivity(); sidebarOpen=false">
+        <span class="nav-icon">📋</span> Activity
+      </div>
+      <div class="nav-item" :class="{active: page==='settings'}" @click="page='settings'; loadSettings(); sidebarOpen=false">
         <span class="nav-icon">⚙️</span> Settings
       </div>
     </div>
@@ -544,6 +623,7 @@
 
     <!-- Topbar -->
     <div class="topbar">
+      <button class="hamburger" @click="sidebarOpen=!sidebarOpen">☰</button>
       <span class="topbar-title" x-text="pageTitle()"></span>
       <template x-if="page==='library'">
         <button class="btn btn-ghost btn-sm" @click="pollNow()" :disabled="polling">
@@ -553,10 +633,16 @@
         </button>
       </template>
       <template x-if="page==='releases'">
-        <button class="btn btn-ghost btn-sm" @click="loadReleaseFeed()">
-          <span x-show="feedLoading" class="spin" style="width:13px;height:13px"></span>
-          <span x-show="!feedLoading">🔄</span> Refresh
-        </button>
+        <div class="flex gap-2 items-center">
+          <button class="btn btn-ghost btn-sm" @click="feedGrouped=!feedGrouped"
+                  :class="{'btn-primary': feedGrouped}">
+            <span x-text="feedGrouped ? '📂 Grouped' : '📃 Flat'"></span>
+          </button>
+          <button class="btn btn-ghost btn-sm" @click="loadReleaseFeed()">
+            <span x-show="feedLoading" class="spin" style="width:13px;height:13px"></span>
+            <span x-show="!feedLoading">🔄</span> Refresh
+          </button>
+        </div>
       </template>
       <template x-if="page==='notifications' && notifications.length > 0">
         <button class="btn btn-ghost btn-sm" @click="markAllRead()">✓ All Read</button>
@@ -629,11 +715,74 @@
           <button class="pill" :class="{active: filter==='on_hold'}" @click="filter='on_hold'">On Hold</button>
           <button class="pill" :class="{active: filter==='considering'}" @click="filter='considering'">Considering</button>
           <button class="pill" :class="{active: filter==='dropped'}" @click="filter='dropped'">Dropped</button>
+          <button class="pill" :class="{active: filter==='idle'}" @click="filter='idle'"
+                  x-show="sf.idle_detection_enabled==='true'"
+                  title="Series with no releases in the configured idle threshold">💤 Idle</button>
         </div>
 
-        <!-- Loading -->
-        <div x-show="loading" style="text-align:center;padding:40px">
-          <div class="spin" style="width:28px;height:28px;margin:0 auto"></div>
+        <!-- Library toolbar: search + sort + genre filter + bulk -->
+        <div class="library-toolbar">
+          <input class="input search-input" type="text" placeholder="Search library…"
+                 x-model="librarySearch" @input="librarySearchDebounce()" />
+          <select class="input" x-model="sortBy" style="width:170px;padding:7px 10px;font-size:0.8rem"
+                  @change="sortLibrary()">
+            <option value="title_asc">A → Z</option>
+            <option value="title_desc">Z → A</option>
+            <option value="rating_desc">Rating (high)</option>
+            <option value="rating_asc">Rating (low)</option>
+            <option value="added_desc">Recently Added</option>
+            <option value="added_asc">Oldest Added</option>
+            <option value="checked_desc">Last Checked</option>
+            <option value="unread_desc">Most Unread</option>
+          </select>
+          <select class="input" x-model="genreFilter" style="width:160px;padding:7px 10px;font-size:0.8rem"
+                  x-show="allGenres.length > 0">
+            <option value="">All Genres</option>
+            <template x-for="g in allGenres" :key="g">
+              <option :value="g" x-text="g"></option>
+            </template>
+          </select>
+          <select class="input" x-model="authorFilter" style="width:160px;padding:7px 10px;font-size:0.8rem"
+                  x-show="allAuthors.length > 0">
+            <option value="">All Authors</option>
+            <template x-for="a in allAuthors" :key="a">
+              <option :value="a" x-text="a"></option>
+            </template>
+          </select>
+          <button class="btn btn-ghost btn-sm" @click="bulkMode=!bulkMode; bulkSelected=[]"
+                  :class="{'btn-primary': bulkMode}">
+            <span x-text="bulkMode ? '✕ Cancel' : '☑ Bulk'"></span>
+          </button>
+        </div>
+
+        <!-- Bulk action bar -->
+        <div class="bulk-bar" x-show="bulkMode && bulkSelected.length > 0">
+          <span class="text-sm fw-600" x-text="bulkSelected.length + ' selected'"></span>
+          <select class="input" x-model="bulkStatus" style="width:160px;padding:5px 8px;font-size:0.8rem">
+            <option value="reading">📖 Reading</option>
+            <option value="considering">🤔 Considering</option>
+            <option value="plan_to_read">📋 Plan to Read</option>
+            <option value="on_hold">⏸ On Hold</option>
+            <option value="completed">✅ Completed</option>
+            <option value="dropped">❌ Dropped</option>
+          </select>
+          <button class="btn btn-primary btn-sm" @click="applyBulkStatus()">Apply Status</button>
+          <button class="btn btn-ghost btn-sm" @click="bulkSelected=[]">Clear</button>
+        </div>
+
+        <!-- Loading (skeleton) -->
+        <div x-show="loading">
+          <div class="stats-row" style="margin-bottom:16px">
+            <div class="skeleton skel-stat"></div>
+            <div class="skeleton skel-stat"></div>
+            <div class="skeleton skel-stat"></div>
+            <div class="skeleton skel-stat"></div>
+          </div>
+          <div class="series-grid">
+            <template x-for="i in 12" :key="i">
+              <div class="skeleton skel-card"></div>
+            </template>
+          </div>
         </div>
 
         <!-- Empty -->
@@ -647,16 +796,26 @@
         <!-- Grid -->
         <div class="series-grid" x-show="!loading && filteredLibrary().length > 0">
           <template x-for="s in filteredLibrary()" :key="s.id">
-            <div class="series-card" :class="{'has-update': s.has_update}" @click="openDetail(s)">
+            <div class="series-card" :class="{'has-update': s.has_update, 'selected': bulkSelected.includes(s.id)}"
+                 @click="bulkMode ? toggleBulk(s.id) : openDetail(s)">
+
+              <!-- Bulk select checkbox -->
+              <input type="checkbox" class="bulk-checkbox" x-show="bulkMode"
+                     :checked="bulkSelected.includes(s.id)"
+                     @click.stop="toggleBulk(s.id)" />
 
               <!-- Status chips -->
               <div class="status-chip chip-new"     x-show="s.has_update">NEW</div>
-              <div class="status-chip chip-plan"    x-show="!s.has_update && s.reading_status==='plan_to_read'">PLAN</div>
+              <div class="status-chip chip-idle"    x-show="!s.has_update && isIdle(s) && sf.idle_detection_enabled==='true'">💤</div>
+              <div class="status-chip chip-plan"    x-show="!s.has_update && !isIdle(s) && s.reading_status==='plan_to_read'">PLAN</div>
               <div class="status-chip chip-considering" x-show="!s.has_update && s.reading_status==='considering'">?</div>
               <div class="status-chip chip-hold"    x-show="!s.has_update && s.reading_status==='on_hold'">HOLD</div>
               <div class="status-chip chip-dropped" x-show="!s.has_update && s.reading_status==='dropped'">DROP</div>
               <div class="status-chip chip-done"    x-show="!s.has_update && s.reading_status==='completed'">DONE</div>
-              <div class="chip-linked" x-show="s.mu_series_id">MU</div>
+              <div class="chip-linked" x-show="s.mu_series_id">
+                MU
+                <span class="poll-health" :class="pollHealthClass(s)" :title="pollHealthTitle(s)"></span>
+              </div>
 
               <!-- Cover -->
               <div class="cover-wrap">
@@ -749,7 +908,8 @@
                 <span class="text-xs text-muted ml-auto" x-text="'of ' + feedTotal + ' total on MU today'"></span>
               </div>
 
-              <div class="card" style="padding:0 16px">
+              <!-- Flat view -->
+              <div class="card" style="padding:0 16px" x-show="!feedGrouped">
                 <template x-for="r in feedReleases" :key="r.mu_release_id || r.series_title+r.chapter">
                   <div class="release-row">
                     <template x-if="r.cover_url">
@@ -778,6 +938,31 @@
                         <button class="btn btn-xs btn-green" @click.stop="openDetailById(r.series_id)">Detail</button>
                       </div>
                     </div>
+                  </div>
+                </template>
+              </div>
+
+              <!-- Grouped view -->
+              <div x-show="feedGrouped">
+                <template x-for="group in groupedFeed()" :key="group.series_id">
+                  <div class="card" style="padding:0 16px;margin-bottom:12px">
+                    <div class="feed-group-header">
+                      <template x-if="group.cover_url">
+                        <img class="feed-group-cover" :src="group.cover_url" loading="lazy" />
+                      </template>
+                      <span x-text="group.series_title"></span>
+                      <span class="section-badge accent" x-text="group.releases.length + ' ch.'"></span>
+                      <button class="btn btn-xs btn-ghost ml-auto" @click.stop="openDetailById(group.series_id)">Detail</button>
+                    </div>
+                    <template x-for="r in group.releases" :key="r.mu_release_id || r.chapter">
+                      <div class="release-row" style="padding:8px 0">
+                        <div class="release-info">
+                          <div class="release-ch" x-text="'Ch. ' + r.chapter + (r.volume ? ' · Vol. ' + r.volume : '')"></div>
+                          <div class="release-group" x-text="r.group_name ? 'by ' + r.group_name : ''"></div>
+                        </div>
+                        <div class="release-date" x-text="r.release_date"></div>
+                      </div>
+                    </template>
                   </div>
                 </template>
               </div>
@@ -896,6 +1081,33 @@
           </div>
         </div>
       </div><!-- /notifications -->
+
+
+      <!-- ══ ACTIVITY LOG ═════════════════════════════════ -->
+      <div x-show="page==='activity'">
+        <div x-show="activityLog.length===0" class="empty">
+          <div class="empty-icon">📋</div>
+          <h3>No activity yet</h3>
+          <p>Your reading history and status changes will appear here as you track your progress.</p>
+        </div>
+        <div class="card" style="padding:0 16px" x-show="activityLog.length>0">
+          <template x-for="entry in activityLog" :key="entry.id">
+            <div class="log-item">
+              <div class="log-icon" x-text="entry.action==='chapter_update' ? '📖' : entry.action==='status_change' ? '🏷️' : entry.action==='added' ? '➕' : '📋'"></div>
+              <div style="flex:1;min-width:0">
+                <div class="fw-600 text-sm" x-text="entry.series_title || 'Unknown'"></div>
+                <div class="text-xs text-muted" x-show="entry.action==='chapter_update'">
+                  Ch. <span x-text="entry.old_chapter || '0'"></span> → Ch. <span x-text="entry.new_chapter"></span>
+                </div>
+                <div class="text-xs text-muted" x-show="entry.action==='status_change'">
+                  <span x-text="(entry.old_chapter||'').replace('_',' ')"></span> → <span x-text="(entry.new_chapter||'').replace('_',' ')"></span>
+                </div>
+              </div>
+              <div class="log-time" x-text="relativeTime(entry.created_at)"></div>
+            </div>
+          </template>
+        </div>
+      </div><!-- /activity -->
 
 
       <!-- ══ SETTINGS ══════════════════════════════════════ -->
@@ -1070,6 +1282,67 @@
           <div class="text-xs text-muted mt-2">
             Used to poll official Kodansha simulpub releases via the K Manga API.
             US-based IP required. Credentials are stored locally and never sent anywhere except K Manga's own servers.
+          </div>
+        </div>
+
+        <!-- ── Idle Series Detection ──────────────────────── -->
+        <div class="card" style="padding:20px 24px;margin-bottom:16px">
+          <div class="settings-block-title">💤 Idle Series Detection</div>
+          <div class="settings-row">
+            <label>Enable idle detection</label>
+            <select class="input" x-model="sf.idle_detection_enabled" style="width:130px">
+              <option value="true">Enabled</option>
+              <option value="false">Disabled</option>
+            </select>
+          </div>
+          <div class="settings-row">
+            <label>Idle threshold (days)</label>
+            <input class="input" type="number" min="7" max="365" x-model="sf.idle_threshold_days" style="width:100px" />
+          </div>
+          <div class="text-xs text-muted mt-1" style="line-height:1.5">
+            When enabled, series with no releases detected in the specified number of days
+            will be flagged with a 💤 chip. Useful for spotting series that may have gone on hiatus or been dropped by scanlators.
+          </div>
+          <div class="flex gap-2 mt-2">
+            <button class="btn btn-primary btn-sm" @click="saveSettings()">💾 Save</button>
+          </div>
+        </div>
+
+        <!-- ── Discord / Slack Webhook ────────────────────── -->
+        <div class="card" style="padding:20px 24px;margin-bottom:16px">
+          <div class="settings-block-title">🔗 Discord / Slack Webhook</div>
+          <div class="settings-row">
+            <label>Enable webhook</label>
+            <select class="input" x-model="sf.webhook_enabled" style="width:130px">
+              <option value="true">Enabled</option>
+              <option value="false">Disabled</option>
+            </select>
+          </div>
+          <div class="settings-row">
+            <label>Webhook URL</label>
+            <input class="input" type="url" style="flex:1" placeholder="https://discord.com/api/webhooks/…"
+                   x-model="sf.webhook_url" />
+          </div>
+          <div class="flex gap-2 mt-2">
+            <button class="btn btn-primary btn-sm" @click="saveSettings()">💾 Save</button>
+            <button class="btn btn-ghost btn-sm" @click="testWebhook()">🧪 Send Test</button>
+          </div>
+          <div class="text-xs text-muted mt-2" style="line-height:1.5">
+            Supports Discord webhook URLs and Slack incoming webhook URLs. Chapter notifications will be sent alongside Pushover (if enabled).
+          </div>
+        </div>
+
+        <!-- ── Export / Import ─────────────────────────────── -->
+        <div class="card" style="padding:20px 24px;margin-bottom:16px">
+          <div class="settings-block-title">💾 Library Backup</div>
+          <div class="flex gap-2">
+            <button class="btn btn-primary btn-sm" @click="exportLibrary()">📥 Export JSON</button>
+            <button class="btn btn-ghost btn-sm" @click="$refs.importFile.click()">📤 Import JSON</button>
+            <input type="file" accept=".json" x-ref="importFile" style="display:none"
+                   @change="importLibrary($event)" />
+          </div>
+          <div class="text-xs text-muted mt-2" style="line-height:1.5">
+            Export your entire library as a JSON file for backup or migration. Import will skip series that are already tracked.
           </div>
         </div>
 
@@ -1499,14 +1772,29 @@ function app() {
     library: [],
     filter: 'all',
 
+    // Library toolbar
+    librarySearch: '',
+    sortBy: 'added_desc',
+    genreFilter: '',
+    authorFilter: '',
+
+    // Bulk mode
+    bulkMode: false, bulkSelected: [], bulkStatus: 'reading',
+
+    // Sidebar (mobile)
+    sidebarOpen: false,
+
     // Search
     searchQuery: '', searchResults: [], searchPagination: {}, searching: false, hasSearched: false,
 
     // Notifications
     notifications: [], unreadCount: 0,
 
+    // Activity log
+    activityLog: [],
+
     // Settings form
-    sf: { pushover_user_key:'', pushover_app_token:'', pushover_enabled:'false', push_chapter_updates:'true', push_news:'false', push_reading_only:'false', poll_interval_hours:'6', mangabaka_token:'', mu_enabled:'true', kmanga_email:'', kmanga_password:'', kmanga_recaptcha_token:'' },
+    sf: { pushover_user_key:'', pushover_app_token:'', pushover_enabled:'false', push_chapter_updates:'true', push_news:'false', push_reading_only:'false', poll_interval_hours:'6', mangabaka_token:'', mu_enabled:'true', kmanga_email:'', kmanga_password:'', kmanga_recaptcha_token:'', idle_detection_enabled:'false', idle_threshold_days:'90', webhook_enabled:'false', webhook_url:'' },
 
     // Detail modal
     detailOpen: false, ds: null, ef: {}, detailReleases: [],
@@ -1515,7 +1803,7 @@ function app() {
     addOpen: false, addTarget: null, addForm: { current_chapter:'0', reading_status:'reading' }, adding: false,
 
     // Live feed
-    feedReleases: [], feedTotal: 0, feedLoading: false,
+    feedReleases: [], feedTotal: 0, feedLoading: false, feedGrouped: false,
 
     // Polling
     polling: false,
@@ -1525,6 +1813,9 @@ function app() {
 
     // Toasts
     toasts: [], _tid: 0,
+
+    // Search debounce timer
+    _searchTimer: null,
 
     // Computed stats
     get stats() {
@@ -1536,6 +1827,8 @@ function app() {
     },
 
     async init() {
+      // Load settings first (needed for idle detection, etc.)
+      try { const d = await this.api('/api/settings'); this.sf = {...this.sf,...d}; } catch(e) {}
       await this.loadLibrary();
       await this.pollUnreadCount();
       // Silently prefetch feed in background
@@ -1543,8 +1836,22 @@ function app() {
       setInterval(() => this.pollUnreadCount(), 30000);
     },
 
+    // Computed: all genres from library
+    get allGenres() {
+      const set = new Set();
+      this.library.forEach(s => (s.genres||[]).forEach(g => set.add(g)));
+      return [...set].sort();
+    },
+
+    // Computed: all authors from library
+    get allAuthors() {
+      const set = new Set();
+      this.library.forEach(s => (s.authors||[]).forEach(a => set.add(a)));
+      return [...set].sort();
+    },
+
     pageTitle() {
-      return { library:'My Library', releases:'Live Feed', search:'Search', notifications:'Notifications', settings:'Settings' }[this.page] || '';
+      return { library:'My Library', releases:'Live Feed', search:'Search', notifications:'Notifications', activity:'Activity Log', settings:'Settings' }[this.page] || '';
     },
 
     // ── Library ─────────────────────────────────────────
@@ -1556,9 +1863,71 @@ function app() {
     },
 
     filteredLibrary() {
-      if (this.filter === 'all') return this.library;
-      if (this.filter === 'updates') return this.library.filter(s=>s.has_update);
-      return this.library.filter(s=>s.reading_status===this.filter);
+      let list = this.library;
+
+      // Status / update / idle filter
+      if (this.filter === 'updates') list = list.filter(s=>s.has_update);
+      else if (this.filter === 'idle') list = list.filter(s=>this.isIdle(s));
+      else if (this.filter !== 'all') list = list.filter(s=>s.reading_status===this.filter);
+
+      // Text search
+      if (this.librarySearch.trim()) {
+        const q = this.librarySearch.toLowerCase().trim();
+        list = list.filter(s => (s.title||'').toLowerCase().includes(q) || (s.native_title||'').toLowerCase().includes(q));
+      }
+
+      // Genre filter
+      if (this.genreFilter) {
+        list = list.filter(s => (s.genres||[]).includes(this.genreFilter));
+      }
+
+      // Author filter
+      if (this.authorFilter) {
+        list = list.filter(s => (s.authors||[]).includes(this.authorFilter));
+      }
+
+      // Sorting
+      const [field, dir] = this.sortBy.split('_');
+      const mul = dir === 'desc' ? -1 : 1;
+      list = [...list].sort((a, b) => {
+        let va, vb;
+        switch(field) {
+          case 'title': return mul * (a.title||'').localeCompare(b.title||'');
+          case 'rating':
+            va = a.mu_rating || 0; vb = b.mu_rating || 0;
+            return mul * (va - vb);
+          case 'added':
+            va = a.added_at || ''; vb = b.added_at || '';
+            return mul * va.localeCompare(vb);
+          case 'checked':
+            va = a.last_checked || ''; vb = b.last_checked || '';
+            return mul * va.localeCompare(vb);
+          case 'unread':
+            va = this._unreadNum(a); vb = this._unreadNum(b);
+            return mul * (va - vb);
+          default: return 0;
+        }
+      });
+
+      return list;
+    },
+
+    _unreadNum(s) {
+      try {
+        const latest = parseFloat(s.latest_chapter);
+        const current = parseFloat(s.current_chapter || 0);
+        if (!isNaN(latest) && !isNaN(current)) return Math.max(0, latest - current);
+      } catch {}
+      return 0;
+    },
+
+    librarySearchDebounce() {
+      clearTimeout(this._searchTimer);
+      this._searchTimer = setTimeout(() => {}, 150); // triggers Alpine reactivity
+    },
+
+    sortLibrary() {
+      // No-op — filteredLibrary() already sorts reactively via sortBy binding
     },
 
     chapterProgress(s) {
@@ -1601,6 +1970,103 @@ function app() {
     async markCaughtUp(s) {
       if (!s.latest_chapter) return;
       await this.quickSetChapter(s, s.latest_chapter);
+    },
+
+    // ── Idle detection ─────────────────────────────────
+    isIdle(s) {
+      if (this.sf.idle_detection_enabled !== 'true') return false;
+      const days = parseInt(this.sf.idle_threshold_days) || 90;
+      const ref = s.latest_release_date || s.last_checked;
+      if (!ref) return false;
+      const refDate = new Date(ref);
+      const now = new Date();
+      const diffDays = (now - refDate) / (1000 * 60 * 60 * 24);
+      return diffDays > days && s.reading_status === 'reading';
+    },
+
+    // ── Poll health ──────────────────────────────────
+    pollHealthClass(s) {
+      if (!s.poll_failures) return 'ph-ok';
+      if (s.poll_failures >= 3) return 'ph-error';
+      return 'ph-warn';
+    },
+    pollHealthTitle(s) {
+      if (!s.poll_failures) return 'Polling OK';
+      return `${s.poll_failures} consecutive poll failure(s)` + (s.last_poll_error ? `: ${s.last_poll_error}` : '');
+    },
+
+    // ── Bulk mode ────────────────────────────────────
+    toggleBulk(id) {
+      const idx = this.bulkSelected.indexOf(id);
+      if (idx === -1) this.bulkSelected.push(id);
+      else this.bulkSelected.splice(idx, 1);
+    },
+
+    async applyBulkStatus() {
+      try {
+        const resp = await this.api('/api/series/bulk/status', 'POST', {
+          series_ids: this.bulkSelected,
+          reading_status: this.bulkStatus,
+        });
+        this.toast(`Updated ${resp.updated} series to "${this.bulkStatus.replace('_',' ')}"`, 'success');
+        this.bulkSelected = [];
+        this.bulkMode = false;
+        await this.loadLibrary();
+      } catch(e) { this.toast('Bulk update failed', 'error'); }
+    },
+
+    // ── Feed grouping ────────────────────────────────
+    groupedFeed() {
+      const groups = {};
+      for (const r of this.feedReleases) {
+        if (!groups[r.series_id]) {
+          groups[r.series_id] = { series_id: r.series_id, series_title: r.series_title, cover_url: r.cover_url, releases: [] };
+        }
+        groups[r.series_id].releases.push(r);
+      }
+      return Object.values(groups);
+    },
+
+    // ── Activity log ─────────────────────────────────
+    async loadActivity() {
+      try { this.activityLog = await this.api('/api/series/activity/log'); }
+      catch(e) { this.toast('Failed to load activity', 'error'); }
+    },
+
+    // ── Export / Import ──────────────────────────────
+    async exportLibrary() {
+      try {
+        const data = await this.api('/api/series/export/json');
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `manga-tracker-backup-${new Date().toISOString().slice(0,10)}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+        this.toast('Library exported!', 'success');
+      } catch(e) { this.toast('Export failed', 'error'); }
+    },
+
+    async importLibrary(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      try {
+        const text = await file.text();
+        const data = JSON.parse(text);
+        const series = data.series || [];
+        if (!series.length) { this.toast('No series found in file', 'error'); return; }
+        const resp = await this.api('/api/series/import/json', 'POST', { series });
+        this.toast(`Imported ${resp.imported}, skipped ${resp.skipped} duplicates`, 'success');
+        await this.loadLibrary();
+      } catch(e) { this.toast('Import failed: invalid file', 'error'); }
+      event.target.value = '';
+    },
+
+    // ── Webhook test ─────────────────────────────────
+    async testWebhook() {
+      try { const d = await this.api('/api/settings/test-webhook', 'POST'); this.toast(d.message||'Test sent!', 'success'); }
+      catch(e) { this.toast(e.detail||'Webhook test failed', 'error'); }
     },
 
     formatVotes(n) {

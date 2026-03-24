@@ -148,36 +148,38 @@ def _maybe_push(
     meta: dict,
     reading_status: str | None,
 ):
-    """Evaluate all push-control settings and fire Pushover if appropriate."""
-    user_key, app_token, pushover_enabled = get_pushover_creds(db)
-    if not pushover_enabled or not user_key or not app_token:
-        return
-
+    """Evaluate all push-control settings and fire Pushover + webhooks if appropriate."""
     push_settings = _get_push_settings(db)
 
     # Per-type gate
     if notif_type == "chapter_update" and not push_settings["push_chapter_updates"]:
-        logger.debug("Pushover suppressed: push_chapter_updates=false")
+        logger.debug("Push suppressed: push_chapter_updates=false")
         return
     if notif_type == "news" and not push_settings["push_news"]:
-        logger.debug("Pushover suppressed: push_news=false")
+        logger.debug("Push suppressed: push_news=false")
         return
 
     # Reading-status gate (if enabled, only "reading" fires)
     if push_settings["push_reading_only"] and reading_status != "reading":
-        logger.debug(f"Pushover suppressed: push_reading_only=true, status={reading_status}")
+        logger.debug(f"Push suppressed: push_reading_only=true, status={reading_status}")
         return
 
     title = f"📚 {series_title}" if series_title else "Manga Tracker"
     url = meta.get("url")
 
-    send_pushover(
-        user_key=user_key,
-        app_token=app_token,
-        title=title,
-        message=message,
-        url=url,
-    )
+    # Pushover
+    user_key, app_token, pushover_enabled = get_pushover_creds(db)
+    if pushover_enabled and user_key and app_token:
+        send_pushover(
+            user_key=user_key,
+            app_token=app_token,
+            title=title,
+            message=message,
+            url=url,
+        )
+
+    # Discord / Slack webhook
+    _maybe_webhook(db, title, message, url)
 
 
 # ── Convenience wrappers (used by MB fallback in scheduler) ──────────────────
@@ -204,6 +206,38 @@ def notify_chapter_update(
         send_push=True,
         reading_status=reading_status,
     )
+
+
+def _maybe_webhook(db: Session, title: str, message: str, url: str | None = None):
+    """Send a Discord/Slack webhook if configured and enabled."""
+    rows = _load_settings(db)
+    enabled = rows.get("webhook_enabled", "false").lower() == "true"
+    webhook_url = rows.get("webhook_url", "").strip()
+    if not enabled or not webhook_url:
+        return
+
+    try:
+        # Detect Discord vs Slack by URL pattern
+        if "discord.com/api/webhooks" in webhook_url or "discordapp.com/api/webhooks" in webhook_url:
+            # Discord embed format
+            payload = {
+                "embeds": [{
+                    "title": title,
+                    "description": message + (f"\n[View]({url})" if url else ""),
+                    "color": 5814783,  # purple
+                }]
+            }
+        else:
+            # Slack-compatible (also works for generic webhook endpoints)
+            text = f"*{title}*\n{message}" + (f"\n<{url}|View>" if url else "")
+            payload = {"text": text}
+
+        with httpx.Client(timeout=10.0) as client:
+            resp = client.post(webhook_url, json=payload)
+            resp.raise_for_status()
+            logger.info(f"Webhook → {title}")
+    except Exception as e:
+        logger.error(f"Webhook failed: {e}")
 
 
 def notify_news(

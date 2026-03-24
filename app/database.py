@@ -82,6 +82,11 @@ class TrackedSeries(Base):
     reading_status = Column(String, default="reading")
     notes = Column(Text, nullable=True)
 
+    # ── Polling health ──────────────────────────────────────────────────
+    poll_failures = Column(Integer, default=0)            # consecutive failures
+    last_poll_error = Column(Text, nullable=True)         # last error message
+    last_poll_success = Column(DateTime, nullable=True)   # last successful poll time
+
     # ── Housekeeping ──────────────────────────────────────────────────
     mangabaka_url = Column(String, nullable=True)
     last_checked = Column(DateTime, nullable=True)
@@ -145,6 +150,9 @@ class TrackedSeries(Base):
             "reading_status": self.reading_status,
             "notes": self.notes,
             "mangabaka_url": self.mangabaka_url,
+            "poll_failures": self.poll_failures or 0,
+            "last_poll_error": self.last_poll_error,
+            "last_poll_success": self.last_poll_success.isoformat() if self.last_poll_success else None,
             "last_checked": self.last_checked.isoformat() if self.last_checked else None,
             "added_at": self.added_at.isoformat() if self.added_at else None,
             "has_update": self.has_update(),
@@ -215,6 +223,32 @@ class Release(Base):
         }
 
 
+class ReadingLog(Base):
+    """Track when users change their current_chapter — powers the Activity Log."""
+    __tablename__ = "reading_log"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    series_id = Column(Integer, nullable=False, index=True)
+    series_title = Column(String, nullable=True)
+    old_chapter = Column(String, nullable=True)
+    new_chapter = Column(String, nullable=True)
+    action = Column(String, default="chapter_update")  # chapter_update | status_change | added | removed
+    detail = Column(Text, nullable=True)  # extra context JSON
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "series_id": self.series_id,
+            "series_title": self.series_title,
+            "old_chapter": self.old_chapter,
+            "new_chapter": self.new_chapter,
+            "action": self.action,
+            "detail": self.detail,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
 class Settings(Base):
     __tablename__ = "settings"
 
@@ -266,6 +300,9 @@ def _migrate_db():
         ("tracked_series", "simulpub_source",   "VARCHAR"),
         ("tracked_series", "simulpub_id",        "VARCHAR"),
         ("tracked_series", "mb_provider_ids",    "TEXT"),
+        ("tracked_series", "poll_failures",      "INTEGER DEFAULT 0"),
+        ("tracked_series", "last_poll_error",    "TEXT"),
+        ("tracked_series", "last_poll_success",  "DATETIME"),
     ]
 
     # Indexes to ensure on hot query columns (idempotent — CREATE IF NOT EXISTS)
@@ -276,6 +313,26 @@ def _migrate_db():
     ]
 
     with engine.connect() as conn:
+        # Ensure reading_log table exists (added post-initial release)
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS reading_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                series_id INTEGER NOT NULL,
+                series_title VARCHAR,
+                old_chapter VARCHAR,
+                new_chapter VARCHAR,
+                action VARCHAR DEFAULT 'chapter_update',
+                detail TEXT,
+                created_at DATETIME
+            )
+        """))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_reading_log_series ON reading_log (series_id)"
+        ))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_reading_log_created ON reading_log (created_at)"
+        ))
+
         for table, col, col_type in migrations:
             rows = conn.execute(text(f"PRAGMA table_info({table})")).fetchall()
             existing = {row[1] for row in rows}
@@ -312,6 +369,12 @@ def _seed_settings():
             # reCAPTCHA v3 token for K Manga re-login (short-lived, consumed on use).
             # Paste a fresh token from the browser login flow when the session expires.
             "kmanga_recaptcha_token": "",
+            # Idle series detection
+            "idle_detection_enabled": "false",
+            "idle_threshold_days": "90",
+            # Discord/Slack webhook
+            "webhook_enabled": "false",
+            "webhook_url": "",
         }
         for k, v in defaults.items():
             if not db.query(Settings).filter(Settings.key == k).first():
