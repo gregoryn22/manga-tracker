@@ -26,6 +26,10 @@ EXPOSED_KEYS = [
     "kmanga_email",
     "kmanga_password",          # returned masked; full value stored in DB
     "kmanga_recaptcha_token",   # short-lived reCAPTCHA v3 token for re-login
+    "idle_detection_enabled",
+    "idle_threshold_days",
+    "webhook_enabled",
+    "webhook_url",
 ]
 
 
@@ -56,6 +60,10 @@ class UpdateSettingsRequest(BaseModel):
     kmanga_email: str | None = None
     kmanga_password: str | None = None
     kmanga_recaptcha_token: str | None = None
+    idle_detection_enabled: str | None = None
+    idle_threshold_days: str | None = None
+    webhook_enabled: str | None = None
+    webhook_url: str | None = None
 
 
 @router.patch("")
@@ -137,6 +145,29 @@ def test_pushover(db: Session = Depends(get_db)):
         return {"success": True, "message": "Test notification sent!"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Pushover error: {e}")
+
+
+@router.post("/test-webhook")
+def test_webhook(db: Session = Depends(get_db)):
+    """Send a test Discord/Slack webhook notification."""
+    from ..notifier import _maybe_webhook
+    webhook_url = get_setting(db, "webhook_url", "")
+    if not webhook_url:
+        raise HTTPException(status_code=400, detail="Webhook URL not configured")
+    try:
+        _maybe_webhook.__wrapped__ if hasattr(_maybe_webhook, '__wrapped__') else None
+        # Temporarily bypass the enabled check by calling the internal send directly
+        import httpx as _httpx
+        if "discord.com" in webhook_url or "discordapp.com" in webhook_url:
+            payload = {"embeds": [{"title": "📚 Manga Tracker — Test", "description": "Your webhook is working!", "color": 5814783}]}
+        else:
+            payload = {"text": "*📚 Manga Tracker — Test*\nYour webhook is working!"}
+        with _httpx.Client(timeout=10.0) as client:
+            resp = client.post(webhook_url, json=payload)
+            resp.raise_for_status()
+        return {"success": True, "message": "Test webhook sent!"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Webhook error: {e}")
 
 
 @router.post("/poll-now")
