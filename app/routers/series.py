@@ -498,9 +498,12 @@ def update_series(series_id: int, req: UpdateSeriesRequest, db: Session = Depend
         series.poll_failures = 0
         series.last_poll_error = None
         series.last_poll_success = None
-        # Reset source-specific release metadata so the new source isn't blocked
-        # by stale chapter numbers from the old source
+        # Clear stale chapter/release data so the new source starts fresh.
+        # The immediate _refresh_simulpub call below will re-populate these
+        # from the new source, so the user sees correct data right away.
+        series.mu_latest_chapter = None
         series.latest_release_group = None
+        series.latest_release_date = None
         # Log the source change in the activity log
         detail = f"Simulpub source changed: {old_source or 'none'}({old_sim_id or '?'}) → {series.simulpub_source or 'none'}({series.simulpub_id or '?'})"
         db.add(ReadingLog(
