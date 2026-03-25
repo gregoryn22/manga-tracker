@@ -69,6 +69,9 @@ class TrackedSeries(Base):
     #   'custom'     — manual tracking only; user sets mu_latest_chapter by hand
     simulpub_source = Column(String, nullable=True)
     simulpub_id = Column(String, nullable=True)  # Platform-specific series ID
+    # Komga-specific: 'chapter' (default) or 'volume' — controls whether we
+    # track the highest chapter number or highest volume/book number.
+    komga_track_mode = Column(String, nullable=True, default="chapter")
 
     # ── Detected provider IDs (from MangaBaka metadata) ───────────────
     # JSON dict populated at add/refresh time from MB's source + links fields.
@@ -81,6 +84,13 @@ class TrackedSeries(Base):
     current_chapter = Column(String, nullable=True, default="0")
     reading_status = Column(String, default="reading")
     notes = Column(Text, nullable=True)
+    last_read_at = Column(DateTime, nullable=True)
+    tags = Column(Text, nullable=True)                 # JSON array of tag strings
+
+    # ── Notification muting ────────────────────────────────────────────
+    # When True, push notifications (Pushover/webhook) are suppressed for
+    # this series.  In-app notifications are still created.
+    notification_muted = Column(Boolean, default=False)
 
     # ── Polling health ──────────────────────────────────────────────────
     poll_failures = Column(Integer, default=0)            # consecutive failures
@@ -145,10 +155,14 @@ class TrackedSeries(Base):
             "latest_release_group": self.latest_release_group,
             "simulpub_source": self.simulpub_source or "",
             "simulpub_id": self.simulpub_id or "",
+            "komga_track_mode": self.komga_track_mode or "chapter",
             "mb_provider_ids": self._safe_json(self.mb_provider_ids, default={}),
             "current_chapter": self.current_chapter,
             "reading_status": self.reading_status,
             "notes": self.notes,
+            "last_read_at": self.last_read_at.isoformat() if self.last_read_at else None,
+            "tags": self._safe_json(self.tags, default=[]),
+            "notification_muted": bool(self.notification_muted),
             "mangabaka_url": self.mangabaka_url,
             "poll_failures": self.poll_failures or 0,
             "last_poll_error": self.last_poll_error,
@@ -303,6 +317,10 @@ def _migrate_db():
         ("tracked_series", "poll_failures",      "INTEGER DEFAULT 0"),
         ("tracked_series", "last_poll_error",    "TEXT"),
         ("tracked_series", "last_poll_success",  "DATETIME"),
+        ("tracked_series", "komga_track_mode",   "VARCHAR DEFAULT 'chapter'"),
+        ("tracked_series", "notification_muted", "BOOLEAN DEFAULT 0"),
+        ("tracked_series", "last_read_at",       "DATETIME"),
+        ("tracked_series", "tags",               "TEXT"),
     ]
 
     # Indexes to ensure on hot query columns (idempotent — CREATE IF NOT EXISTS)
@@ -372,9 +390,17 @@ def _seed_settings():
             # Idle series detection
             "idle_detection_enabled": "false",
             "idle_threshold_days": "90",
+            # Komga self-hosted server
+            "komga_url": os.getenv("KOMGA_URL", ""),
+            "komga_api_key": os.getenv("KOMGA_API_KEY", ""),
+            # Dashboard behaviour
+            "updates_reading_only": "false",
             # Discord/Slack webhook
             "webhook_enabled": "false",
             "webhook_url": "",
+            # UI customization
+            "default_page": "library",
+            "grid_density": "normal",
         }
         for k, v in defaults.items():
             if not db.query(Settings).filter(Settings.key == k).first():

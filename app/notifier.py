@@ -106,6 +106,7 @@ def create_notification(
     meta: dict | None = None,
     send_push: bool = True,
     reading_status: str | None = None,
+    notification_muted: bool = False,
 ):
     """
     Persist an in-app notification and optionally dispatch to Pushover.
@@ -113,6 +114,9 @@ def create_notification(
     `send_push` is the caller's intent. Whether Pushover actually fires also
     depends on the user's granular settings (push_chapter_updates, push_news,
     push_reading_only) read from the DB at call time.
+
+    `notification_muted` is a per-series override — when True, the in-app
+    notification is still created but push/webhook is suppressed.
     """
     notif = Notification(
         series_id=series_id,
@@ -127,7 +131,7 @@ def create_notification(
     db.commit()
     db.refresh(notif)
 
-    if send_push:
+    if send_push and not notification_muted:
         _maybe_push(
             db=db,
             notif_type=notif_type,
@@ -136,6 +140,8 @@ def create_notification(
             meta=meta or {},
             reading_status=reading_status,
         )
+    elif notification_muted:
+        logger.debug(f"Push suppressed: series '{series_title}' is muted")
 
     return notif
 
@@ -208,6 +214,30 @@ def notify_chapter_update(
     )
 
 
+def send_webhook_raw(webhook_url: str, title: str, message: str, url: str | None = None):
+    """
+    Send a formatted message to a Discord or Slack webhook.
+
+    Detects the webhook type from the URL and formats accordingly.
+    Raises on failure — callers should handle exceptions.
+    """
+    if "discord.com/api/webhooks" in webhook_url or "discordapp.com/api/webhooks" in webhook_url:
+        payload = {
+            "embeds": [{
+                "title": title,
+                "description": message + (f"\n[View]({url})" if url else ""),
+                "color": 5814783,  # purple
+            }]
+        }
+    else:
+        text = f"*{title}*\n{message}" + (f"\n<{url}|View>" if url else "")
+        payload = {"text": text}
+
+    with httpx.Client(timeout=10.0) as client:
+        resp = client.post(webhook_url, json=payload)
+        resp.raise_for_status()
+
+
 def _maybe_webhook(db: Session, title: str, message: str, url: str | None = None):
     """Send a Discord/Slack webhook if configured and enabled."""
     rows = _load_settings(db)
@@ -217,25 +247,8 @@ def _maybe_webhook(db: Session, title: str, message: str, url: str | None = None
         return
 
     try:
-        # Detect Discord vs Slack by URL pattern
-        if "discord.com/api/webhooks" in webhook_url or "discordapp.com/api/webhooks" in webhook_url:
-            # Discord embed format
-            payload = {
-                "embeds": [{
-                    "title": title,
-                    "description": message + (f"\n[View]({url})" if url else ""),
-                    "color": 5814783,  # purple
-                }]
-            }
-        else:
-            # Slack-compatible (also works for generic webhook endpoints)
-            text = f"*{title}*\n{message}" + (f"\n<{url}|View>" if url else "")
-            payload = {"text": text}
-
-        with httpx.Client(timeout=10.0) as client:
-            resp = client.post(webhook_url, json=payload)
-            resp.raise_for_status()
-            logger.info(f"Webhook → {title}")
+        send_webhook_raw(webhook_url, title, message, url)
+        logger.info(f"Webhook → {title}")
     except Exception as e:
         logger.error(f"Webhook failed: {e}")
 

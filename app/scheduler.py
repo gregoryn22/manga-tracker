@@ -37,7 +37,7 @@ from datetime import datetime
 from apscheduler.schedulers.background import BackgroundScheduler
 from sqlalchemy.orm import Session
 
-from .database import Notification, Release, SessionLocal, TrackedSeries, get_setting
+from .database import Notification, Release, SessionLocal, TrackedSeries, get_setting, set_setting
 from .mangabaka import MangaBakaClient
 from .mangaupdates import (
     chapter_is_newer,
@@ -57,6 +57,7 @@ from .kmanga import (
 from .mangaplus import get_latest_chapter as mp_get_latest_chapter
 from .mangadex import MangaDexError, MangaDexNotFound, MangaDexRateLimited
 from .mangadex import get_latest_chapter as mdx_get_latest_chapter
+from .komga import KomgaClient, KomgaAuthError, KomgaConnectionError, KomgaError, KomgaNotFound
 from .mangaup import MangaUpError, MangaUpNotFound
 from .mangaup import get_latest_chapter as mup_get_latest_chapter
 from .notifier import clear_settings_cache, create_notification, get_pushover_creds, send_pushover
@@ -67,6 +68,45 @@ scheduler = BackgroundScheduler(timezone="UTC")
 _JOB_ID = "poll_updates"
 
 ACTIVE_STATUSES = {"reading", "on_hold"}
+
+
+def _mark_poll_success(series: TrackedSeries):
+    """Reset poll health counters on a successful poll."""
+    series.poll_failures = 0
+    series.last_poll_error = None
+    series.last_poll_success = datetime.utcnow()
+
+
+def _mark_poll_failure(series: TrackedSeries, error: str):
+    """Increment poll failure counter and record the error message."""
+    series.poll_failures = (series.poll_failures or 0) + 1
+    series.last_poll_error = error
+
+
+# Max consecutive failures before a series is skipped entirely until manual refresh
+_MAX_BACKOFF_FAILURES = 10
+
+
+def _should_skip_poll(series: TrackedSeries) -> bool:
+    """
+    Exponential backoff: skip polling a series based on its failure count.
+
+    After 5 consecutive failures, skip every other poll cycle.
+    After 7 failures, skip 3 out of 4 cycles.
+    After 10+ failures, skip entirely until manually refreshed.
+
+    Uses a simple modulo on poll_failures to approximate a backoff curve
+    without needing a separate timer or counter.
+    """
+    failures = series.poll_failures or 0
+    if failures < 5:
+        return False
+    if failures >= _MAX_BACKOFF_FAILURES:
+        return True  # fully paused — manual refresh required
+    # Skip increasingly often: 5-6 → every 2nd, 7-8 → every 4th, 9 → every 8th
+    skip_ratio = 2 ** ((failures - 5) // 2 + 1)
+    # Use a simple hash of the series ID to stagger which poll cycle runs
+    return (series.id % skip_ratio) != 0
 
 
 def _titles_plausibly_match(tracked_title: str, release_title: str) -> bool:
@@ -484,6 +524,7 @@ def _send_chapter_notification(
         },
         send_push=True,
         reading_status=series.reading_status,
+        notification_muted=bool(getattr(series, "notification_muted", False)),
     )
 
 
@@ -568,26 +609,44 @@ def _poll_via_simulpub(db: Session, series_list: list[TrackedSeries]):
 
     Runs after Layers 1 & 2.  Only updates mu_latest_chapter if the simulpub
     source reports a strictly higher chapter than what earlier layers already found.
+
+    Series with high consecutive poll failures are skipped via exponential backoff.
     """
-    mp_series = [s for s in series_list if s.simulpub_source == "mangaplus"]
+    # Apply exponential backoff — skip series that have failed too many times in a row
+    active = []
+    skipped = 0
+    for s in series_list:
+        if _should_skip_poll(s):
+            skipped += 1
+        else:
+            active.append(s)
+    if skipped:
+        logger.info(f"Layer 3: skipping {skipped} series due to backoff (consecutive failures)")
+
+    mp_series = [s for s in active if s.simulpub_source == "mangaplus"]
     if mp_series:
         logger.info(f"Layer 3: MangaPlus check for {len(mp_series)} series")
         _poll_mangaplus(db, mp_series)
 
-    km_series = [s for s in series_list if s.simulpub_source == "kmanga"]
+    km_series = [s for s in active if s.simulpub_source == "kmanga"]
     if km_series:
         logger.info(f"Layer 3: K Manga check for {len(km_series)} series")
         _poll_kmanga(db, km_series)
 
-    mup_series = [s for s in series_list if s.simulpub_source == "mangaup"]
+    mup_series = [s for s in active if s.simulpub_source == "mangaup"]
     if mup_series:
         logger.info(f"Layer 3: MangaUp! check for {len(mup_series)} series")
         _poll_mangaup(db, mup_series)
 
-    mdx_series = [s for s in series_list if s.simulpub_source == "mangadex"]
+    mdx_series = [s for s in active if s.simulpub_source == "mangadex"]
     if mdx_series:
         logger.info(f"Layer 3: MangaDex check for {len(mdx_series)} series")
         _poll_mangadex(db, mdx_series)
+
+    kg_series = [s for s in active if s.simulpub_source == "komga"]
+    if kg_series:
+        logger.info(f"Layer 3: Komga check for {len(kg_series)} series")
+        _poll_komga(db, kg_series)
 
 
 def _poll_mangaplus(db: Session, series_list: list[TrackedSeries]):
@@ -648,10 +707,13 @@ def _poll_mangaplus(db: Session, series_list: list[TrackedSeries]):
                     f"(known: {series.mu_latest_chapter})"
                 )
 
+            _mark_poll_success(series)
             series.last_checked = datetime.utcnow()
             db.commit()
         except Exception as e:
             logger.error(f"MangaPlus poll failed for '{series.title}': {e}")
+            _mark_poll_failure(series, str(e))
+            db.commit()
 
 
 def _poll_kmanga(db: Session, series_list: list[TrackedSeries]):
@@ -664,8 +726,6 @@ def _poll_kmanga(db: Session, series_list: list[TrackedSeries]):
       - On KMangaAuthError (expired session), attempts one re-login per run.
     """
     import json as _json
-
-    from .database import set_setting
 
     email    = get_setting(db, "kmanga_email", "")
     password = get_setting(db, "kmanga_password", "")
@@ -795,6 +855,7 @@ def _poll_kmanga(db: Session, series_list: list[TrackedSeries]):
                     f"(known: {series.mu_latest_chapter})"
                 )
 
+            _mark_poll_success(series)
             series.last_checked = datetime.utcnow()
             db.commit()
 
@@ -813,8 +874,12 @@ def _poll_kmanga(db: Session, series_list: list[TrackedSeries]):
             break
         except KMangaError as e:
             logger.error(f"K Manga poll failed for '{series.title}': {e}")
+            _mark_poll_failure(series, str(e))
+            db.commit()
         except Exception as e:
             logger.error(f"K Manga unexpected error for '{series.title}': {e}")
+            _mark_poll_failure(series, str(e))
+            db.commit()
 
     # Persist latest cookies (birthday refresh, etc.) back to DB
     set_setting(db, "kmanga_cookies", _json.dumps(client.cookies))
@@ -885,6 +950,7 @@ def _poll_mangaup(db: Session, series_list: list[TrackedSeries]):
                     f"(known: {series.mu_latest_chapter})"
                 )
 
+            _mark_poll_success(series)
             series.last_checked = datetime.utcnow()
             db.commit()
 
@@ -893,10 +959,16 @@ def _poll_mangaup(db: Session, series_list: list[TrackedSeries]):
                 f"MangaUp! title not found for '{series.title}' (id={series.simulpub_id})"
                 f" — check the title ID in series settings"
             )
+            _mark_poll_failure(series, f"Title not found (id={series.simulpub_id})")
+            db.commit()
         except MangaUpError as e:
             logger.error(f"MangaUp! poll failed for '{series.title}': {e}")
+            _mark_poll_failure(series, str(e))
+            db.commit()
         except Exception as e:
             logger.error(f"MangaUp! unexpected error for '{series.title}': {e}")
+            _mark_poll_failure(series, str(e))
+            db.commit()
 
 
 def _poll_mangadex(db: Session, series_list: list[TrackedSeries]):
@@ -964,6 +1036,7 @@ def _poll_mangadex(db: Session, series_list: list[TrackedSeries]):
                     f"(known: {series.mu_latest_chapter})"
                 )
 
+            _mark_poll_success(series)
             series.last_checked = datetime.utcnow()
             db.commit()
 
@@ -972,10 +1045,127 @@ def _poll_mangadex(db: Session, series_list: list[TrackedSeries]):
                 f"MangaDex manga not found for '{series.title}' (id={series.simulpub_id})"
                 f" — check the UUID in series settings"
             )
+            _mark_poll_failure(series, f"Manga not found (id={series.simulpub_id})")
+            db.commit()
         except MangaDexRateLimited:
             logger.warning("MangaDex rate limit hit — skipping remaining series this run")
             break
         except MangaDexError as e:
             logger.error(f"MangaDex poll failed for '{series.title}': {e}")
+            _mark_poll_failure(series, str(e))
+            db.commit()
         except Exception as e:
             logger.error(f"MangaDex unexpected error for '{series.title}': {e}")
+            _mark_poll_failure(series, str(e))
+            db.commit()
+
+
+def _poll_komga(db: Session, series_list: list[TrackedSeries]):
+    """
+    Poll a user's Komga server for each series and notify on new chapters.
+
+    Series IDs are opaque strings stored in simulpub_id.
+    Requires komga_url and komga_api_key to be configured in Settings.
+    Chapter numbers come from book metadata.number (highest numberSort).
+    """
+    komga_url = get_setting(db, "komga_url", "")
+    komga_key = get_setting(db, "komga_api_key", "")
+    if not komga_url or not komga_key:
+        logger.warning("Komga: server URL or API key not configured — skipping poll")
+        return
+
+    client = KomgaClient(komga_url, komga_key)
+
+    for series in series_list:
+        try:
+            is_volume = (getattr(series, "komga_track_mode", None) or "chapter") == "volume"
+            unit_label = "Vol." if is_volume else "Ch."
+
+            number = client.get_latest_chapter(series.simulpub_id)
+            if not number:
+                logger.debug(
+                    f"Komga: no data for '{series.title}' (id={series.simulpub_id})"
+                )
+                series.last_checked = datetime.utcnow()
+                db.commit()
+                continue
+
+            if chapter_is_newer(number, series.mu_latest_chapter):
+                group_name = "Komga (volume)" if is_volume else "Komga"
+                if _simulpub_release_exists(db, series.id, number, group_name):
+                    logger.debug(f"Komga: release already logged for '{series.title}' {unit_label} {number}")
+                    series.last_checked = datetime.utcnow()
+                    db.commit()
+                    continue
+
+                old_chapter = series.mu_latest_chapter
+                series.mu_latest_chapter    = number
+                series.latest_release_date  = datetime.utcnow().strftime("%Y-%m-%d")
+                series.latest_release_group = group_name
+
+                message = f"{series.title} — {unit_label} {number} · Komga"
+
+                kg_url = f"{komga_url}/series/{series.simulpub_id}"
+                rel = Release(
+                    series_id=series.id,
+                    mu_series_id=series.mu_series_id,
+                    series_title=series.title,
+                    chapter=number,
+                    volume=number if is_volume else None,
+                    release_date=series.latest_release_date,
+                    group_name=group_name,
+                    mu_release_id=None,
+                    cover_url=series.best_cover(),
+                    mu_url=kg_url,
+                )
+                db.add(rel)
+
+                _send_chapter_notification(
+                    db=db,
+                    series=series,
+                    message=message,
+                    chapter=number,
+                    volume=number if is_volume else None,
+                    group_name=group_name,
+                    release_date=series.latest_release_date,
+                    old_chapter=old_chapter,
+                )
+                logger.info(f"✓ Komga new: {message}")
+            else:
+                logger.debug(
+                    f"Komga: '{series.title}' still at {unit_label} {number} "
+                    f"(known: {series.mu_latest_chapter})"
+                )
+
+            _mark_poll_success(series)
+            series.last_checked = datetime.utcnow()
+            db.commit()
+
+        except KomgaAuthError:
+            logger.error("Komga: API key is invalid — check Settings")
+            # Mark all remaining Komga series as failed before breaking
+            for s in series_list:
+                _mark_poll_failure(s, "API key invalid")
+            db.commit()
+            break
+        except KomgaConnectionError as e:
+            logger.error(f"Komga: server unreachable — {e}")
+            for s in series_list:
+                _mark_poll_failure(s, f"Server unreachable: {e}")
+            db.commit()
+            break
+        except KomgaNotFound:
+            logger.error(
+                f"Komga: series not found for '{series.title}' (id={series.simulpub_id})"
+                f" — check the series ID in Settings"
+            )
+            _mark_poll_failure(series, f"Series not found (id={series.simulpub_id})")
+            db.commit()
+        except KomgaError as e:
+            logger.error(f"Komga poll failed for '{series.title}': {e}")
+            _mark_poll_failure(series, str(e))
+            db.commit()
+        except Exception as e:
+            logger.error(f"Komga unexpected error for '{series.title}': {e}")
+            _mark_poll_failure(series, str(e))
+            db.commit()

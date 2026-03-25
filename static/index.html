@@ -487,6 +487,7 @@
     .p-km  { background: rgba(30,120,255,0.2);  color: #4d9dff; }
     .p-mup { background: rgba(0,190,100,0.2);   color: #2ed87a; }
     .p-mdx { background: rgba(240,60,40,0.2);   color: #f05a46; }
+    .p-kg  { background: rgba(76,175,80,0.2);   color: #66bb6a; }
     .p-custom { background: rgba(150,150,150,0.2); color: var(--text-muted); }
 
     /* ── List view ─────────────────────────────────────── */
@@ -635,6 +636,10 @@
       <div class="nav-item" :class="{active: page==='search'}" @click="page='search'; sidebarOpen=false">
         <span class="nav-icon">🔍</span> Search
       </div>
+      <div class="nav-item" :class="{active: page==='komga'}" @click="page='komga'; loadKomgaBrowse(); sidebarOpen=false"
+           x-show="sf.komga_url && sf.komga_api_key">
+        <span class="nav-icon">📚</span> Komga
+      </div>
 
       <div class="nav-section">Manage</div>
       <div class="nav-item" :class="{active: page==='notifications'}" @click="page='notifications'; loadNotifications(); sidebarOpen=false">
@@ -643,6 +648,9 @@
       </div>
       <div class="nav-item" :class="{active: page==='activity'}" @click="page='activity'; loadActivity(); sidebarOpen=false">
         <span class="nav-icon">📋</span> Activity
+      </div>
+      <div class="nav-item" :class="{active: page==='stats'}" @click="page='stats'; loadStats(); sidebarOpen=false">
+        <span class="nav-icon">📊</span> Statistics
       </div>
       <div class="nav-item" :class="{active: page==='settings'}" @click="page='settings'; loadSettings(); sidebarOpen=false">
         <span class="nav-icon">⚙️</span> Settings
@@ -734,7 +742,7 @@
                 </template>
                 <div class="drop-body">
                   <div class="drop-title" x-text="r.series_title"></div>
-                  <div class="drop-ch" x-text="'Ch. ' + r.chapter"></div>
+                  <div class="drop-ch" x-text="releaseUnit(r) + ' ' + r.chapter"></div>
                   <div class="drop-group" x-text="r.group_name || ''"></div>
                 </div>
               </div>
@@ -769,8 +777,13 @@
             <option value="rating_asc">Rating (low)</option>
             <option value="added_desc">Recently Added</option>
             <option value="added_asc">Oldest Added</option>
+            <option value="release_desc">Latest Release</option>
+            <option value="release_asc">Oldest Release</option>
+            <option value="last_read_desc">Last Read</option>
+            <option value="idle_desc">Longest Idle</option>
             <option value="checked_desc">Last Checked</option>
             <option value="unread_desc">Most Unread</option>
+            <option value="progress_desc">Most Complete</option>
           </select>
           <select class="input" x-model="genreFilter" style="width:160px;padding:7px 10px;font-size:0.8rem"
                   x-show="allGenres.length > 0">
@@ -786,6 +799,13 @@
               <option :value="a" x-text="a"></option>
             </template>
           </select>
+          <select class="input" x-model="tagFilter" style="width:160px;padding:7px 10px;font-size:0.8rem"
+                  x-show="allTags.length > 0">
+            <option value="">All Tags</option>
+            <template x-for="t in allTags" :key="t">
+              <option :value="t" x-text="t"></option>
+            </template>
+          </select>
           <div class="view-toggle">
             <button :class="{active: viewMode==='grid'}" @click="viewMode='grid'" title="Grid view">▦</button>
             <button :class="{active: viewMode==='list'}" @click="viewMode='list'" title="List view">☰</button>
@@ -797,18 +817,24 @@
         </div>
 
         <!-- Bulk action bar -->
-        <div class="bulk-bar" x-show="bulkMode && bulkSelected.length > 0">
-          <span class="text-sm fw-600" x-text="bulkSelected.length + ' selected'"></span>
-          <select class="input" x-model="bulkStatus" style="width:160px;padding:5px 8px;font-size:0.8rem">
-            <option value="reading">📖 Reading</option>
-            <option value="considering">🤔 Considering</option>
-            <option value="plan_to_read">📋 Plan to Read</option>
-            <option value="on_hold">⏸ On Hold</option>
-            <option value="completed">✅ Completed</option>
-            <option value="dropped">❌ Dropped</option>
-          </select>
-          <button class="btn btn-primary btn-sm" @click="applyBulkStatus()">Apply Status</button>
-          <button class="btn btn-ghost btn-sm" @click="bulkSelected=[]">Clear</button>
+        <div class="bulk-bar" x-show="bulkMode">
+          <button class="btn btn-ghost btn-xs" @click="bulkSelectAll()" x-text="bulkSelected.length === filteredLibrary().length ? 'Deselect All' : 'Select All'" style="white-space:nowrap"></button>
+          <span class="text-sm fw-600" x-text="bulkSelected.length + ' selected'" x-show="bulkSelected.length > 0"></span>
+          <template x-if="bulkSelected.length > 0">
+            <div class="flex items-center gap-2">
+              <select class="input" x-model="bulkStatus" style="width:160px;padding:5px 8px;font-size:0.8rem">
+                <option value="reading">📖 Reading</option>
+                <option value="considering">🤔 Considering</option>
+                <option value="plan_to_read">📋 Plan to Read</option>
+                <option value="on_hold">⏸ On Hold</option>
+                <option value="completed">✅ Completed</option>
+                <option value="dropped">❌ Dropped</option>
+              </select>
+              <button class="btn btn-primary btn-sm" @click="applyBulkStatus()">Apply Status</button>
+              <button class="btn btn-danger btn-sm" @click="bulkDelete()">🗑 Delete</button>
+              <button class="btn btn-ghost btn-sm" @click="bulkSelected=[]">Clear</button>
+            </div>
+          </template>
         </div>
 
         <!-- Loading (skeleton) -->
@@ -835,7 +861,11 @@
         </div>
 
         <!-- Grid view -->
-        <div class="series-grid" x-show="!loading && filteredLibrary().length > 0 && viewMode==='grid'">
+        <div class="series-grid" x-show="!loading && filteredLibrary().length > 0 && viewMode==='grid'"
+             :style="{
+               'grid-template-columns': sf.grid_density === 'compact' ? 'repeat(auto-fill, minmax(130px, 1fr))' : (sf.grid_density === 'large' ? 'repeat(auto-fill, minmax(220px, 1fr))' : 'repeat(auto-fill, minmax(168px, 1fr))'),
+               'gap': sf.grid_density === 'compact' ? '10px' : (sf.grid_density === 'large' ? '20px' : '16px')
+             }">
           <template x-for="s in filteredLibrary()" :key="s.id">
             <div class="series-card" :class="{'has-update': s.has_update, 'selected': bulkSelected.includes(s.id)}"
                  @click="bulkMode ? toggleBulk(s.id) : openDetail(s)">
@@ -884,7 +914,7 @@
                 </div>
                 <!-- Latest chapter info -->
                 <div class="card-chapter" :class="{'new': s.has_update}" x-show="s.latest_chapter">
-                  Ch. <span x-text="s.latest_chapter"></span>
+                  <span x-text="unitLabel(s)"></span> <span x-text="s.latest_chapter"></span>
                   <template x-if="s.has_update">
                     <span style="font-size:0.62rem;color:var(--text-muted)"> ← <span x-text="s.current_chapter || '0'"></span> read</span>
                   </template>
@@ -895,6 +925,15 @@
                 <div class="progress-wrap" x-show="s.latest_chapter && s.current_chapter">
                   <div class="progress-bar" :class="{'green': s.has_update}" :style="`width: ${chapterProgress(s)}%`"></div>
                 </div>
+
+                <!-- Tags -->
+                <template x-if="(s.tags || []).length > 0">
+                  <div style="display:flex;gap:3px;flex-wrap:wrap;margin-top:6px">
+                    <template x-for="tag in s.tags" :key="tag">
+                      <span class="tag" style="font-size:0.65rem;padding:2px 6px" x-text="tag"></span>
+                    </template>
+                  </div>
+                </template>
 
                 <!-- Inline chapter controls -->
                 <div class="card-chapter-controls" @click.stop x-show="s.latest_chapter">
@@ -958,7 +997,7 @@
 
               <!-- Chapter info -->
               <div style="text-align:right;flex-shrink:0;min-width:90px">
-                <div class="list-chapter" x-show="s.latest_chapter" x-text="'Ch. ' + s.latest_chapter"></div>
+                <div class="list-chapter" x-show="s.latest_chapter" x-text="unitLabel(s) + ' ' + s.latest_chapter"></div>
                 <div class="text-xs text-muted" x-show="s.latest_chapter && s.current_chapter"
                      x-text="s.current_chapter + ' / ' + s.latest_chapter + ' read'"></div>
               </div>
@@ -1071,7 +1110,7 @@
                     <template x-for="r in group.releases" :key="r.mu_release_id || r.chapter">
                       <div class="release-row" style="padding:8px 0">
                         <div class="release-info">
-                          <div class="release-ch" x-text="'Ch. ' + r.chapter + (r.volume ? ' · Vol. ' + r.volume : '')"></div>
+                          <div class="release-ch" x-text="releaseUnit(r) + ' ' + r.chapter + (r.volume ? ' · Vol. ' + r.volume : '')"></div>
                           <div class="release-group" x-text="r.group_name ? 'by ' + r.group_name : ''"></div>
                         </div>
                         <div class="release-date" x-text="r.release_date"></div>
@@ -1199,6 +1238,16 @@
 
       <!-- ══ ACTIVITY LOG ═════════════════════════════════ -->
       <div x-show="page==='activity'">
+        <!-- Activity filters -->
+        <div class="flex gap-2 items-center" style="margin-bottom:12px">
+          <select class="input" x-model="activityFilter" @change="loadActivity()" style="width:180px;padding:6px 10px;font-size:0.8rem">
+            <option value="">All Activity</option>
+            <option value="chapter_update">📖 Chapter Updates</option>
+            <option value="status_change">🏷️ Status Changes</option>
+            <option value="source_change">📋 Source Changes</option>
+          </select>
+        </div>
+
         <div x-show="activityLog.length===0" class="empty">
           <div class="empty-icon">📋</div>
           <h3>No activity yet</h3>
@@ -1211,7 +1260,7 @@
               <div style="flex:1;min-width:0">
                 <div class="fw-600 text-sm" x-text="entry.series_title || 'Unknown'"></div>
                 <div class="text-xs text-muted" x-show="entry.action==='chapter_update'">
-                  Ch. <span x-text="entry.old_chapter || '0'"></span> → Ch. <span x-text="entry.new_chapter"></span>
+                  <span x-text="activityUnit(entry)"></span> <span x-text="entry.old_chapter || '0'"></span> → <span x-text="activityUnit(entry)"></span> <span x-text="entry.new_chapter"></span>
                 </div>
                 <div class="text-xs text-muted" x-show="entry.action==='status_change'">
                   <span x-text="(entry.old_chapter||'').replace('_',' ')"></span> → <span x-text="(entry.new_chapter||'').replace('_',' ')"></span>
@@ -1222,6 +1271,247 @@
           </template>
         </div>
       </div><!-- /activity -->
+
+
+      <!-- ══ STATISTICS ════════════════════════════════════ -->
+      <div x-show="page==='stats'">
+        <template x-if="statsLoading">
+          <div style="padding:40px;text-align:center"><span class="spin"></span> Loading statistics…</div>
+        </template>
+
+        <template x-if="!statsLoading && statsData">
+          <!-- Summary cards -->
+          <div class="stats-row">
+            <div class="stat-card">
+              <div class="stat-label">Total Series</div>
+              <div class="stat-value accent" x-text="statsData.total_series"></div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">Chapters Read</div>
+              <div class="stat-value green" x-text="statsData.total_chapters_read"></div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">Completion Rate</div>
+              <div class="stat-value blue" x-text="statsData.completion_rate.toFixed(1) + '%'"></div>
+            </div>
+            <div class="stat-card" x-show="statsData.avg_rating > 0">
+              <div class="stat-label">Avg Rating</div>
+              <div class="stat-value yellow" x-text="statsData.avg_rating.toFixed(2)"></div>
+              <div class="stat-sub">★ (MangaUpdates)</div>
+            </div>
+          </div>
+
+          <!-- Status breakdown -->
+          <template x-if="Object.keys(statsData.by_status).length > 0">
+            <div class="card" style="padding:20px 24px;margin-bottom:20px">
+              <div class="settings-block-title">📊 Status Breakdown</div>
+              <template x-for="[status, count] in Object.entries(statsData.by_status)" :key="status">
+                <div style="margin-bottom:12px">
+                  <div style="display:flex;justify-content:space-between;margin-bottom:4px;font-size:0.85rem">
+                    <span class="fw-600" x-text="status.replace('_',' ').replace(/\b\w/g, c => c.toUpperCase())"></span>
+                    <span class="text-muted" x-text="count + ' series'"></span>
+                  </div>
+                  <div style="width:100%;height:8px;background:var(--surface2);border-radius:4px;overflow:hidden">
+                    <div style="height:100%;background:var(--accent);border-radius:4px" :style="`width: ${(count / statsData.total_series * 100)}%`"></div>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </template>
+
+          <!-- Type distribution -->
+          <template x-if="Object.keys(statsData.by_type).length > 0">
+            <div class="card" style="padding:20px 24px;margin-bottom:20px">
+              <div class="settings-block-title">📚 Type Distribution</div>
+              <template x-for="[type, count] in Object.entries(statsData.by_type)" :key="type">
+                <div style="margin-bottom:12px">
+                  <div style="display:flex;justify-content:space-between;margin-bottom:4px;font-size:0.85rem">
+                    <span class="fw-600" x-text="type"></span>
+                    <span class="text-muted" x-text="count + ' series'"></span>
+                  </div>
+                  <div style="width:100%;height:8px;background:var(--surface2);border-radius:4px;overflow:hidden">
+                    <div style="height:100%;background:var(--blue);border-radius:4px" :style="`width: ${(count / statsData.total_series * 100)}%`"></div>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </template>
+
+          <!-- Genre breakdown (top 15) -->
+          <template x-if="statsData.by_genre.length > 0">
+            <div class="card" style="padding:20px 24px;margin-bottom:20px">
+              <div class="settings-block-title">🏷️ Top Genres</div>
+              <template x-for="item in statsData.by_genre" :key="item.genre">
+                <div style="margin-bottom:12px">
+                  <div style="display:flex;justify-content:space-between;margin-bottom:4px;font-size:0.85rem">
+                    <span class="fw-600" x-text="item.genre"></span>
+                    <span class="text-muted" x-text="item.count + ' series'"></span>
+                  </div>
+                  <div style="width:100%;height:8px;background:var(--surface2);border-radius:4px;overflow:hidden">
+                    <div style="height:100%;background:var(--green);border-radius:4px" :style="`width: ${(item.count / statsData.total_series * 100)}%`"></div>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </template>
+
+          <!-- Reading pace -->
+          <div class="card" style="padding:20px 24px;margin-bottom:20px">
+            <div class="settings-block-title">🏃 Reading Pace</div>
+            <div class="stats-row">
+              <div class="stat-card">
+                <div class="stat-label">Last 7 Days</div>
+                <div class="stat-value accent" x-text="statsData.reading_pace.last_7_days"></div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-label">Last 30 Days</div>
+                <div class="stat-value accent" x-text="statsData.reading_pace.last_30_days"></div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-label">Last 90 Days</div>
+                <div class="stat-value accent" x-text="statsData.reading_pace.last_90_days"></div>
+              </div>
+            </div>
+          </div>
+        </template>
+
+        <template x-if="!statsLoading && !statsData">
+          <div class="empty">
+            <div class="empty-icon">📊</div>
+            <h3>No data available</h3>
+            <p>Statistics will appear here once you start tracking series.</p>
+          </div>
+        </template>
+      </div><!-- /stats -->
+
+
+      <!-- ══ KOMGA BROWSER ══════════════════════════════════ -->
+      <div x-show="page==='komga'">
+
+        <!-- Filters row -->
+        <div class="card" style="padding:14px 20px;margin-bottom:16px;display:flex;flex-wrap:wrap;gap:10px;align-items:center">
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            <button class="pill" :class="{active: komgaReadFilter==='IN_PROGRESS'}" @click="komgaReadFilter='IN_PROGRESS'; komgaPage=0; loadKomgaBrowse()">📖 In Progress</button>
+            <button class="pill" :class="{active: komgaReadFilter==='UNREAD'}" @click="komgaReadFilter='UNREAD'; komgaPage=0; loadKomgaBrowse()">🆕 Unread</button>
+            <button class="pill" :class="{active: komgaReadFilter==='READ'}" @click="komgaReadFilter='READ'; komgaPage=0; loadKomgaBrowse()">✅ Completed</button>
+            <button class="pill" :class="{active: komgaReadFilter===''}" @click="komgaReadFilter=''; komgaPage=0; loadKomgaBrowse()">📋 All</button>
+          </div>
+          <div style="flex:1;min-width:200px">
+            <input class="input" type="text" placeholder="Search Komga library…" x-model="komgaBrowseSearch"
+                   @keyup.enter="komgaPage=0; loadKomgaBrowse()"
+                   @input.debounce.400ms="komgaPage=0; loadKomgaBrowse()"
+                   style="width:100%;font-size:0.85rem" />
+          </div>
+        </div>
+
+        <!-- Selection controls -->
+        <div x-show="komgaBrowse.length > 0" class="card" style="padding:12px 20px;margin-bottom:16px;display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between">
+          <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+            <label style="font-size:0.82rem;display:flex;align-items:center;gap:6px;cursor:pointer">
+              <input type="checkbox"
+                     :checked="komgaSelected.length > 0 && komgaSelected.length === komgaBrowse.filter(s=>!s.already_tracked).length"
+                     @change="if($el.checked){ komgaSelected = komgaBrowse.filter(s=>!s.already_tracked).map(s=>s.komga_id); } else { komgaSelected = []; }">
+              <span x-text="komgaSelected.length > 0 ? `${komgaSelected.length} selected` : 'Select all'"></span>
+            </label>
+            <div style="display:flex;gap:8px;align-items:center">
+              <span class="text-xs text-muted">Track as:</span>
+              <select class="input" x-model="komgaTrackMode" style="width:auto;padding:4px 8px;font-size:0.8rem">
+                <option value="chapter">Chapters</option>
+                <option value="volume">Volumes</option>
+              </select>
+            </div>
+            <label style="font-size:0.82rem;display:flex;align-items:center;gap:6px;cursor:pointer">
+              <input type="checkbox" x-model="komgaSyncProgress" />
+              <span>Sync read progress</span>
+            </label>
+          </div>
+          <button class="btn btn-primary" :disabled="komgaSelected.length === 0 || komgaImporting"
+                  @click="importFromKomga()"
+                  style="white-space:nowrap">
+            <span x-show="komgaImporting" class="spin" style="width:13px;height:13px;display:inline-block"></span>
+            <span x-text="komgaImporting ? 'Importing…' : `Import ${komgaSelected.length} series`"></span>
+          </button>
+        </div>
+
+        <!-- Loading -->
+        <template x-if="komgaLoading">
+          <div style="text-align:center;padding:60px 0">
+            <div class="spin" style="width:32px;height:32px;margin:0 auto 12px"></div>
+            <div class="text-muted">Loading Komga library…</div>
+          </div>
+        </template>
+
+        <!-- Grid of series cards -->
+        <template x-if="!komgaLoading && komgaBrowse.length > 0">
+          <div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:16px">
+              <template x-for="ks in komgaBrowse" :key="ks.komga_id">
+                <div class="card" style="padding:0;overflow:hidden;cursor:pointer;position:relative;transition:border-color 0.15s"
+                     :style="komgaSelected.includes(ks.komga_id) ? 'border-color:var(--accent);box-shadow:0 0 12px rgba(124,108,255,0.25)' : ''"
+                     @click="if(!ks.already_tracked){ if(komgaSelected.includes(ks.komga_id)){ komgaSelected = komgaSelected.filter(id=>id!==ks.komga_id); } else { komgaSelected = [...komgaSelected, ks.komga_id]; } }">
+
+                  <!-- Thumbnail -->
+                  <div style="width:100%;aspect-ratio:2/3;background:var(--surface2);overflow:hidden;position:relative">
+                    <img :src="ks.thumbnail_url" :alt="ks.title" style="width:100%;height:100%;object-fit:cover"
+                         loading="lazy" onerror="this.style.display='none'" />
+
+                    <!-- Already tracked badge -->
+                    <div x-show="ks.already_tracked" style="position:absolute;top:8px;left:8px;background:var(--green);color:#fff;font-size:0.7rem;font-weight:600;padding:2px 8px;border-radius:20px">
+                      Tracked
+                    </div>
+
+                    <!-- Checkbox (only for untracked) -->
+                    <div x-show="!ks.already_tracked" style="position:absolute;top:8px;right:8px;width:22px;height:22px;border-radius:6px;border:2px solid rgba(255,255,255,0.5);background:rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center"
+                         :style="komgaSelected.includes(ks.komga_id) ? 'background:var(--accent);border-color:var(--accent)' : ''">
+                      <span x-show="komgaSelected.includes(ks.komga_id)" style="color:#fff;font-size:0.75rem;font-weight:700">✓</span>
+                    </div>
+
+                    <!-- Read progress bar -->
+                    <div x-show="ks.books_count > 0" style="position:absolute;bottom:0;left:0;right:0;height:4px;background:rgba(0,0,0,0.5)">
+                      <div style="height:100%;background:var(--accent);border-radius:0 2px 2px 0;transition:width 0.3s"
+                           :style="`width:${(ks.books_read / ks.books_count * 100)}%`"></div>
+                    </div>
+                  </div>
+
+                  <!-- Info -->
+                  <div style="padding:10px 12px">
+                    <div style="font-size:0.82rem;font-weight:600;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden" x-text="ks.title"></div>
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px">
+                      <span class="text-xs text-muted" x-text="`${ks.books_read}/${ks.books_count} read`"></span>
+                      <span class="text-xs" style="padding:1px 6px;border-radius:4px;font-weight:500"
+                            :style="ks.status === 'ENDED' ? 'background:var(--green-dim);color:var(--green)' :
+                                    ks.status === 'ONGOING' ? 'background:var(--blue-dim);color:var(--blue)' :
+                                    ks.status === 'HIATUS' ? 'background:var(--yellow-dim);color:var(--yellow)' :
+                                    'background:var(--surface2);color:var(--text-muted)'"
+                            x-text="ks.status || 'Unknown'"></span>
+                    </div>
+                    <div x-show="ks.books_in_progress > 0" class="text-xs text-muted" style="margin-top:4px">
+                      📖 <span x-text="ks.books_in_progress"></span> in progress
+                    </div>
+                  </div>
+                </div>
+              </template>
+            </div>
+
+            <!-- Pagination -->
+            <div x-show="komgaPages > 1" style="display:flex;justify-content:center;gap:8px;margin-top:20px;padding-bottom:20px">
+              <button class="btn btn-ghost btn-sm" :disabled="komgaPage === 0" @click="komgaPage--; loadKomgaBrowse()">← Prev</button>
+              <span class="text-muted" style="line-height:32px;font-size:0.85rem" x-text="`Page ${komgaPage + 1} of ${komgaPages} (${komgaTotal} series)`"></span>
+              <button class="btn btn-ghost btn-sm" :disabled="komgaPage >= komgaPages - 1" @click="komgaPage++; loadKomgaBrowse()">Next →</button>
+            </div>
+          </div>
+        </template>
+
+        <!-- Empty state -->
+        <template x-if="!komgaLoading && komgaBrowse.length === 0">
+          <div class="empty">
+            <div class="empty-icon">📚</div>
+            <h3 x-text="komgaBrowseSearch ? 'No matching series' : (komgaReadFilter ? 'No series with this status' : 'Your Komga library is empty')"></h3>
+            <p x-text="komgaBrowseSearch ? 'Try a different search term.' : (komgaReadFilter ? 'Try a different filter or browse all series.' : 'Add some manga to your Komga server first.')"></p>
+          </div>
+        </template>
+
+      </div><!-- /komga -->
 
 
       <!-- ══ SETTINGS ══════════════════════════════════════ -->
@@ -1274,7 +1564,7 @@
               </div>
             </div>
 
-            <div style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:14px 16px;grid-column:1/-1">
+            <div style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:14px 16px">
               <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
                 <div style="font-size:0.85rem;font-weight:600">📲 Push only for "Reading" status</div>
                 <select class="input" x-model="sf.push_reading_only" style="width:100px;padding:4px 8px;font-size:0.8rem">
@@ -1287,6 +1577,21 @@
                 <strong>Reading</strong>. Series set to On Hold, Plan to Read, Considering, etc.
                 still create in-app notifications but won't ping your device.
                 Useful if you have a large backlog you haven't started yet.
+              </div>
+            </div>
+
+            <div style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:14px 16px">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+                <div style="font-size:0.85rem;font-weight:600">🟢 Dashboard "Updates" filter</div>
+                <select class="input" x-model="sf.updates_reading_only" style="width:100px;padding:4px 8px;font-size:0.8rem">
+                  <option value="false">All statuses</option>
+                  <option value="true">Reading only</option>
+                </select>
+              </div>
+              <div class="text-xs text-muted" style="line-height:1.5">
+                When set to "Reading only", the Updates pill and badge on the dashboard only count
+                series with <strong>Reading</strong> status. Plan to Read, On Hold, etc. with new chapters
+                still show a NEW chip on their card — they just won't be counted in the update total.
               </div>
             </div>
 
@@ -1399,6 +1704,28 @@
           </div>
         </div>
 
+        <div class="card" style="padding:20px 24px">
+          <div class="settings-block-title">📚 Komga (Self-Hosted)</div>
+          <div class="settings-row">
+            <label>Server URL</label>
+            <input class="input" type="url" style="flex:1" placeholder="https://komga.example.com"
+                   x-model="sf.komga_url" autocomplete="off" />
+          </div>
+          <div class="settings-row">
+            <label>API Key</label>
+            <input class="input" type="text" style="flex:1" placeholder="Your Komga API key"
+                   x-model="sf.komga_api_key" autocomplete="off" />
+          </div>
+          <div class="flex gap-2 mt-2">
+            <button class="btn btn-primary btn-sm" @click="saveSettings()">💾 Save</button>
+            <button class="btn btn-ghost btn-sm" @click="testKomga()">🔌 Test Connection</button>
+          </div>
+          <div class="text-xs text-muted mt-2">
+            Connect your Komga server to track chapter updates from your self-hosted library.
+            Generate an API key in Komga: User Settings → API Keys.
+          </div>
+        </div>
+
         <!-- ── Idle Series Detection ──────────────────────── -->
         <div class="card" style="padding:20px 24px;margin-bottom:16px">
           <div class="settings-block-title">💤 Idle Series Detection</div>
@@ -1457,6 +1784,40 @@
           </div>
           <div class="text-xs text-muted mt-2" style="line-height:1.5">
             Export your entire library as a JSON file for backup or migration. Import will skip series that are already tracked.
+          </div>
+        </div>
+
+        <!-- UI Customization -->
+        <div class="card" style="padding:20px 24px;margin-bottom:16px">
+          <div class="settings-block-title">🎨 UI Customization</div>
+
+          <div class="settings-row">
+            <label>Default Landing Page</label>
+            <select class="input" x-model="sf.default_page" style="width:200px">
+              <option value="library">📚 Library</option>
+              <option value="releases">⚡ Live Feed</option>
+              <option value="search">🔍 Search</option>
+              <option value="notifications">🔔 Notifications</option>
+              <option value="activity">📋 Activity</option>
+              <option value="stats">📊 Statistics</option>
+              <option value="settings">⚙️ Settings</option>
+            </select>
+          </div>
+
+          <div class="settings-row">
+            <label>Grid Density</label>
+            <select class="input" x-model="sf.grid_density" style="width:200px">
+              <option value="compact">🗜️ Compact (130px)</option>
+              <option value="normal">📦 Normal (168px)</option>
+              <option value="large">📏 Large (220px)</option>
+            </select>
+          </div>
+
+          <div class="flex gap-2 mt-2">
+            <button class="btn btn-primary btn-sm" @click="saveSettings()">💾 Save</button>
+          </div>
+          <div class="text-xs text-muted mt-2">
+            Customize your dashboard experience. Changes are applied immediately.
           </div>
         </div>
 
@@ -1538,6 +1899,7 @@
               <span class="provider-chip p-km"  x-show="ds.simulpub_source === 'kmanga'">K Manga</span>
               <span class="provider-chip p-mup" x-show="ds.simulpub_source === 'mangaup'">MangaUp!</span>
               <span class="provider-chip p-mdx" x-show="ds.simulpub_source === 'mangadex'">MangaDex</span>
+              <span class="provider-chip p-kg"  x-show="ds.simulpub_source === 'komga'">Komga</span>
               <span class="provider-chip p-custom" x-show="ds.simulpub_source === 'custom'">Manual</span>
             </div>
           </div>
@@ -1552,7 +1914,7 @@
               <div class="flex items-center gap-2">
                 <span style="font-size:1.1rem">📡</span>
                 <div>
-                  <div class="text-sm fw-600 text-green">Latest: Chapter <span x-text="ds.latest_chapter"></span></div>
+                  <div class="text-sm fw-600 text-green">Latest: <span x-text="unitLabel(ds) === 'Vol.' ? 'Volume' : 'Chapter'"></span> <span x-text="ds.latest_chapter"></span></div>
                   <div class="text-xs text-muted" x-show="ds.latest_release_group">
                     by <span x-text="ds.latest_release_group"></span>
                     <span x-show="ds.latest_release_date"> · <span x-text="ds.latest_release_date"></span></span>
@@ -1594,12 +1956,62 @@
             </div>
             <div class="text-xs text-muted mt-1" x-show="ds.latest_chapter"
                  x-text="`${chapterProgress({...ds, current_chapter: ef.current_chapter}).toFixed(0)}% complete`"></div>
+            <div class="text-xs text-muted mt-2" x-show="ds.last_read_at">
+              Last read: <strong x-text="relativeTime(ds.last_read_at)"></strong>
+            </div>
           </div>
 
           <div class="form-group">
             <div class="form-label">Notes</div>
             <textarea class="input" rows="2" placeholder="Your notes…" x-model="ef.notes" style="width:100%"></textarea>
           </div>
+
+          <div class="form-group">
+            <div class="form-label">Tags</div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+              <template x-for="tag in (ef.tags || [])" :key="tag">
+                <div style="display:inline-flex;align-items:center;gap:6px;background:var(--accent-dim);color:var(--accent);padding:4px 10px;border-radius:99px;font-size:0.78rem;border:1px solid rgba(124,108,255,0.3)">
+                  <span x-text="tag"></span>
+                  <button type="button" @click="ef.tags = ef.tags.filter(t => t !== tag)" style="background:none;border:none;color:inherit;cursor:pointer;font-weight:bold;padding:0;font-size:0.9rem">×</button>
+                </div>
+              </template>
+            </div>
+            <div style="display:flex;gap:6px;align-items:center">
+              <input class="input" type="text" placeholder="Add a new tag…" x-model="ef.newTag" style="flex:1;font-size:0.85rem" @keyup.enter="if(ef.newTag.trim() && !(ef.tags||[]).includes(ef.newTag.trim())){ ef.tags=[...(ef.tags||[]), ef.newTag.trim()]; ef.newTag=''; }" />
+              <button class="btn btn-primary btn-sm" @click="if(ef.newTag.trim() && !(ef.tags||[]).includes(ef.newTag.trim())){ ef.tags=[...(ef.tags||[]), ef.newTag.trim()]; ef.newTag=''; }">Add</button>
+            </div>
+            <template x-if="allTags.length > 0">
+              <div class="text-xs text-muted mt-2" style="margin-bottom:8px">Suggested tags:</div>
+              <div style="display:flex;gap:4px;flex-wrap:wrap">
+                <template x-for="tag in allTags" :key="tag">
+                  <button type="button" class="btn btn-ghost btn-xs" @click="ef.tags = ef.tags.includes(tag) ? ef.tags.filter(t => t !== tag) : [...(ef.tags||[]), tag]"
+                          :class="{'btn-primary': (ef.tags||[]).includes(tag)}" x-text="tag"></button>
+                </template>
+              </div>
+            </template>
+          </div>
+
+          <div class="form-group">
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:0.85rem">
+              <input type="checkbox" x-model="ef.notification_muted" style="accent-color:var(--accent)" />
+              <span>🔇 Mute push notifications for this series</span>
+            </label>
+            <div class="text-xs text-muted" style="margin-left:26px">
+              In-app notifications are still created. Only Pushover / webhook pushes are suppressed.
+            </div>
+          </div>
+
+          <!-- Poll health info -->
+          <template x-if="ds.poll_failures > 0">
+            <div class="card" style="padding:10px 14px;margin-bottom:14px;border-color:var(--red);font-size:0.8rem">
+              <div class="flex items-center gap-2">
+                <span class="poll-health" :class="pollHealthClass(ds)"></span>
+                <span class="fw-600" x-text="ds.poll_failures + ' consecutive poll failure' + (ds.poll_failures > 1 ? 's' : '')"></span>
+              </div>
+              <div class="text-xs text-muted mt-1" x-show="ds.last_poll_error" x-text="ds.last_poll_error"></div>
+              <div class="text-xs text-muted mt-1" x-show="ds.poll_failures >= 10">Polling paused — click Refresh to retry and reset.</div>
+            </div>
+          </template>
 
           <!-- Simulpub source config -->
           <div class="form-group">
@@ -1624,6 +2036,7 @@
               <option value="kmanga">🔵 K Manga / Kodansha (simulpub)</option>
               <option value="mangaup">🟢 MangaUp! / Square Enix (simulpub)</option>
               <option value="mangadex">🔴 MangaDex</option>
+              <option value="komga">📚 Komga (self-hosted)</option>
               <option value="custom">✏️ Manual / Custom</option>
             </select>
             <!-- Detected provider hint badges -->
@@ -1687,7 +2100,7 @@
                      :href="`https://kmanga.kodansha.com/title/${ef.simulpub_id}`"
                      target="_blank" class="btn btn-ghost btn-sm">K Manga ↗</a>
                 </div>
-                <div class="text-xs text-muted mt-1" x-show="!$store?.kmanga_configured">
+                <div class="text-xs text-muted mt-1" x-show="!sf.kmanga_email || !sf.kmanga_password">
                   Requires K Manga credentials in Settings.
                 </div>
               </div>
@@ -1730,6 +2143,62 @@
               </div>
             </template>
 
+            <!-- Komga series ID input + search -->
+            <template x-if="ef.simulpub_source === 'komga'">
+              <div style="margin-top:10px">
+                <div class="text-xs text-muted mb-1">
+                  Search your Komga library or paste a series ID directly.
+                </div>
+                <div class="flex gap-2 items-center mb-2">
+                  <input class="input" type="text" placeholder="Search Komga library..."
+                         x-model="ef.komgaSearch"
+                         @input.debounce.400ms="searchKomga()" style="width:280px" />
+                  <span class="text-xs text-muted" x-show="ef.komgaSearching">searching…</span>
+                </div>
+                <template x-if="ef.komgaResults && ef.komgaResults.length > 0">
+                  <div style="max-height:160px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;margin-bottom:8px">
+                    <template x-for="ks in ef.komgaResults" :key="ks.id">
+                      <div class="flex items-center gap-2 px-3 py-2"
+                           style="cursor:pointer;border-bottom:1px solid var(--border)"
+                           :style="ef.simulpub_id === ks.id ? 'background:var(--surface2)' : ''"
+                           @click="ef.simulpub_id = ks.id; ef.komgaResults = []">
+                        <span class="text-sm" x-text="ks.metadata?.title || ks.name"></span>
+                        <span class="text-xs text-muted" x-text="ks.booksCount + ' books'"></span>
+                      </div>
+                    </template>
+                  </div>
+                </template>
+                <template x-if="ef.komgaSearched && ef.komgaResults && ef.komgaResults.length === 0">
+                  <div class="text-xs text-muted mb-2">No series found. You can paste the ID directly below.</div>
+                </template>
+                <div class="flex gap-2 items-center">
+                  <input class="input" type="text" placeholder="Komga series ID"
+                         x-model="ef.simulpub_id" style="width:280px;font-size:0.8rem" />
+                  <a x-show="ef.simulpub_id && sf.komga_url"
+                     :href="`${sf.komga_url}/series/${ef.simulpub_id}`"
+                     target="_blank" class="btn btn-ghost btn-sm">Komga ↗</a>
+                </div>
+                <div class="text-xs text-muted mt-1" x-show="!sf.komga_url || !sf.komga_api_key">
+                  ⚠️ Configure your Komga URL and API key in Settings first.
+                </div>
+                <!-- Track mode toggle -->
+                <div class="flex gap-3 items-center mt-3" style="padding:8px 12px;background:var(--surface2);border-radius:8px">
+                  <span class="text-xs fw-600">Track by:</span>
+                  <label class="flex items-center gap-1" style="cursor:pointer">
+                    <input type="radio" value="chapter" x-model="ef.komga_track_mode" />
+                    <span class="text-xs">Chapters</span>
+                  </label>
+                  <label class="flex items-center gap-1" style="cursor:pointer">
+                    <input type="radio" value="volume" x-model="ef.komga_track_mode" />
+                    <span class="text-xs">Volumes</span>
+                  </label>
+                  <span class="text-xs text-muted" x-show="ef.komga_track_mode === 'volume'">
+                    Each book in Komga = one volume
+                  </span>
+                </div>
+              </div>
+            </template>
+
             <!-- Custom / manual chapter input -->
             <template x-if="ef.simulpub_source === 'custom'">
               <div style="margin-top:10px">
@@ -1769,7 +2238,7 @@
                   <div class="tl-item">
                     <div class="tl-dot"></div>
                     <div>
-                      <div class="tl-ch" x-text="'Ch. ' + r.chapter + (r.volume ? ' · Vol. ' + r.volume : '')"></div>
+                      <div class="tl-ch" x-text="releaseUnit(r) + ' ' + r.chapter + (r.volume ? ' · Vol. ' + r.volume : '')"></div>
                       <div class="tl-meta">
                         <span x-text="r.release_date || ''"></span>
                         <span x-show="r.groups && r.groups.length"> · <span x-text="r.groups[0].name"></span></span>
@@ -1798,6 +2267,9 @@
             <a x-show="ds.simulpub_source === 'mangadex' && ds.simulpub_id"
                :href="`https://mangadex.org/title/${ds.simulpub_id}`"
                target="_blank" class="btn btn-ghost btn-sm">MangaDex ↗</a>
+            <a x-show="ds.simulpub_source === 'komga' && ds.simulpub_id && sf.komga_url"
+               :href="`${sf.komga_url}/series/${ds.simulpub_id}`"
+               target="_blank" class="btn btn-ghost btn-sm">Komga ↗</a>
           </div>
         </div>
 
@@ -1892,6 +2364,7 @@ function app() {
     sortBy: 'added_desc',
     genreFilter: '',
     authorFilter: '',
+    tagFilter: '',
 
     // Bulk mode
     bulkMode: false, bulkSelected: [], bulkStatus: 'reading',
@@ -1907,9 +2380,10 @@ function app() {
 
     // Activity log
     activityLog: [],
+    activityFilter: '',
 
     // Settings form
-    sf: { pushover_user_key:'', pushover_app_token:'', pushover_enabled:'false', push_chapter_updates:'true', push_news:'false', push_reading_only:'false', poll_interval_hours:'6', mangabaka_token:'', mu_enabled:'true', kmanga_email:'', kmanga_password:'', kmanga_recaptcha_token:'', idle_detection_enabled:'false', idle_threshold_days:'90', webhook_enabled:'false', webhook_url:'' },
+    sf: { pushover_user_key:'', pushover_app_token:'', pushover_enabled:'false', push_chapter_updates:'true', push_news:'false', push_reading_only:'false', updates_reading_only:'false', poll_interval_hours:'6', mangabaka_token:'', mu_enabled:'true', kmanga_email:'', kmanga_password:'', kmanga_recaptcha_token:'', komga_url:'', komga_api_key:'', idle_detection_enabled:'false', idle_threshold_days:'90', webhook_enabled:'false', webhook_url:'', default_page:'library', grid_density:'normal' },
 
     // Detail modal
     detailOpen: false, ds: null, ef: {}, detailReleases: [],
@@ -1919,6 +2393,16 @@ function app() {
 
     // Live feed
     feedReleases: [], feedTotal: 0, feedLoading: false, feedGrouped: false,
+
+    // Statistics
+    statsData: null, statsLoading: false,
+
+    // Komga browser
+    komgaBrowse: [], komgaTotal: 0, komgaPages: 0, komgaPage: 0,
+    komgaLoading: false, komgaBrowseSearch: '',
+    komgaReadFilter: 'IN_PROGRESS', // IN_PROGRESS, UNREAD, READ, or '' for all
+    komgaSelected: [], komgaTrackMode: 'chapter', komgaSyncProgress: true,
+    komgaImporting: false,
 
     // Polling
     polling: false,
@@ -1934,8 +2418,9 @@ function app() {
 
     // Computed stats
     get stats() {
+      const readingOnly = this.sf.updates_reading_only === 'true';
       return {
-        updates: this.library.filter(s=>s.has_update).length,
+        updates: this.library.filter(s => s.has_update && (!readingOnly || s.reading_status === 'reading')).length,
         reading: this.library.filter(s=>s.reading_status==='reading').length,
         mu_linked: this.library.filter(s=>s.mu_series_id).length,
       };
@@ -1946,8 +2431,20 @@ function app() {
       try { const d = await this.api('/api/settings'); this.sf = {...this.sf,...d}; } catch(e) {}
       await this.loadLibrary();
       await this.pollUnreadCount();
-      // Silently prefetch feed in background
-      this.loadReleaseFeed().catch(()=>{});
+      // Load appropriate page based on default_page setting
+      const defaultPage = this.sf.default_page || 'library';
+      if (defaultPage !== 'library') {
+        this.page = defaultPage;
+        if (defaultPage === 'releases') { this.loadReleaseFeed().catch(()=>{}); }
+        else if (defaultPage === 'notifications') { this.loadNotifications().catch(()=>{}); }
+        else if (defaultPage === 'activity') { this.loadActivity().catch(()=>{}); }
+        else if (defaultPage === 'stats') { this.loadStats().catch(()=>{}); }
+        else if (defaultPage === 'komga') { this.loadKomgaBrowse().catch(()=>{}); }
+        else if (defaultPage === 'settings') { this.loadSettings().catch(()=>{}); }
+      } else {
+        // Silently prefetch feed in background
+        this.loadReleaseFeed().catch(()=>{});
+      }
       setInterval(() => this.pollUnreadCount(), 30000);
     },
 
@@ -1965,8 +2462,15 @@ function app() {
       return [...set].sort();
     },
 
+    // Computed: all tags from library
+    get allTags() {
+      const set = new Set();
+      this.library.forEach(s => (s.tags||[]).forEach(t => set.add(t)));
+      return [...set].sort();
+    },
+
     pageTitle() {
-      return { library:'My Library', releases:'Live Feed', search:'Search', notifications:'Notifications', activity:'Activity Log', settings:'Settings' }[this.page] || '';
+      return { library:'My Library', releases:'Live Feed', search:'Search', komga:'Komga Library', notifications:'Notifications', activity:'Activity Log', stats:'Statistics', settings:'Settings' }[this.page] || '';
     },
 
     // ── Library ─────────────────────────────────────────
@@ -2002,7 +2506,7 @@ function app() {
       if (!this.filters.includes('all')) {
         list = list.filter(s => {
           for (const f of this.filters) {
-            if (f === 'updates' && s.has_update) return true;
+            if (f === 'updates' && s.has_update && (this.sf.updates_reading_only !== 'true' || s.reading_status === 'reading')) return true;
             if (f === 'idle' && this.isIdle(s)) return true;
             if (s.reading_status === f) return true;
           }
@@ -2026,6 +2530,11 @@ function app() {
         list = list.filter(s => (s.authors||[]).includes(this.authorFilter));
       }
 
+      // Tag filter
+      if (this.tagFilter) {
+        list = list.filter(s => (s.tags||[]).includes(this.tagFilter));
+      }
+
       // Sorting
       const [field, dir] = this.sortBy.split('_');
       const mul = dir === 'desc' ? -1 : 1;
@@ -2039,12 +2548,25 @@ function app() {
           case 'added':
             va = a.added_at || ''; vb = b.added_at || '';
             return mul * va.localeCompare(vb);
+          case 'release':
+            va = a.latest_release_date || ''; vb = b.latest_release_date || '';
+            return mul * va.localeCompare(vb);
+          case 'idle':
+            // Sort by how long since last release (longest idle = desc)
+            va = a.latest_release_date || a.added_at || ''; vb = b.latest_release_date || b.added_at || '';
+            return mul * va.localeCompare(vb);
           case 'checked':
             va = a.last_checked || ''; vb = b.last_checked || '';
             return mul * va.localeCompare(vb);
           case 'unread':
             va = this._unreadNum(a); vb = this._unreadNum(b);
             return mul * (va - vb);
+          case 'progress':
+            va = this.chapterProgress(a); vb = this.chapterProgress(b);
+            return mul * (va - vb);
+          case 'last_read':
+            va = a.last_read_at || ''; vb = b.last_read_at || '';
+            return mul * va.localeCompare(vb);
           default: return 0;
         }
       });
@@ -2101,7 +2623,7 @@ function app() {
           const current = parseFloat(val);
           this.library[idx].has_update = latest > 0 && current < latest;
         }
-        this.toast(`${s.title} → Ch. ${val} read`, 'success');
+        this.toast(`${s.title} → ${this.unitLabel(s)} ${val} read`, 'success');
       } catch(e) {
         this.toast('Failed to update chapter', 'error');
       }
@@ -2142,6 +2664,31 @@ function app() {
       else this.bulkSelected.splice(idx, 1);
     },
 
+    bulkSelectAll() {
+      const visible = this.filteredLibrary().map(s => s.id);
+      if (this.bulkSelected.length === visible.length) {
+        this.bulkSelected = [];
+      } else {
+        this.bulkSelected = [...visible];
+      }
+    },
+
+    async bulkDelete() {
+      const count = this.bulkSelected.length;
+      if (!confirm(`Delete ${count} series from your library? This cannot be undone.`)) return;
+      try {
+        let deleted = 0;
+        for (const id of this.bulkSelected) {
+          await this.api(`/api/series/${id}`, 'DELETE');
+          deleted++;
+        }
+        this.library = this.library.filter(s => !this.bulkSelected.includes(s.id));
+        this.bulkSelected = [];
+        this.bulkMode = false;
+        this.toast(`Deleted ${deleted} series`, 'success');
+      } catch(e) { this.toast('Bulk delete failed', 'error'); }
+    },
+
     async applyBulkStatus() {
       try {
         const resp = await this.api('/api/series/bulk/status', 'POST', {
@@ -2169,8 +2716,29 @@ function app() {
 
     // ── Activity log ─────────────────────────────────
     async loadActivity() {
-      try { this.activityLog = await this.api('/api/series/activity/log'); }
-      catch(e) { this.toast('Failed to load activity', 'error'); }
+      try {
+        const params = this.activityFilter ? `?action=${this.activityFilter}` : '';
+        this.activityLog = await this.api(`/api/series/activity/log${params}`);
+      } catch(e) { this.toast('Failed to load activity', 'error'); }
+    },
+
+    // ── Statistics ───────────────────────────────────
+    async loadStats() {
+      this.statsLoading = true;
+      try {
+        this.statsData = await this.api('/api/series/stats');
+      } catch(e) {
+        this.toast('Failed to load statistics', 'error');
+        this.statsData = null;
+      } finally {
+        this.statsLoading = false;
+      }
+    },
+
+    // ── Settings ─────────────────────────────────────
+    async loadSettings() {
+      try { const d = await this.api('/api/settings'); this.sf = {...this.sf,...d}; }
+      catch(e) { this.toast('Failed to load settings', 'error'); }
     },
 
     // ── Export / Import ──────────────────────────────
@@ -2209,10 +2777,97 @@ function app() {
       catch(e) { this.toast(e.detail||'Webhook test failed', 'error'); }
     },
 
+    async testKomga() {
+      try { const d = await this.api('/api/settings/test-komga', 'POST'); this.toast(d.message||'Connected!', 'success'); }
+      catch(e) { this.toast(e.detail||'Komga connection failed', 'error'); }
+    },
+
+    // ── Komga Browser ─────────────────────────────────────
+    async loadKomgaBrowse() {
+      this.komgaLoading = true;
+      try {
+        const params = new URLSearchParams({
+          page: this.komgaPage,
+          size: 24,
+          sort: 'metadata.titleSort,asc',
+        });
+        if (this.komgaReadFilter) params.set('read_status', this.komgaReadFilter);
+        if (this.komgaBrowseSearch.trim()) params.set('search', this.komgaBrowseSearch.trim());
+        const data = await this.api(`/api/komga/browse?${params}`);
+        this.komgaBrowse = data.content || [];
+        this.komgaTotal = data.total_elements || 0;
+        this.komgaPages = data.total_pages || 0;
+        this.komgaPage = data.page || 0;
+        // Clear selection when changing pages/filters
+        this.komgaSelected = [];
+      } catch(e) {
+        this.toast(e.detail || 'Failed to load Komga library', 'error');
+        this.komgaBrowse = [];
+      } finally {
+        this.komgaLoading = false;
+      }
+    },
+
+    async importFromKomga() {
+      if (this.komgaSelected.length === 0) return;
+      this.komgaImporting = true;
+      try {
+        const items = this.komgaSelected.map(id => ({
+          komga_series_id: id,
+          track_mode: this.komgaTrackMode,
+          sync_progress: this.komgaSyncProgress,
+        }));
+        const resp = await this.api('/api/komga/import', 'POST', { items });
+        const parts = [];
+        if (resp.imported > 0) parts.push(`${resp.imported} imported`);
+        if (resp.skipped > 0) parts.push(`${resp.skipped} already tracked`);
+        if (resp.errors && resp.errors.length > 0) parts.push(`${resp.errors.length} failed`);
+        this.toast(parts.join(', ') || 'Done!', resp.imported > 0 ? 'success' : 'error');
+        // Refresh library and the Komga browse grid
+        await this.loadLibrary();
+        await this.loadKomgaBrowse();
+      } catch(e) {
+        this.toast(e.detail || 'Import failed', 'error');
+      } finally {
+        this.komgaImporting = false;
+      }
+    },
+
+    async searchKomga() {
+      const q = (this.ef.komgaSearch || '').trim();
+      if (!q) { this.ef.komgaResults = []; this.ef.komgaSearched = false; return; }
+      this.ef.komgaSearching = true;
+      try {
+        const data = await this.api(`/api/komga/search?q=${encodeURIComponent(q)}`);
+        this.ef.komgaResults = data.content || [];
+        this.ef.komgaSearched = true;
+      } catch(e) {
+        this.toast(e.detail || 'Komga search failed', 'error');
+        this.ef.komgaResults = [];
+      }
+      this.ef.komgaSearching = false;
+    },
+
     formatVotes(n) {
       if (!n) return '';
       if (n >= 1000) return (n/1000).toFixed(1) + 'k';
       return n;
+    },
+
+    /** Return 'Vol.' for Komga volume-tracked series, 'Ch.' otherwise. */
+    unitLabel(s) {
+      return (s && s.simulpub_source === 'komga' && (s.komga_track_mode || 'chapter') === 'volume') ? 'Vol.' : 'Ch.';
+    },
+
+    /** Unit label for a release record — infers from group_name since releases lack track mode. */
+    releaseUnit(r) {
+      return (r.group_name && r.group_name.includes('(volume)')) ? 'Vol.' : 'Ch.';
+    },
+
+    /** Unit label for an activity log entry — looks up the series from the library. */
+    activityUnit(entry) {
+      const s = this.library.find(s => s.id === entry.series_id);
+      return this.unitLabel(s);
     },
 
     // ── Live Feed ────────────────────────────────────────
@@ -2277,9 +2932,14 @@ function app() {
         current_chapter: series.current_chapter||'0',
         reading_status: series.reading_status||'reading',
         notes: series.notes||'',
+        tags: [...(series.tags||[])],
+        newTag: '',
+        notification_muted: !!series.notification_muted,
         simulpub_source: series.simulpub_source||'',
         simulpub_id: series.simulpub_id||'',
         mu_latest_chapter_manual: series.mu_latest_chapter||'',
+        komgaSearch: '', komgaResults: [], komgaSearching: false, komgaSearched: false,
+        komga_track_mode: series.komga_track_mode || 'chapter',
       };
       this.detailOpen = true;
       this.detailReleases = [];
@@ -2324,8 +2984,11 @@ function app() {
           current_chapter: this.ef.current_chapter,
           reading_status: this.ef.reading_status,
           notes: this.ef.notes,
+          tags: this.ef.tags,
+          notification_muted: this.ef.notification_muted,
           simulpub_source: this.ef.simulpub_source,
           simulpub_id: this.ef.simulpub_id,
+          komga_track_mode: this.ef.simulpub_source === 'komga' ? this.ef.komga_track_mode : undefined,
         };
         if (this.ef.simulpub_source === 'custom') {
           body.mu_latest_chapter = this.ef.mu_latest_chapter_manual;
@@ -2340,7 +3003,8 @@ function app() {
     },
 
     async removeSeries(id) {
-      if (!confirm('Remove this series from your library?')) return;
+      const title = this.ds?.title || 'this series';
+      if (!confirm(`Remove "${title}" from your library? This will also delete its release history, notifications, and activity log entries.`)) return;
       try {
         await this.api(`/api/series/${id}`,'DELETE');
         this.library = this.library.filter(s=>s.id!==id);

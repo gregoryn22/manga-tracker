@@ -35,6 +35,7 @@ _SIMULPUB_ID_VALIDATORS: dict[str, tuple[str, callable]] = {
     "kmanga":    ("an integer (K Manga title ID)",    lambda v: v.isdigit()),
     "mangaup":   ("an integer (MangaUp manga ID)",    lambda v: v.isdigit()),
     "mangadex":  ("a UUID (MangaDex manga ID)",       lambda v: bool(_UUID_RE.match(v))),
+    "komga":     ("a non-empty Komga series ID",      lambda v: len(v.strip()) > 0),
 }
 
 
@@ -97,6 +98,18 @@ def _refresh_simulpub(series: TrackedSeries, db: Session) -> str | None:
             from ..mangadex import get_latest_chapter as mdx_latest
             chapter = mdx_latest(sim_id)
             group_name = "MangaDex"
+
+        elif source == "komga":
+            from ..komga import KomgaClient
+            komga_url = get_setting(db, "komga_url", "")
+            komga_key = get_setting(db, "komga_api_key", "")
+            if komga_url and komga_key:
+                is_volume = (getattr(series, "komga_track_mode", None) or "chapter") == "volume"
+                client = KomgaClient(komga_url, komga_key)
+                chapter = client.get_latest_chapter(sim_id)
+                group_name = "Komga (volume)" if is_volume else "Komga"
+            else:
+                logger.warning("Komga: URL or API key not configured — skipping refresh")
 
     except Exception as e:
         logger.warning(f"Simulpub refresh failed for '{series.title}' ({source}): {e}")
@@ -312,6 +325,8 @@ class BulkStatusRequest(BaseModel):
 @router.post("/bulk/status")
 def bulk_status(req: BulkStatusRequest, db: Session = Depends(get_db)):
     """Change reading_status for multiple series at once."""
+    if req.reading_status not in _VALID_READING_STATUSES:
+        raise HTTPException(status_code=422, detail=f"Invalid reading_status: {req.reading_status!r}")
     updated = 0
     for sid in req.series_ids:
         series = db.query(TrackedSeries).filter(TrackedSeries.id == sid).first()
@@ -382,11 +397,18 @@ def import_library(req: ImportRequest, db: Session = Depends(get_db)):
             latest_release_group=item.get("latest_release_group"),
             simulpub_source=item.get("simulpub_source"),
             simulpub_id=item.get("simulpub_id"),
+            komga_track_mode=item.get("komga_track_mode", "chapter"),
+            notification_muted=item.get("notification_muted", False),
             mb_provider_ids=json.dumps(item.get("mb_provider_ids", {})),
             current_chapter=item.get("current_chapter", "0"),
             reading_status=item.get("reading_status", "reading"),
             notes=item.get("notes"),
+            tags=json.dumps(item.get("tags", [])) if item.get("tags") else None,
+            last_read_at=datetime.fromisoformat(item["last_read_at"]) if item.get("last_read_at") else None,
             mangabaka_url=item.get("mangabaka_url"),
+            poll_failures=item.get("poll_failures", 0),
+            last_poll_error=item.get("last_poll_error"),
+            last_poll_success=datetime.fromisoformat(item["last_poll_success"]) if item.get("last_poll_success") else None,
             added_at=datetime.utcnow(),
         )
         db.add(s)
@@ -398,15 +420,120 @@ def import_library(req: ImportRequest, db: Session = Depends(get_db)):
 # ── Reading activity log ─────────────────────────────────────────────
 
 @router.get("/activity/log")
-def get_activity_log(limit: int = 100, db: Session = Depends(get_db)):
-    """Return recent reading activity (chapter changes, status changes)."""
-    entries = (
-        db.query(ReadingLog)
-        .order_by(ReadingLog.created_at.desc())
-        .limit(limit)
-        .all()
-    )
+def get_activity_log(
+    limit: int = 100,
+    action: str | None = None,
+    series_id: int | None = None,
+    db: Session = Depends(get_db),
+):
+    """Return recent reading activity with optional filters.
+
+    Query params:
+      action    — filter by action type: chapter_update, status_change, source_change
+      series_id — filter to a single series
+      limit     — max entries (default 100)
+    """
+    query = db.query(ReadingLog)
+    if action:
+        query = query.filter(ReadingLog.action == action)
+    if series_id is not None:
+        query = query.filter(ReadingLog.series_id == series_id)
+    entries = query.order_by(ReadingLog.created_at.desc()).limit(limit).all()
     return [e.to_dict() for e in entries]
+
+
+# ── Statistics API ───────────────────────────────────────────────────────────
+
+@router.get("/stats")
+def get_stats(db: Session = Depends(get_db)):
+    """Return comprehensive statistics about the user's library."""
+    from datetime import timedelta
+
+    series_list = db.query(TrackedSeries).all()
+    total_series = len(series_list)
+
+    if total_series == 0:
+        return {
+            "total_series": 0,
+            "by_status": {},
+            "by_type": {},
+            "by_genre": [],
+            "total_chapters_read": 0,
+            "avg_rating": 0.0,
+            "reading_pace": {"last_7_days": 0, "last_30_days": 0, "last_90_days": 0},
+            "completion_rate": 0.0,
+        }
+
+    # Count by reading status
+    by_status = {}
+    for s in series_list:
+        status = s.reading_status or "reading"
+        by_status[status] = by_status.get(status, 0) + 1
+
+    # Count by type
+    by_type = {}
+    for s in series_list:
+        stype = (s.series_type or "unknown").replace("_", " ").title()
+        by_type[stype] = by_type.get(stype, 0) + 1
+
+    # Top 15 genres
+    genre_counts = {}
+    for s in series_list:
+        for g in (s._safe_json(s.genres) if s.genres else []):
+            genre_counts[g] = genre_counts.get(g, 0) + 1
+    by_genre = sorted(genre_counts.items(), key=lambda x: -x[1])[:15]
+    by_genre = [{"genre": g, "count": c} for g, c in by_genre]
+
+    # Total chapters read
+    total_chapters_read = sum(
+        float(s.current_chapter or 0) for s in series_list
+        if s.current_chapter and s.current_chapter != "0"
+    )
+    try:
+        total_chapters_read = int(total_chapters_read)
+    except Exception:
+        total_chapters_read = 0
+
+    # Average rating (only series with mu_rating)
+    rated_series = [s for s in series_list if s.mu_rating]
+    avg_rating = (
+        sum(s.mu_rating for s in rated_series) / len(rated_series)
+        if rated_series else 0.0
+    )
+
+    # Reading pace: chapters updated in last 7/30/90 days
+    now = datetime.utcnow()
+    logs_7 = db.query(ReadingLog).filter(
+        ReadingLog.action == "chapter_update",
+        ReadingLog.created_at >= now - timedelta(days=7)
+    ).count()
+    logs_30 = db.query(ReadingLog).filter(
+        ReadingLog.action == "chapter_update",
+        ReadingLog.created_at >= now - timedelta(days=30)
+    ).count()
+    logs_90 = db.query(ReadingLog).filter(
+        ReadingLog.action == "chapter_update",
+        ReadingLog.created_at >= now - timedelta(days=90)
+    ).count()
+
+    # Completion rate
+    completed = sum(1 for s in series_list if s.reading_status == "completed")
+    completion_rate = (completed / total_series * 100) if total_series > 0 else 0.0
+
+    return {
+        "total_series": total_series,
+        "by_status": by_status,
+        "by_type": by_type,
+        "by_genre": by_genre,
+        "total_chapters_read": total_chapters_read,
+        "avg_rating": round(avg_rating, 2),
+        "reading_pace": {
+            "last_7_days": logs_7,
+            "last_30_days": logs_30,
+            "last_90_days": logs_90,
+        },
+        "completion_rate": round(completion_rate, 1),
+    }
 
 
 # ── Get single series ─────────────────────────────────────────────────────────
@@ -421,15 +548,24 @@ def get_series_endpoint(series_id: int, db: Session = Depends(get_db)):
 
 # ── Update series ─────────────────────────────────────────────────────────────
 
+_VALID_READING_STATUSES = {"reading", "plan_to_read", "completed", "on_hold", "dropped", "rereading"}
+_VALID_TRACK_MODES = {"chapter", "volume"}
+
+
 class UpdateSeriesRequest(BaseModel):
     current_chapter: str | None = None
     reading_status: str | None = None
     notes: str | None = None
+    notification_muted: bool | None = None
     # Simulpub source configuration
     simulpub_source: str | None = None   # 'mangaplus' | 'custom' | '' (clear)
     simulpub_id: str | None = None       # Platform-specific ID (e.g. MangaPlus title_id)
+    # Komga-specific: 'chapter' or 'volume'
+    komga_track_mode: str | None = None
     # Editable for 'custom' source — lets the user manually record the latest chapter
     mu_latest_chapter: str | None = None
+    # Tags for filtering
+    tags: list[str] | None = None
 
 
 @router.patch("/{series_id}")
@@ -437,6 +573,10 @@ def update_series(series_id: int, req: UpdateSeriesRequest, db: Session = Depend
     series = db.query(TrackedSeries).filter(TrackedSeries.id == series_id).first()
     if not series:
         raise HTTPException(status_code=404, detail="Series not tracked")
+    if req.reading_status is not None and req.reading_status not in _VALID_READING_STATUSES:
+        raise HTTPException(status_code=422, detail=f"Invalid reading_status: {req.reading_status!r}. Must be one of: {', '.join(sorted(_VALID_READING_STATUSES))}")
+    if req.komga_track_mode is not None and req.komga_track_mode not in _VALID_TRACK_MODES:
+        raise HTTPException(status_code=422, detail=f"Invalid komga_track_mode: {req.komga_track_mode!r}. Must be 'chapter' or 'volume'")
     if req.current_chapter is not None:
         old_ch = series.current_chapter
         if req.current_chapter != old_ch:
@@ -445,6 +585,7 @@ def update_series(series_id: int, req: UpdateSeriesRequest, db: Session = Depend
                 old_chapter=old_ch, new_chapter=req.current_chapter,
                 action="chapter_update", created_at=datetime.utcnow(),
             ))
+            series.last_read_at = datetime.utcnow()
         series.current_chapter = req.current_chapter
     if req.reading_status is not None:
         if req.reading_status != series.reading_status:
@@ -456,9 +597,14 @@ def update_series(series_id: int, req: UpdateSeriesRequest, db: Session = Depend
         series.reading_status = req.reading_status
     if req.notes is not None:
         series.notes = req.notes
+    if req.tags is not None:
+        series.tags = json.dumps(req.tags) if req.tags else None
+    if req.notification_muted is not None:
+        series.notification_muted = req.notification_muted
     # ── Simulpub source change — reset stale polling state ──────────────────
     old_source = series.simulpub_source
     old_sim_id = series.simulpub_id
+    old_track_mode = getattr(series, "komga_track_mode", None) or "chapter"
     if req.simulpub_source is not None:
         series.simulpub_source = req.simulpub_source or None
     if req.simulpub_id is not None:
@@ -466,19 +612,28 @@ def update_series(series_id: int, req: UpdateSeriesRequest, db: Session = Depend
         effective_source = req.simulpub_source if req.simulpub_source is not None else series.simulpub_source
         _validate_simulpub_id(effective_source, req.simulpub_id)
         series.simulpub_id = req.simulpub_id or None
+    if req.komga_track_mode is not None:
+        series.komga_track_mode = req.komga_track_mode
 
+    track_mode_changed = (
+        req.komga_track_mode is not None and req.komga_track_mode != old_track_mode
+    )
     source_changed = (
         (req.simulpub_source is not None and req.simulpub_source != (old_source or ""))
         or (req.simulpub_id is not None and req.simulpub_id != (old_sim_id or ""))
+        or track_mode_changed
     )
     if source_changed:
         # Reset poll health — old errors/successes don't apply to the new source
         series.poll_failures = 0
         series.last_poll_error = None
         series.last_poll_success = None
-        # Reset source-specific release metadata so the new source isn't blocked
-        # by stale chapter numbers from the old source
+        # Clear stale chapter/release data so the new source starts fresh.
+        # The immediate _refresh_simulpub call below will re-populate these
+        # from the new source, so the user sees correct data right away.
+        series.mu_latest_chapter = None
         series.latest_release_group = None
+        series.latest_release_date = None
         # Log the source change in the activity log
         detail = f"Simulpub source changed: {old_source or 'none'}({old_sim_id or '?'}) → {series.simulpub_source or 'none'}({series.simulpub_id or '?'})"
         db.add(ReadingLog(
@@ -516,6 +671,7 @@ def remove_series(series_id: int, db: Session = Depends(get_db)):
     # Clean up related records to avoid orphans
     db.query(Release).filter(Release.series_id == series_id).delete()
     db.query(Notification).filter(Notification.series_id == series_id).delete()
+    db.query(ReadingLog).filter(ReadingLog.series_id == series_id).delete()
 
     db.delete(series)
     db.commit()

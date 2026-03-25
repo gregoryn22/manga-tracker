@@ -17,7 +17,7 @@ import re
 # Strict canonical: requires an explicit prefix.  Used when high confidence is
 # needed (e.g. protobuf scanning where bare numbers may be metadata).
 CHAPTER_CANONICAL_RE = re.compile(
-    r"(?:Ch\.?\s*|Chapter\s*|Chap\.?\s*|#)(\d{1,4}(?:\.\d{1,2})?)",
+    r"(?:Ch\.?\s*|Chapter\s*|Chap\.?\s*|#)(\d+(?:\.\d+)?)",
     re.IGNORECASE,
 )
 
