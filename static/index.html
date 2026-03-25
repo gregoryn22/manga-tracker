@@ -885,7 +885,7 @@
                 </div>
                 <!-- Latest chapter info -->
                 <div class="card-chapter" :class="{'new': s.has_update}" x-show="s.latest_chapter">
-                  Ch. <span x-text="s.latest_chapter"></span>
+                  <span x-text="unitLabel(s)"></span> <span x-text="s.latest_chapter"></span>
                   <template x-if="s.has_update">
                     <span style="font-size:0.62rem;color:var(--text-muted)"> ← <span x-text="s.current_chapter || '0'"></span> read</span>
                   </template>
@@ -959,7 +959,7 @@
 
               <!-- Chapter info -->
               <div style="text-align:right;flex-shrink:0;min-width:90px">
-                <div class="list-chapter" x-show="s.latest_chapter" x-text="'Ch. ' + s.latest_chapter"></div>
+                <div class="list-chapter" x-show="s.latest_chapter" x-text="unitLabel(s) + ' ' + s.latest_chapter"></div>
                 <div class="text-xs text-muted" x-show="s.latest_chapter && s.current_chapter"
                      x-text="s.current_chapter + ' / ' + s.latest_chapter + ' read'"></div>
               </div>
@@ -1576,7 +1576,7 @@
               <div class="flex items-center gap-2">
                 <span style="font-size:1.1rem">📡</span>
                 <div>
-                  <div class="text-sm fw-600 text-green">Latest: Chapter <span x-text="ds.latest_chapter"></span></div>
+                  <div class="text-sm fw-600 text-green">Latest: <span x-text="unitLabel(ds) === 'Vol.' ? 'Volume' : 'Chapter'"></span> <span x-text="ds.latest_chapter"></span></div>
                   <div class="text-xs text-muted" x-show="ds.latest_release_group">
                     by <span x-text="ds.latest_release_group"></span>
                     <span x-show="ds.latest_release_date"> · <span x-text="ds.latest_release_date"></span></span>
@@ -1792,6 +1792,21 @@
                 </div>
                 <div class="text-xs text-muted mt-1" x-show="!sf.komga_url || !sf.komga_api_key">
                   ⚠️ Configure your Komga URL and API key in Settings first.
+                </div>
+                <!-- Track mode toggle -->
+                <div class="flex gap-3 items-center mt-3" style="padding:8px 12px;background:var(--surface2);border-radius:8px">
+                  <span class="text-xs fw-600">Track by:</span>
+                  <label class="flex items-center gap-1" style="cursor:pointer">
+                    <input type="radio" value="chapter" x-model="ef.komga_track_mode" />
+                    <span class="text-xs">Chapters</span>
+                  </label>
+                  <label class="flex items-center gap-1" style="cursor:pointer">
+                    <input type="radio" value="volume" x-model="ef.komga_track_mode" />
+                    <span class="text-xs">Volumes</span>
+                  </label>
+                  <span class="text-xs text-muted" x-show="ef.komga_track_mode === 'volume'">
+                    Each book in Komga = one volume
+                  </span>
                 </div>
               </div>
             </template>
@@ -2170,7 +2185,7 @@ function app() {
           const current = parseFloat(val);
           this.library[idx].has_update = latest > 0 && current < latest;
         }
-        this.toast(`${s.title} → Ch. ${val} read`, 'success');
+        this.toast(`${s.title} → ${this.unitLabel(s)} ${val} read`, 'success');
       } catch(e) {
         this.toast('Failed to update chapter', 'error');
       }
@@ -2304,6 +2319,11 @@ function app() {
       return n;
     },
 
+    /** Return 'Vol.' for Komga volume-tracked series, 'Ch.' otherwise. */
+    unitLabel(s) {
+      return (s && s.simulpub_source === 'komga' && (s.komga_track_mode || 'chapter') === 'volume') ? 'Vol.' : 'Ch.';
+    },
+
     // ── Live Feed ────────────────────────────────────────
     async loadReleaseFeed() {
       this.feedLoading = true;
@@ -2370,6 +2390,7 @@ function app() {
         simulpub_id: series.simulpub_id||'',
         mu_latest_chapter_manual: series.mu_latest_chapter||'',
         komgaSearch: '', komgaResults: [], komgaSearching: false, komgaSearched: false,
+        komga_track_mode: series.komga_track_mode || 'chapter',
       };
       this.detailOpen = true;
       this.detailReleases = [];
@@ -2416,6 +2437,7 @@ function app() {
           notes: this.ef.notes,
           simulpub_source: this.ef.simulpub_source,
           simulpub_id: this.ef.simulpub_id,
+          komga_track_mode: this.ef.simulpub_source === 'komga' ? this.ef.komga_track_mode : undefined,
         };
         if (this.ef.simulpub_source === 'custom') {
           body.mu_latest_chapter = this.ef.mu_latest_chapter_manual;

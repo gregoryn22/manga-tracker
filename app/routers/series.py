@@ -104,9 +104,10 @@ def _refresh_simulpub(series: TrackedSeries, db: Session) -> str | None:
             komga_url = get_setting(db, "komga_url", "")
             komga_key = get_setting(db, "komga_api_key", "")
             if komga_url and komga_key:
+                is_volume = (getattr(series, "komga_track_mode", None) or "chapter") == "volume"
                 client = KomgaClient(komga_url, komga_key)
                 chapter = client.get_latest_chapter(sim_id)
-                group_name = "Komga"
+                group_name = "Komga (volume)" if is_volume else "Komga"
             else:
                 logger.warning("Komga: URL or API key not configured — skipping refresh")
 
@@ -440,6 +441,8 @@ class UpdateSeriesRequest(BaseModel):
     # Simulpub source configuration
     simulpub_source: str | None = None   # 'mangaplus' | 'custom' | '' (clear)
     simulpub_id: str | None = None       # Platform-specific ID (e.g. MangaPlus title_id)
+    # Komga-specific: 'chapter' or 'volume'
+    komga_track_mode: str | None = None
     # Editable for 'custom' source — lets the user manually record the latest chapter
     mu_latest_chapter: str | None = None
 
@@ -471,6 +474,7 @@ def update_series(series_id: int, req: UpdateSeriesRequest, db: Session = Depend
     # ── Simulpub source change — reset stale polling state ──────────────────
     old_source = series.simulpub_source
     old_sim_id = series.simulpub_id
+    old_track_mode = getattr(series, "komga_track_mode", None) or "chapter"
     if req.simulpub_source is not None:
         series.simulpub_source = req.simulpub_source or None
     if req.simulpub_id is not None:
@@ -478,10 +482,16 @@ def update_series(series_id: int, req: UpdateSeriesRequest, db: Session = Depend
         effective_source = req.simulpub_source if req.simulpub_source is not None else series.simulpub_source
         _validate_simulpub_id(effective_source, req.simulpub_id)
         series.simulpub_id = req.simulpub_id or None
+    if req.komga_track_mode is not None:
+        series.komga_track_mode = req.komga_track_mode
 
+    track_mode_changed = (
+        req.komga_track_mode is not None and req.komga_track_mode != old_track_mode
+    )
     source_changed = (
         (req.simulpub_source is not None and req.simulpub_source != (old_source or ""))
         or (req.simulpub_id is not None and req.simulpub_id != (old_sim_id or ""))
+        or track_mode_changed
     )
     if source_changed:
         # Reset poll health — old errors/successes don't apply to the new source

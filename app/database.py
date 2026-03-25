@@ -69,6 +69,9 @@ class TrackedSeries(Base):
     #   'custom'     — manual tracking only; user sets mu_latest_chapter by hand
     simulpub_source = Column(String, nullable=True)
     simulpub_id = Column(String, nullable=True)  # Platform-specific series ID
+    # Komga-specific: 'chapter' (default) or 'volume' — controls whether we
+    # track the highest chapter number or highest volume/book number.
+    komga_track_mode = Column(String, nullable=True, default="chapter")
 
     # ── Detected provider IDs (from MangaBaka metadata) ───────────────
     # JSON dict populated at add/refresh time from MB's source + links fields.
@@ -145,6 +148,7 @@ class TrackedSeries(Base):
             "latest_release_group": self.latest_release_group,
             "simulpub_source": self.simulpub_source or "",
             "simulpub_id": self.simulpub_id or "",
+            "komga_track_mode": self.komga_track_mode or "chapter",
             "mb_provider_ids": self._safe_json(self.mb_provider_ids, default={}),
             "current_chapter": self.current_chapter,
             "reading_status": self.reading_status,
@@ -303,6 +307,7 @@ def _migrate_db():
         ("tracked_series", "poll_failures",      "INTEGER DEFAULT 0"),
         ("tracked_series", "last_poll_error",    "TEXT"),
         ("tracked_series", "last_poll_success",  "DATETIME"),
+        ("tracked_series", "komga_track_mode",   "VARCHAR DEFAULT 'chapter'"),
     ]
 
     # Indexes to ensure on hot query columns (idempotent — CREATE IF NOT EXISTS)

@@ -1005,39 +1005,42 @@ def _poll_komga(db: Session, series_list: list[TrackedSeries]):
 
     for series in series_list:
         try:
-            chapter = client.get_latest_chapter(series.simulpub_id)
-            if not chapter:
+            is_volume = (getattr(series, "komga_track_mode", None) or "chapter") == "volume"
+            unit_label = "Vol." if is_volume else "Ch."
+
+            number = client.get_latest_chapter(series.simulpub_id)
+            if not number:
                 logger.debug(
-                    f"Komga: no chapter data for '{series.title}' (id={series.simulpub_id})"
+                    f"Komga: no data for '{series.title}' (id={series.simulpub_id})"
                 )
                 series.last_checked = datetime.utcnow()
                 db.commit()
                 continue
 
-            if chapter_is_newer(chapter, series.mu_latest_chapter):
-                if _simulpub_release_exists(db, series.id, chapter, "Komga"):
-                    logger.debug(f"Komga: release already logged for '{series.title}' Ch. {chapter}")
+            if chapter_is_newer(number, series.mu_latest_chapter):
+                group_name = "Komga (volume)" if is_volume else "Komga"
+                if _simulpub_release_exists(db, series.id, number, group_name):
+                    logger.debug(f"Komga: release already logged for '{series.title}' {unit_label} {number}")
                     series.last_checked = datetime.utcnow()
                     db.commit()
                     continue
 
                 old_chapter = series.mu_latest_chapter
-                series.mu_latest_chapter    = chapter
+                series.mu_latest_chapter    = number
                 series.latest_release_date  = datetime.utcnow().strftime("%Y-%m-%d")
-                series.latest_release_group = "Komga"
+                series.latest_release_group = group_name
 
-                ch_str  = f"Ch. {chapter}"
-                message = f"{series.title} — {ch_str} · Komga"
+                message = f"{series.title} — {unit_label} {number} · Komga"
 
                 kg_url = f"{komga_url}/series/{series.simulpub_id}"
                 rel = Release(
                     series_id=series.id,
                     mu_series_id=series.mu_series_id,
                     series_title=series.title,
-                    chapter=chapter,
-                    volume=None,
+                    chapter=number,
+                    volume=number if is_volume else None,
                     release_date=series.latest_release_date,
-                    group_name="Komga",
+                    group_name=group_name,
                     mu_release_id=None,
                     cover_url=series.best_cover(),
                     mu_url=kg_url,
@@ -1048,16 +1051,16 @@ def _poll_komga(db: Session, series_list: list[TrackedSeries]):
                     db=db,
                     series=series,
                     message=message,
-                    chapter=chapter,
-                    volume=None,
-                    group_name="Komga",
+                    chapter=number,
+                    volume=number if is_volume else None,
+                    group_name=group_name,
                     release_date=series.latest_release_date,
                     old_chapter=old_chapter,
                 )
-                logger.info(f"✓ Komga new chapter: {message}")
+                logger.info(f"✓ Komga new: {message}")
             else:
                 logger.debug(
-                    f"Komga: '{series.title}' still at Ch. {chapter} "
+                    f"Komga: '{series.title}' still at {unit_label} {number} "
                     f"(known: {series.mu_latest_chapter})"
                 )
 
