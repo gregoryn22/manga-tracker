@@ -35,6 +35,7 @@ _SIMULPUB_ID_VALIDATORS: dict[str, tuple[str, callable]] = {
     "kmanga":    ("an integer (K Manga title ID)",    lambda v: v.isdigit()),
     "mangaup":   ("an integer (MangaUp manga ID)",    lambda v: v.isdigit()),
     "mangadex":  ("a UUID (MangaDex manga ID)",       lambda v: bool(_UUID_RE.match(v))),
+    "komga":     ("a non-empty Komga series ID",      lambda v: len(v.strip()) > 0),
 }
 
 
@@ -97,6 +98,17 @@ def _refresh_simulpub(series: TrackedSeries, db: Session) -> str | None:
             from ..mangadex import get_latest_chapter as mdx_latest
             chapter = mdx_latest(sim_id)
             group_name = "MangaDex"
+
+        elif source == "komga":
+            from ..komga import KomgaClient
+            komga_url = get_setting(db, "komga_url", "")
+            komga_key = get_setting(db, "komga_api_key", "")
+            if komga_url and komga_key:
+                client = KomgaClient(komga_url, komga_key)
+                chapter = client.get_latest_chapter(sim_id)
+                group_name = "Komga"
+            else:
+                logger.warning("Komga: URL or API key not configured — skipping refresh")
 
     except Exception as e:
         logger.warning(f"Simulpub refresh failed for '{series.title}' ({source}): {e}")

@@ -26,6 +26,8 @@ EXPOSED_KEYS = [
     "kmanga_email",
     "kmanga_password",          # returned masked; full value stored in DB
     "kmanga_recaptcha_token",   # short-lived reCAPTCHA v3 token for re-login
+    "komga_url",
+    "komga_api_key",
     "idle_detection_enabled",
     "idle_threshold_days",
     "webhook_enabled",
@@ -44,6 +46,9 @@ def get_settings(db: Session = Depends(get_db)):
     pw = result.get("kmanga_password", "")
     if pw:
         result["kmanga_password"] = "••••••••"
+    kg_key = result.get("komga_api_key", "")
+    if kg_key and len(kg_key) > 12:
+        result["komga_api_key"] = kg_key[:6] + "..." + kg_key[-6:]
     return result
 
 
@@ -60,6 +65,8 @@ class UpdateSettingsRequest(BaseModel):
     kmanga_email: str | None = None
     kmanga_password: str | None = None
     kmanga_recaptcha_token: str | None = None
+    komga_url: str | None = None
+    komga_api_key: str | None = None
     idle_detection_enabled: str | None = None
     idle_threshold_days: str | None = None
     webhook_enabled: str | None = None
@@ -120,6 +127,17 @@ def system_status(db: Session = Depends(get_db)):
                 "level": "info",
             })
 
+    # Komga check
+    kg_series = db.query(TrackedSeries).filter(TrackedSeries.simulpub_source == "komga").count()
+    if kg_series > 0:
+        komga_url = get_setting(db, "komga_url", "")
+        komga_key = get_setting(db, "komga_api_key", "")
+        if not komga_url or not komga_key:
+            warnings.append({
+                "source": "Komga",
+                "message": f"{kg_series} series use Komga but server URL or API key is not configured.",
+            })
+
     token = get_setting(db, "mangabaka_token", "")
     if not token:
         warnings.append({
@@ -172,6 +190,24 @@ def test_webhook(db: Session = Depends(get_db)):
         return {"success": True, "message": "Test webhook sent!"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Webhook error: {e}")
+
+
+@router.post("/test-komga")
+def test_komga(db: Session = Depends(get_db)):
+    """Test Komga connection by fetching server info."""
+    komga_url = get_setting(db, "komga_url", "")
+    komga_key = get_setting(db, "komga_api_key", "")
+    if not komga_url or not komga_key:
+        raise HTTPException(status_code=400, detail="Komga URL or API key not configured")
+    try:
+        from ..komga import KomgaClient
+        client = KomgaClient(komga_url, komga_key)
+        # Hit the series list to verify connection + auth
+        data = client._get("/series", params={"size": 1})
+        total = data.get("totalElements", 0)
+        return {"success": True, "message": f"Connected! Your Komga library has {total} series."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Komga connection failed: {e}")
 
 
 @router.post("/poll-now")

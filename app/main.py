@@ -6,7 +6,7 @@ import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -67,6 +67,24 @@ app.include_router(series.router)
 app.include_router(releases.router)
 app.include_router(notifications.router)
 app.include_router(settings.router)
+
+# Komga library search proxy (lightweight — no separate router needed)
+@app.get("/api/komga/search")
+def komga_search(q: str = ""):
+    """Search the user's Komga library by series title."""
+    from .database import get_setting as _gs
+    db = SessionLocal()
+    try:
+        komga_url = _gs(db, "komga_url", "")
+        komga_key = _gs(db, "komga_api_key", "")
+    finally:
+        db.close()
+    if not komga_url or not komga_key:
+        raise HTTPException(status_code=400, detail="Komga URL or API key not configured")
+    from .komga import KomgaClient
+    client = KomgaClient(komga_url, komga_key)
+    return client._get("/series", params={"search": q, "size": 20})
+
 
 # Serve static files
 if STATIC_DIR.exists():

@@ -487,6 +487,7 @@
     .p-km  { background: rgba(30,120,255,0.2);  color: #4d9dff; }
     .p-mup { background: rgba(0,190,100,0.2);   color: #2ed87a; }
     .p-mdx { background: rgba(240,60,40,0.2);   color: #f05a46; }
+    .p-kg  { background: rgba(76,175,80,0.2);   color: #66bb6a; }
     .p-custom { background: rgba(150,150,150,0.2); color: var(--text-muted); }
 
     /* ── List view ─────────────────────────────────────── */
@@ -1399,6 +1400,28 @@
           </div>
         </div>
 
+        <div class="card" style="padding:20px 24px">
+          <div class="settings-block-title">📚 Komga (Self-Hosted)</div>
+          <div class="settings-row">
+            <label>Server URL</label>
+            <input class="input" type="url" style="flex:1" placeholder="https://komga.example.com"
+                   x-model="sf.komga_url" autocomplete="off" />
+          </div>
+          <div class="settings-row">
+            <label>API Key</label>
+            <input class="input" type="text" style="flex:1" placeholder="Your Komga API key"
+                   x-model="sf.komga_api_key" autocomplete="off" />
+          </div>
+          <div class="flex gap-2 mt-2">
+            <button class="btn btn-primary btn-sm" @click="saveSettings()">💾 Save</button>
+            <button class="btn btn-ghost btn-sm" @click="testKomga()">🔌 Test Connection</button>
+          </div>
+          <div class="text-xs text-muted mt-2">
+            Connect your Komga server to track chapter updates from your self-hosted library.
+            Generate an API key in Komga: User Settings → API Keys.
+          </div>
+        </div>
+
         <!-- ── Idle Series Detection ──────────────────────── -->
         <div class="card" style="padding:20px 24px;margin-bottom:16px">
           <div class="settings-block-title">💤 Idle Series Detection</div>
@@ -1538,6 +1561,7 @@
               <span class="provider-chip p-km"  x-show="ds.simulpub_source === 'kmanga'">K Manga</span>
               <span class="provider-chip p-mup" x-show="ds.simulpub_source === 'mangaup'">MangaUp!</span>
               <span class="provider-chip p-mdx" x-show="ds.simulpub_source === 'mangadex'">MangaDex</span>
+              <span class="provider-chip p-kg"  x-show="ds.simulpub_source === 'komga'">Komga</span>
               <span class="provider-chip p-custom" x-show="ds.simulpub_source === 'custom'">Manual</span>
             </div>
           </div>
@@ -1624,6 +1648,7 @@
               <option value="kmanga">🔵 K Manga / Kodansha (simulpub)</option>
               <option value="mangaup">🟢 MangaUp! / Square Enix (simulpub)</option>
               <option value="mangadex">🔴 MangaDex</option>
+              <option value="komga">📚 Komga (self-hosted)</option>
               <option value="custom">✏️ Manual / Custom</option>
             </select>
             <!-- Detected provider hint badges -->
@@ -1730,6 +1755,47 @@
               </div>
             </template>
 
+            <!-- Komga series ID input + search -->
+            <template x-if="ef.simulpub_source === 'komga'">
+              <div style="margin-top:10px">
+                <div class="text-xs text-muted mb-1">
+                  Search your Komga library or paste a series ID directly.
+                </div>
+                <div class="flex gap-2 items-center mb-2">
+                  <input class="input" type="text" placeholder="Search Komga library..."
+                         x-model="ef.komgaSearch"
+                         @input.debounce.400ms="searchKomga()" style="width:280px" />
+                  <span class="text-xs text-muted" x-show="ef.komgaSearching">searching…</span>
+                </div>
+                <template x-if="ef.komgaResults && ef.komgaResults.length > 0">
+                  <div style="max-height:160px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;margin-bottom:8px">
+                    <template x-for="ks in ef.komgaResults" :key="ks.id">
+                      <div class="flex items-center gap-2 px-3 py-2"
+                           style="cursor:pointer;border-bottom:1px solid var(--border)"
+                           :style="ef.simulpub_id === ks.id ? 'background:var(--surface2)' : ''"
+                           @click="ef.simulpub_id = ks.id; ef.komgaResults = []">
+                        <span class="text-sm" x-text="ks.metadata?.title || ks.name"></span>
+                        <span class="text-xs text-muted" x-text="ks.booksCount + ' books'"></span>
+                      </div>
+                    </template>
+                  </div>
+                </template>
+                <template x-if="ef.komgaSearched && ef.komgaResults && ef.komgaResults.length === 0">
+                  <div class="text-xs text-muted mb-2">No series found. You can paste the ID directly below.</div>
+                </template>
+                <div class="flex gap-2 items-center">
+                  <input class="input" type="text" placeholder="Komga series ID"
+                         x-model="ef.simulpub_id" style="width:280px;font-size:0.8rem" />
+                  <a x-show="ef.simulpub_id && sf.komga_url"
+                     :href="`${sf.komga_url}/series/${ef.simulpub_id}`"
+                     target="_blank" class="btn btn-ghost btn-sm">Komga ↗</a>
+                </div>
+                <div class="text-xs text-muted mt-1" x-show="!sf.komga_url || !sf.komga_api_key">
+                  ⚠️ Configure your Komga URL and API key in Settings first.
+                </div>
+              </div>
+            </template>
+
             <!-- Custom / manual chapter input -->
             <template x-if="ef.simulpub_source === 'custom'">
               <div style="margin-top:10px">
@@ -1798,6 +1864,9 @@
             <a x-show="ds.simulpub_source === 'mangadex' && ds.simulpub_id"
                :href="`https://mangadex.org/title/${ds.simulpub_id}`"
                target="_blank" class="btn btn-ghost btn-sm">MangaDex ↗</a>
+            <a x-show="ds.simulpub_source === 'komga' && ds.simulpub_id && sf.komga_url"
+               :href="`${sf.komga_url}/series/${ds.simulpub_id}`"
+               target="_blank" class="btn btn-ghost btn-sm">Komga ↗</a>
           </div>
         </div>
 
@@ -1909,7 +1978,7 @@ function app() {
     activityLog: [],
 
     // Settings form
-    sf: { pushover_user_key:'', pushover_app_token:'', pushover_enabled:'false', push_chapter_updates:'true', push_news:'false', push_reading_only:'false', poll_interval_hours:'6', mangabaka_token:'', mu_enabled:'true', kmanga_email:'', kmanga_password:'', kmanga_recaptcha_token:'', idle_detection_enabled:'false', idle_threshold_days:'90', webhook_enabled:'false', webhook_url:'' },
+    sf: { pushover_user_key:'', pushover_app_token:'', pushover_enabled:'false', push_chapter_updates:'true', push_news:'false', push_reading_only:'false', poll_interval_hours:'6', mangabaka_token:'', mu_enabled:'true', kmanga_email:'', kmanga_password:'', kmanga_recaptcha_token:'', komga_url:'', komga_api_key:'', idle_detection_enabled:'false', idle_threshold_days:'90', webhook_enabled:'false', webhook_url:'' },
 
     // Detail modal
     detailOpen: false, ds: null, ef: {}, detailReleases: [],
@@ -2209,6 +2278,26 @@ function app() {
       catch(e) { this.toast(e.detail||'Webhook test failed', 'error'); }
     },
 
+    async testKomga() {
+      try { const d = await this.api('/api/settings/test-komga', 'POST'); this.toast(d.message||'Connected!', 'success'); }
+      catch(e) { this.toast(e.detail||'Komga connection failed', 'error'); }
+    },
+
+    async searchKomga() {
+      const q = (this.ef.komgaSearch || '').trim();
+      if (!q) { this.ef.komgaResults = []; this.ef.komgaSearched = false; return; }
+      this.ef.komgaSearching = true;
+      try {
+        const data = await this.api(`/api/komga/search?q=${encodeURIComponent(q)}`);
+        this.ef.komgaResults = data.content || [];
+        this.ef.komgaSearched = true;
+      } catch(e) {
+        this.toast(e.detail || 'Komga search failed', 'error');
+        this.ef.komgaResults = [];
+      }
+      this.ef.komgaSearching = false;
+    },
+
     formatVotes(n) {
       if (!n) return '';
       if (n >= 1000) return (n/1000).toFixed(1) + 'k';
@@ -2280,6 +2369,7 @@ function app() {
         simulpub_source: series.simulpub_source||'',
         simulpub_id: series.simulpub_id||'',
         mu_latest_chapter_manual: series.mu_latest_chapter||'',
+        komgaSearch: '', komgaResults: [], komgaSearching: false, komgaSearched: false,
       };
       this.detailOpen = true;
       this.detailReleases = [];

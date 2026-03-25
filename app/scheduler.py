@@ -57,6 +57,7 @@ from .kmanga import (
 from .mangaplus import get_latest_chapter as mp_get_latest_chapter
 from .mangadex import MangaDexError, MangaDexNotFound, MangaDexRateLimited
 from .mangadex import get_latest_chapter as mdx_get_latest_chapter
+from .komga import KomgaClient, KomgaAuthError, KomgaConnectionError, KomgaError, KomgaNotFound
 from .mangaup import MangaUpError, MangaUpNotFound
 from .mangaup import get_latest_chapter as mup_get_latest_chapter
 from .notifier import clear_settings_cache, create_notification, get_pushover_creds, send_pushover
@@ -589,6 +590,11 @@ def _poll_via_simulpub(db: Session, series_list: list[TrackedSeries]):
         logger.info(f"Layer 3: MangaDex check for {len(mdx_series)} series")
         _poll_mangadex(db, mdx_series)
 
+    kg_series = [s for s in series_list if s.simulpub_source == "komga"]
+    if kg_series:
+        logger.info(f"Layer 3: Komga check for {len(kg_series)} series")
+        _poll_komga(db, kg_series)
+
 
 def _poll_mangaplus(db: Session, series_list: list[TrackedSeries]):
     """Poll MangaPlus API for each series and notify on new chapters."""
@@ -979,3 +985,97 @@ def _poll_mangadex(db: Session, series_list: list[TrackedSeries]):
             logger.error(f"MangaDex poll failed for '{series.title}': {e}")
         except Exception as e:
             logger.error(f"MangaDex unexpected error for '{series.title}': {e}")
+
+
+def _poll_komga(db: Session, series_list: list[TrackedSeries]):
+    """
+    Poll a user's Komga server for each series and notify on new chapters.
+
+    Series IDs are opaque strings stored in simulpub_id.
+    Requires komga_url and komga_api_key to be configured in Settings.
+    Chapter numbers come from book metadata.number (highest numberSort).
+    """
+    komga_url = get_setting(db, "komga_url", "")
+    komga_key = get_setting(db, "komga_api_key", "")
+    if not komga_url or not komga_key:
+        logger.warning("Komga: server URL or API key not configured — skipping poll")
+        return
+
+    client = KomgaClient(komga_url, komga_key)
+
+    for series in series_list:
+        try:
+            chapter = client.get_latest_chapter(series.simulpub_id)
+            if not chapter:
+                logger.debug(
+                    f"Komga: no chapter data for '{series.title}' (id={series.simulpub_id})"
+                )
+                series.last_checked = datetime.utcnow()
+                db.commit()
+                continue
+
+            if chapter_is_newer(chapter, series.mu_latest_chapter):
+                if _simulpub_release_exists(db, series.id, chapter, "Komga"):
+                    logger.debug(f"Komga: release already logged for '{series.title}' Ch. {chapter}")
+                    series.last_checked = datetime.utcnow()
+                    db.commit()
+                    continue
+
+                old_chapter = series.mu_latest_chapter
+                series.mu_latest_chapter    = chapter
+                series.latest_release_date  = datetime.utcnow().strftime("%Y-%m-%d")
+                series.latest_release_group = "Komga"
+
+                ch_str  = f"Ch. {chapter}"
+                message = f"{series.title} — {ch_str} · Komga"
+
+                kg_url = f"{komga_url}/series/{series.simulpub_id}"
+                rel = Release(
+                    series_id=series.id,
+                    mu_series_id=series.mu_series_id,
+                    series_title=series.title,
+                    chapter=chapter,
+                    volume=None,
+                    release_date=series.latest_release_date,
+                    group_name="Komga",
+                    mu_release_id=None,
+                    cover_url=series.best_cover(),
+                    mu_url=kg_url,
+                )
+                db.add(rel)
+
+                _send_chapter_notification(
+                    db=db,
+                    series=series,
+                    message=message,
+                    chapter=chapter,
+                    volume=None,
+                    group_name="Komga",
+                    release_date=series.latest_release_date,
+                    old_chapter=old_chapter,
+                )
+                logger.info(f"✓ Komga new chapter: {message}")
+            else:
+                logger.debug(
+                    f"Komga: '{series.title}' still at Ch. {chapter} "
+                    f"(known: {series.mu_latest_chapter})"
+                )
+
+            series.last_checked = datetime.utcnow()
+            db.commit()
+
+        except KomgaAuthError:
+            logger.error("Komga: API key is invalid — check Settings")
+            break
+        except KomgaConnectionError as e:
+            logger.error(f"Komga: server unreachable — {e}")
+            break
+        except KomgaNotFound:
+            logger.error(
+                f"Komga: series not found for '{series.title}' (id={series.simulpub_id})"
+                f" — check the series ID in Settings"
+            )
+        except KomgaError as e:
+            logger.error(f"Komga poll failed for '{series.title}': {e}")
+        except Exception as e:
+            logger.error(f"Komga unexpected error for '{series.title}': {e}")

@@ -372,6 +372,9 @@ def _seed_settings():
             # Idle series detection
             "idle_detection_enabled": "false",
             "idle_threshold_days": "90",
+            # Komga self-hosted server
+            "komga_url": os.getenv("KOMGA_URL", ""),
+            "komga_api_key": os.getenv("KOMGA_API_KEY", ""),
             # Discord/Slack webhook
             "webhook_enabled": "false",
             "webhook_url": "",
