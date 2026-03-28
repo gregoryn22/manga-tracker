@@ -325,6 +325,8 @@ class BulkStatusRequest(BaseModel):
 @router.post("/bulk/status")
 def bulk_status(req: BulkStatusRequest, db: Session = Depends(get_db)):
     """Change reading_status for multiple series at once."""
+    if req.reading_status not in _VALID_READING_STATUSES:
+        raise HTTPException(status_code=422, detail=f"Invalid reading_status: {req.reading_status!r}")
     updated = 0
     for sid in req.series_ids:
         series = db.query(TrackedSeries).filter(TrackedSeries.id == sid).first()
@@ -395,11 +397,14 @@ def import_library(req: ImportRequest, db: Session = Depends(get_db)):
             latest_release_group=item.get("latest_release_group"),
             simulpub_source=item.get("simulpub_source"),
             simulpub_id=item.get("simulpub_id"),
+            komga_track_mode=item.get("komga_track_mode", "chapter"),
             mb_provider_ids=json.dumps(item.get("mb_provider_ids", {})),
             current_chapter=item.get("current_chapter", "0"),
             reading_status=item.get("reading_status", "reading"),
             notes=item.get("notes"),
             mangabaka_url=item.get("mangabaka_url"),
+            poll_failures=item.get("poll_failures", 0),
+            last_poll_error=item.get("last_poll_error"),
             added_at=datetime.utcnow(),
         )
         db.add(s)
@@ -434,6 +439,10 @@ def get_series_endpoint(series_id: int, db: Session = Depends(get_db)):
 
 # ── Update series ─────────────────────────────────────────────────────────────
 
+_VALID_READING_STATUSES = {"reading", "plan_to_read", "completed", "on_hold", "dropped", "rereading"}
+_VALID_TRACK_MODES = {"chapter", "volume"}
+
+
 class UpdateSeriesRequest(BaseModel):
     current_chapter: str | None = None
     reading_status: str | None = None
@@ -452,6 +461,10 @@ def update_series(series_id: int, req: UpdateSeriesRequest, db: Session = Depend
     series = db.query(TrackedSeries).filter(TrackedSeries.id == series_id).first()
     if not series:
         raise HTTPException(status_code=404, detail="Series not tracked")
+    if req.reading_status is not None and req.reading_status not in _VALID_READING_STATUSES:
+        raise HTTPException(status_code=422, detail=f"Invalid reading_status: {req.reading_status!r}. Must be one of: {', '.join(sorted(_VALID_READING_STATUSES))}")
+    if req.komga_track_mode is not None and req.komga_track_mode not in _VALID_TRACK_MODES:
+        raise HTTPException(status_code=422, detail=f"Invalid komga_track_mode: {req.komga_track_mode!r}. Must be 'chapter' or 'volume'")
     if req.current_chapter is not None:
         old_ch = series.current_chapter
         if req.current_chapter != old_ch:

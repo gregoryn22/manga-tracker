@@ -132,31 +132,51 @@ def extract_mu_cover(image_data: dict | None) -> str | None:
 
 def normalize_chapter(chapter_str: str | None) -> float | None:
     """
-    Parse a chapter string into a comparable float, taking the highest number.
+    Parse a chapter string into a comparable float.
 
     Handles MangaUpdates formats including:
-      '121'           → 121.0
-      '12.5'          → 12.5
-      '23-24'         → 24.0   (simple range)
-      'c23-c24'       → 24.0   (prefixed range)
-      'Ch. 23 - Ch. 24' → 24.0 (verbose range)
-      'v3 c23'        → 23.0   (volume + chapter)
-      'vol.3 ch.23-24' → 24.0  (volume + chapter range)
+      '121'             → 121.0
+      '12.5'            → 12.5
+      '23-24'           → 24.0   (simple range)
+      'c23-c24'         → 24.0   (prefixed range)
+      'Ch. 23 - Ch. 24' → 24.0   (verbose range)
+      'v3 c23'          → 23.0   (volume + chapter — prefers chapter)
+      'vol.3 ch.23-24'  → 24.0   (volume + chapter range)
+      'v100 c45'        → 45.0   (volume > chapter — still picks chapter)
 
-    Strategy: extract ALL numbers from the string, return the highest.
-    This is safe because for chapter tracking we always want the latest
-    (highest) chapter number regardless of how the range is formatted.
+    Strategy:
+      1. Strip volume-prefixed numbers first (v3, vol.3, volume 3).
+      2. If explicit chapter-prefixed numbers exist (ch., c, chapter, #),
+         return the max of those.
+      3. Otherwise return the max of all remaining numbers.
     """
     if not chapter_str:
         return None
     import re
-    # Find all decimal numbers in the string (e.g. 12, 12.5, 3)
-    numbers = re.findall(r"\d+(?:\.\d+)?", str(chapter_str))
+
+    s = str(chapter_str)
+
+    # 1. Remove volume-prefixed numbers so they don't pollute the max
+    s_no_vol = re.sub(r"(?i)\b(?:v(?:ol(?:ume)?)?\.?\s*)\d+(?:\.\d+)?", "", s)
+
+    # 2. If the string has explicit chapter prefixes (ch., c, #), we know
+    #    the remaining numbers are chapter-related (including range endpoints
+    #    like the "24" in "ch.23-24"). Use max of all remaining numbers.
+    has_ch_prefix = re.search(
+        r"(?i)(?:ch(?:ap(?:ter)?)?\.?\s*|c(?=\d)|#)\d", s_no_vol
+    )
+    numbers = re.findall(r"\d+(?:\.\d+)?", s_no_vol)
+    if has_ch_prefix and numbers:
+        return max(float(n) for n in numbers)
+
+    # 3. Fall back to all remaining numbers in the volume-stripped string
+    if numbers:
+        return max(float(n) for n in numbers)
+
+    # 4. Last resort: all numbers from the original (covers bare "123" cases)
+    numbers = re.findall(r"\d+(?:\.\d+)?", s)
     if not numbers:
         return None
-    # Return the max — for "v3 c23-24" this gives 24.0 not 3.0
-    # Volume numbers are typically small (1-30) while chapter numbers
-    # are larger, so max() naturally picks the chapter number.
     return max(float(n) for n in numbers)
 
 

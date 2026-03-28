@@ -172,21 +172,16 @@ def test_pushover(db: Session = Depends(get_db)):
 @router.post("/test-webhook")
 def test_webhook(db: Session = Depends(get_db)):
     """Send a test Discord/Slack webhook notification."""
-    from ..notifier import _maybe_webhook
+    from ..notifier import send_webhook_raw
     webhook_url = get_setting(db, "webhook_url", "")
     if not webhook_url:
         raise HTTPException(status_code=400, detail="Webhook URL not configured")
     try:
-        _maybe_webhook.__wrapped__ if hasattr(_maybe_webhook, '__wrapped__') else None
-        # Temporarily bypass the enabled check by calling the internal send directly
-        import httpx as _httpx
-        if "discord.com" in webhook_url or "discordapp.com" in webhook_url:
-            payload = {"embeds": [{"title": "📚 Manga Tracker — Test", "description": "Your webhook is working!", "color": 5814783}]}
-        else:
-            payload = {"text": "*📚 Manga Tracker — Test*\nYour webhook is working!"}
-        with _httpx.Client(timeout=10.0) as client:
-            resp = client.post(webhook_url, json=payload)
-            resp.raise_for_status()
+        send_webhook_raw(
+            webhook_url=webhook_url,
+            title="📚 Manga Tracker — Test",
+            message="Your webhook is working!",
+        )
         return {"success": True, "message": "Test webhook sent!"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Webhook error: {e}")

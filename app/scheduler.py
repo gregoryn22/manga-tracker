@@ -70,6 +70,19 @@ _JOB_ID = "poll_updates"
 ACTIVE_STATUSES = {"reading", "on_hold"}
 
 
+def _mark_poll_success(series: TrackedSeries):
+    """Reset poll health counters on a successful poll."""
+    series.poll_failures = 0
+    series.last_poll_error = None
+    series.last_poll_success = datetime.utcnow()
+
+
+def _mark_poll_failure(series: TrackedSeries, error: str):
+    """Increment poll failure counter and record the error message."""
+    series.poll_failures = (series.poll_failures or 0) + 1
+    series.last_poll_error = error
+
+
 def _titles_plausibly_match(tracked_title: str, release_title: str) -> bool:
     """
     Quick sanity check that a release record plausibly belongs to a tracked series.
@@ -654,10 +667,13 @@ def _poll_mangaplus(db: Session, series_list: list[TrackedSeries]):
                     f"(known: {series.mu_latest_chapter})"
                 )
 
+            _mark_poll_success(series)
             series.last_checked = datetime.utcnow()
             db.commit()
         except Exception as e:
             logger.error(f"MangaPlus poll failed for '{series.title}': {e}")
+            _mark_poll_failure(series, str(e))
+            db.commit()
 
 
 def _poll_kmanga(db: Session, series_list: list[TrackedSeries]):
@@ -801,6 +817,7 @@ def _poll_kmanga(db: Session, series_list: list[TrackedSeries]):
                     f"(known: {series.mu_latest_chapter})"
                 )
 
+            _mark_poll_success(series)
             series.last_checked = datetime.utcnow()
             db.commit()
 
@@ -819,8 +836,12 @@ def _poll_kmanga(db: Session, series_list: list[TrackedSeries]):
             break
         except KMangaError as e:
             logger.error(f"K Manga poll failed for '{series.title}': {e}")
+            _mark_poll_failure(series, str(e))
+            db.commit()
         except Exception as e:
             logger.error(f"K Manga unexpected error for '{series.title}': {e}")
+            _mark_poll_failure(series, str(e))
+            db.commit()
 
     # Persist latest cookies (birthday refresh, etc.) back to DB
     set_setting(db, "kmanga_cookies", _json.dumps(client.cookies))
@@ -891,6 +912,7 @@ def _poll_mangaup(db: Session, series_list: list[TrackedSeries]):
                     f"(known: {series.mu_latest_chapter})"
                 )
 
+            _mark_poll_success(series)
             series.last_checked = datetime.utcnow()
             db.commit()
 
@@ -899,10 +921,16 @@ def _poll_mangaup(db: Session, series_list: list[TrackedSeries]):
                 f"MangaUp! title not found for '{series.title}' (id={series.simulpub_id})"
                 f" — check the title ID in series settings"
             )
+            _mark_poll_failure(series, f"Title not found (id={series.simulpub_id})")
+            db.commit()
         except MangaUpError as e:
             logger.error(f"MangaUp! poll failed for '{series.title}': {e}")
+            _mark_poll_failure(series, str(e))
+            db.commit()
         except Exception as e:
             logger.error(f"MangaUp! unexpected error for '{series.title}': {e}")
+            _mark_poll_failure(series, str(e))
+            db.commit()
 
 
 def _poll_mangadex(db: Session, series_list: list[TrackedSeries]):
@@ -970,6 +998,7 @@ def _poll_mangadex(db: Session, series_list: list[TrackedSeries]):
                     f"(known: {series.mu_latest_chapter})"
                 )
 
+            _mark_poll_success(series)
             series.last_checked = datetime.utcnow()
             db.commit()
 
@@ -978,13 +1007,19 @@ def _poll_mangadex(db: Session, series_list: list[TrackedSeries]):
                 f"MangaDex manga not found for '{series.title}' (id={series.simulpub_id})"
                 f" — check the UUID in series settings"
             )
+            _mark_poll_failure(series, f"Manga not found (id={series.simulpub_id})")
+            db.commit()
         except MangaDexRateLimited:
             logger.warning("MangaDex rate limit hit — skipping remaining series this run")
             break
         except MangaDexError as e:
             logger.error(f"MangaDex poll failed for '{series.title}': {e}")
+            _mark_poll_failure(series, str(e))
+            db.commit()
         except Exception as e:
             logger.error(f"MangaDex unexpected error for '{series.title}': {e}")
+            _mark_poll_failure(series, str(e))
+            db.commit()
 
 
 def _poll_komga(db: Session, series_list: list[TrackedSeries]):
@@ -1064,21 +1099,35 @@ def _poll_komga(db: Session, series_list: list[TrackedSeries]):
                     f"(known: {series.mu_latest_chapter})"
                 )
 
+            _mark_poll_success(series)
             series.last_checked = datetime.utcnow()
             db.commit()
 
         except KomgaAuthError:
             logger.error("Komga: API key is invalid — check Settings")
+            # Mark all remaining Komga series as failed before breaking
+            for s in series_list:
+                _mark_poll_failure(s, "API key invalid")
+            db.commit()
             break
         except KomgaConnectionError as e:
             logger.error(f"Komga: server unreachable — {e}")
+            for s in series_list:
+                _mark_poll_failure(s, f"Server unreachable: {e}")
+            db.commit()
             break
         except KomgaNotFound:
             logger.error(
                 f"Komga: series not found for '{series.title}' (id={series.simulpub_id})"
                 f" — check the series ID in Settings"
             )
+            _mark_poll_failure(series, f"Series not found (id={series.simulpub_id})")
+            db.commit()
         except KomgaError as e:
             logger.error(f"Komga poll failed for '{series.title}': {e}")
+            _mark_poll_failure(series, str(e))
+            db.commit()
         except Exception as e:
             logger.error(f"Komga unexpected error for '{series.title}': {e}")
+            _mark_poll_failure(series, str(e))
+            db.commit()

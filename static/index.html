@@ -735,7 +735,7 @@
                 </template>
                 <div class="drop-body">
                   <div class="drop-title" x-text="r.series_title"></div>
-                  <div class="drop-ch" x-text="'Ch. ' + r.chapter"></div>
+                  <div class="drop-ch" x-text="releaseUnit(r) + ' ' + r.chapter"></div>
                   <div class="drop-group" x-text="r.group_name || ''"></div>
                 </div>
               </div>
@@ -1072,7 +1072,7 @@
                     <template x-for="r in group.releases" :key="r.mu_release_id || r.chapter">
                       <div class="release-row" style="padding:8px 0">
                         <div class="release-info">
-                          <div class="release-ch" x-text="'Ch. ' + r.chapter + (r.volume ? ' · Vol. ' + r.volume : '')"></div>
+                          <div class="release-ch" x-text="releaseUnit(r) + ' ' + r.chapter + (r.volume ? ' · Vol. ' + r.volume : '')"></div>
                           <div class="release-group" x-text="r.group_name ? 'by ' + r.group_name : ''"></div>
                         </div>
                         <div class="release-date" x-text="r.release_date"></div>
@@ -1212,7 +1212,7 @@
               <div style="flex:1;min-width:0">
                 <div class="fw-600 text-sm" x-text="entry.series_title || 'Unknown'"></div>
                 <div class="text-xs text-muted" x-show="entry.action==='chapter_update'">
-                  Ch. <span x-text="entry.old_chapter || '0'"></span> → Ch. <span x-text="entry.new_chapter"></span>
+                  <span x-text="activityUnit(entry)"></span> <span x-text="entry.old_chapter || '0'"></span> → <span x-text="activityUnit(entry)"></span> <span x-text="entry.new_chapter"></span>
                 </div>
                 <div class="text-xs text-muted" x-show="entry.action==='status_change'">
                   <span x-text="(entry.old_chapter||'').replace('_',' ')"></span> → <span x-text="(entry.new_chapter||'').replace('_',' ')"></span>
@@ -1850,7 +1850,7 @@
                   <div class="tl-item">
                     <div class="tl-dot"></div>
                     <div>
-                      <div class="tl-ch" x-text="'Ch. ' + r.chapter + (r.volume ? ' · Vol. ' + r.volume : '')"></div>
+                      <div class="tl-ch" x-text="releaseUnit(r) + ' ' + r.chapter + (r.volume ? ' · Vol. ' + r.volume : '')"></div>
                       <div class="tl-meta">
                         <span x-text="r.release_date || ''"></span>
                         <span x-show="r.groups && r.groups.length"> · <span x-text="r.groups[0].name"></span></span>
@@ -2322,6 +2322,17 @@ function app() {
     /** Return 'Vol.' for Komga volume-tracked series, 'Ch.' otherwise. */
     unitLabel(s) {
       return (s && s.simulpub_source === 'komga' && (s.komga_track_mode || 'chapter') === 'volume') ? 'Vol.' : 'Ch.';
+    },
+
+    /** Unit label for a release record — infers from group_name since releases lack track mode. */
+    releaseUnit(r) {
+      return (r.group_name && r.group_name.includes('(volume)')) ? 'Vol.' : 'Ch.';
+    },
+
+    /** Unit label for an activity log entry — looks up the series from the library. */
+    activityUnit(entry) {
+      const s = this.library.find(s => s.id === entry.series_id);
+      return this.unitLabel(s);
     },
 
     // ── Live Feed ────────────────────────────────────────

@@ -81,9 +81,19 @@ def komga_search(q: str = ""):
         db.close()
     if not komga_url or not komga_key:
         raise HTTPException(status_code=400, detail="Komga URL or API key not configured")
-    from .komga import KomgaClient
+    from .komga import KomgaClient, KomgaAuthError, KomgaConnectionError, KomgaError
     client = KomgaClient(komga_url, komga_key)
-    return client._get("/series", params={"search": q, "size": 20})
+    try:
+        return client._get("/series", params={"search": q, "size": 20})
+    except KomgaAuthError:
+        raise HTTPException(status_code=401, detail="Komga API key is invalid — check Settings")
+    except KomgaConnectionError as e:
+        raise HTTPException(status_code=502, detail=f"Komga server unreachable: {e}")
+    except KomgaError as e:
+        raise HTTPException(status_code=502, detail=f"Komga error: {e}")
+    except Exception as e:
+        logger.error(f"Komga search proxy error: {e}")
+        raise HTTPException(status_code=500, detail=f"Komga search failed: {e}")
 
 
 # Serve static files
