@@ -380,6 +380,8 @@ def _seed_settings():
             # Komga self-hosted server
             "komga_url": os.getenv("KOMGA_URL", ""),
             "komga_api_key": os.getenv("KOMGA_API_KEY", ""),
+            # Dashboard behaviour
+            "updates_reading_only": "false",
             # Discord/Slack webhook
             "webhook_enabled": "false",
             "webhook_url": "",

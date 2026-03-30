@@ -1275,7 +1275,7 @@
               </div>
             </div>
 
-            <div style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:14px 16px;grid-column:1/-1">
+            <div style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:14px 16px">
               <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
                 <div style="font-size:0.85rem;font-weight:600">📲 Push only for "Reading" status</div>
                 <select class="input" x-model="sf.push_reading_only" style="width:100px;padding:4px 8px;font-size:0.8rem">
@@ -1288,6 +1288,21 @@
                 <strong>Reading</strong>. Series set to On Hold, Plan to Read, Considering, etc.
                 still create in-app notifications but won't ping your device.
                 Useful if you have a large backlog you haven't started yet.
+              </div>
+            </div>
+
+            <div style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:14px 16px">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+                <div style="font-size:0.85rem;font-weight:600">🟢 Dashboard "Updates" filter</div>
+                <select class="input" x-model="sf.updates_reading_only" style="width:100px;padding:4px 8px;font-size:0.8rem">
+                  <option value="false">All statuses</option>
+                  <option value="true">Reading only</option>
+                </select>
+              </div>
+              <div class="text-xs text-muted" style="line-height:1.5">
+                When set to "Reading only", the Updates pill and badge on the dashboard only count
+                series with <strong>Reading</strong> status. Plan to Read, On Hold, etc. with new chapters
+                still show a NEW chip on their card — they just won't be counted in the update total.
               </div>
             </div>
 
@@ -1993,7 +2008,7 @@ function app() {
     activityLog: [],
 
     // Settings form
-    sf: { pushover_user_key:'', pushover_app_token:'', pushover_enabled:'false', push_chapter_updates:'true', push_news:'false', push_reading_only:'false', poll_interval_hours:'6', mangabaka_token:'', mu_enabled:'true', kmanga_email:'', kmanga_password:'', kmanga_recaptcha_token:'', komga_url:'', komga_api_key:'', idle_detection_enabled:'false', idle_threshold_days:'90', webhook_enabled:'false', webhook_url:'' },
+    sf: { pushover_user_key:'', pushover_app_token:'', pushover_enabled:'false', push_chapter_updates:'true', push_news:'false', push_reading_only:'false', updates_reading_only:'false', poll_interval_hours:'6', mangabaka_token:'', mu_enabled:'true', kmanga_email:'', kmanga_password:'', kmanga_recaptcha_token:'', komga_url:'', komga_api_key:'', idle_detection_enabled:'false', idle_threshold_days:'90', webhook_enabled:'false', webhook_url:'' },
 
     // Detail modal
     detailOpen: false, ds: null, ef: {}, detailReleases: [],
@@ -2018,8 +2033,9 @@ function app() {
 
     // Computed stats
     get stats() {
+      const readingOnly = this.sf.updates_reading_only === 'true';
       return {
-        updates: this.library.filter(s=>s.has_update).length,
+        updates: this.library.filter(s => s.has_update && (!readingOnly || s.reading_status === 'reading')).length,
         reading: this.library.filter(s=>s.reading_status==='reading').length,
         mu_linked: this.library.filter(s=>s.mu_series_id).length,
       };
@@ -2086,7 +2102,7 @@ function app() {
       if (!this.filters.includes('all')) {
         list = list.filter(s => {
           for (const f of this.filters) {
-            if (f === 'updates' && s.has_update) return true;
+            if (f === 'updates' && s.has_update && (this.sf.updates_reading_only !== 'true' || s.reading_status === 'reading')) return true;
             if (f === 'idle' && this.isIdle(s)) return true;
             if (s.reading_status === f) return true;
           }

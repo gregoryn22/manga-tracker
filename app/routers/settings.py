@@ -30,6 +30,7 @@ EXPOSED_KEYS = [
     "komga_api_key",
     "idle_detection_enabled",
     "idle_threshold_days",
+    "updates_reading_only",
     "webhook_enabled",
     "webhook_url",
 ]
@@ -69,6 +70,7 @@ class UpdateSettingsRequest(BaseModel):
     komga_api_key: str | None = None
     idle_detection_enabled: str | None = None
     idle_threshold_days: str | None = None
+    updates_reading_only: str | None = None
     webhook_enabled: str | None = None
     webhook_url: str | None = None
 
