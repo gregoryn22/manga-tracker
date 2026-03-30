@@ -770,8 +770,12 @@
             <option value="rating_asc">Rating (low)</option>
             <option value="added_desc">Recently Added</option>
             <option value="added_asc">Oldest Added</option>
+            <option value="release_desc">Latest Release</option>
+            <option value="release_asc">Oldest Release</option>
+            <option value="idle_desc">Longest Idle</option>
             <option value="checked_desc">Last Checked</option>
             <option value="unread_desc">Most Unread</option>
+            <option value="progress_desc">Most Complete</option>
           </select>
           <select class="input" x-model="genreFilter" style="width:160px;padding:7px 10px;font-size:0.8rem"
                   x-show="allGenres.length > 0">
@@ -798,18 +802,24 @@
         </div>
 
         <!-- Bulk action bar -->
-        <div class="bulk-bar" x-show="bulkMode && bulkSelected.length > 0">
-          <span class="text-sm fw-600" x-text="bulkSelected.length + ' selected'"></span>
-          <select class="input" x-model="bulkStatus" style="width:160px;padding:5px 8px;font-size:0.8rem">
-            <option value="reading">📖 Reading</option>
-            <option value="considering">🤔 Considering</option>
-            <option value="plan_to_read">📋 Plan to Read</option>
-            <option value="on_hold">⏸ On Hold</option>
-            <option value="completed">✅ Completed</option>
-            <option value="dropped">❌ Dropped</option>
-          </select>
-          <button class="btn btn-primary btn-sm" @click="applyBulkStatus()">Apply Status</button>
-          <button class="btn btn-ghost btn-sm" @click="bulkSelected=[]">Clear</button>
+        <div class="bulk-bar" x-show="bulkMode">
+          <button class="btn btn-ghost btn-xs" @click="bulkSelectAll()" x-text="bulkSelected.length === filteredLibrary().length ? 'Deselect All' : 'Select All'" style="white-space:nowrap"></button>
+          <span class="text-sm fw-600" x-text="bulkSelected.length + ' selected'" x-show="bulkSelected.length > 0"></span>
+          <template x-if="bulkSelected.length > 0">
+            <div class="flex items-center gap-2">
+              <select class="input" x-model="bulkStatus" style="width:160px;padding:5px 8px;font-size:0.8rem">
+                <option value="reading">📖 Reading</option>
+                <option value="considering">🤔 Considering</option>
+                <option value="plan_to_read">📋 Plan to Read</option>
+                <option value="on_hold">⏸ On Hold</option>
+                <option value="completed">✅ Completed</option>
+                <option value="dropped">❌ Dropped</option>
+              </select>
+              <button class="btn btn-primary btn-sm" @click="applyBulkStatus()">Apply Status</button>
+              <button class="btn btn-danger btn-sm" @click="bulkDelete()">🗑 Delete</button>
+              <button class="btn btn-ghost btn-sm" @click="bulkSelected=[]">Clear</button>
+            </div>
+          </template>
         </div>
 
         <!-- Loading (skeleton) -->
@@ -1200,6 +1210,16 @@
 
       <!-- ══ ACTIVITY LOG ═════════════════════════════════ -->
       <div x-show="page==='activity'">
+        <!-- Activity filters -->
+        <div class="flex gap-2 items-center" style="margin-bottom:12px">
+          <select class="input" x-model="activityFilter" @change="loadActivity()" style="width:180px;padding:6px 10px;font-size:0.8rem">
+            <option value="">All Activity</option>
+            <option value="chapter_update">📖 Chapter Updates</option>
+            <option value="status_change">🏷️ Status Changes</option>
+            <option value="source_change">📋 Source Changes</option>
+          </select>
+        </div>
+
         <div x-show="activityLog.length===0" class="empty">
           <div class="empty-icon">📋</div>
           <h3>No activity yet</h3>
@@ -1640,6 +1660,28 @@
             <textarea class="input" rows="2" placeholder="Your notes…" x-model="ef.notes" style="width:100%"></textarea>
           </div>
 
+          <div class="form-group">
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:0.85rem">
+              <input type="checkbox" x-model="ef.notification_muted" style="accent-color:var(--accent)" />
+              <span>🔇 Mute push notifications for this series</span>
+            </label>
+            <div class="text-xs text-muted" style="margin-left:26px">
+              In-app notifications are still created. Only Pushover / webhook pushes are suppressed.
+            </div>
+          </div>
+
+          <!-- Poll health info -->
+          <template x-if="ds.poll_failures > 0">
+            <div class="card" style="padding:10px 14px;margin-bottom:14px;border-color:var(--red);font-size:0.8rem">
+              <div class="flex items-center gap-2">
+                <span class="poll-health" :class="pollHealthClass(ds)"></span>
+                <span class="fw-600" x-text="ds.poll_failures + ' consecutive poll failure' + (ds.poll_failures > 1 ? 's' : '')"></span>
+              </div>
+              <div class="text-xs text-muted mt-1" x-show="ds.last_poll_error" x-text="ds.last_poll_error"></div>
+              <div class="text-xs text-muted mt-1" x-show="ds.poll_failures >= 10">Polling paused — click Refresh to retry and reset.</div>
+            </div>
+          </template>
+
           <!-- Simulpub source config -->
           <div class="form-group">
             <div class="form-label">Chapter Source
@@ -2006,6 +2048,7 @@ function app() {
 
     // Activity log
     activityLog: [],
+    activityFilter: '',
 
     // Settings form
     sf: { pushover_user_key:'', pushover_app_token:'', pushover_enabled:'false', push_chapter_updates:'true', push_news:'false', push_reading_only:'false', updates_reading_only:'false', poll_interval_hours:'6', mangabaka_token:'', mu_enabled:'true', kmanga_email:'', kmanga_password:'', kmanga_recaptcha_token:'', komga_url:'', komga_api_key:'', idle_detection_enabled:'false', idle_threshold_days:'90', webhook_enabled:'false', webhook_url:'' },
@@ -2139,11 +2182,21 @@ function app() {
           case 'added':
             va = a.added_at || ''; vb = b.added_at || '';
             return mul * va.localeCompare(vb);
+          case 'release':
+            va = a.latest_release_date || ''; vb = b.latest_release_date || '';
+            return mul * va.localeCompare(vb);
+          case 'idle':
+            // Sort by how long since last release (longest idle = desc)
+            va = a.latest_release_date || a.added_at || ''; vb = b.latest_release_date || b.added_at || '';
+            return mul * va.localeCompare(vb);
           case 'checked':
             va = a.last_checked || ''; vb = b.last_checked || '';
             return mul * va.localeCompare(vb);
           case 'unread':
             va = this._unreadNum(a); vb = this._unreadNum(b);
+            return mul * (va - vb);
+          case 'progress':
+            va = this.chapterProgress(a); vb = this.chapterProgress(b);
             return mul * (va - vb);
           default: return 0;
         }
@@ -2242,6 +2295,31 @@ function app() {
       else this.bulkSelected.splice(idx, 1);
     },
 
+    bulkSelectAll() {
+      const visible = this.filteredLibrary().map(s => s.id);
+      if (this.bulkSelected.length === visible.length) {
+        this.bulkSelected = [];
+      } else {
+        this.bulkSelected = [...visible];
+      }
+    },
+
+    async bulkDelete() {
+      const count = this.bulkSelected.length;
+      if (!confirm(`Delete ${count} series from your library? This cannot be undone.`)) return;
+      try {
+        let deleted = 0;
+        for (const id of this.bulkSelected) {
+          await this.api(`/api/series/${id}`, 'DELETE');
+          deleted++;
+        }
+        this.library = this.library.filter(s => !this.bulkSelected.includes(s.id));
+        this.bulkSelected = [];
+        this.bulkMode = false;
+        this.toast(`Deleted ${deleted} series`, 'success');
+      } catch(e) { this.toast('Bulk delete failed', 'error'); }
+    },
+
     async applyBulkStatus() {
       try {
         const resp = await this.api('/api/series/bulk/status', 'POST', {
@@ -2269,8 +2347,10 @@ function app() {
 
     // ── Activity log ─────────────────────────────────
     async loadActivity() {
-      try { this.activityLog = await this.api('/api/series/activity/log'); }
-      catch(e) { this.toast('Failed to load activity', 'error'); }
+      try {
+        const params = this.activityFilter ? `?action=${this.activityFilter}` : '';
+        this.activityLog = await this.api(`/api/series/activity/log${params}`);
+      } catch(e) { this.toast('Failed to load activity', 'error'); }
     },
 
     // ── Export / Import ──────────────────────────────
@@ -2413,6 +2493,7 @@ function app() {
         current_chapter: series.current_chapter||'0',
         reading_status: series.reading_status||'reading',
         notes: series.notes||'',
+        notification_muted: !!series.notification_muted,
         simulpub_source: series.simulpub_source||'',
         simulpub_id: series.simulpub_id||'',
         mu_latest_chapter_manual: series.mu_latest_chapter||'',
@@ -2462,6 +2543,7 @@ function app() {
           current_chapter: this.ef.current_chapter,
           reading_status: this.ef.reading_status,
           notes: this.ef.notes,
+          notification_muted: this.ef.notification_muted,
           simulpub_source: this.ef.simulpub_source,
           simulpub_id: this.ef.simulpub_id,
           komga_track_mode: this.ef.simulpub_source === 'komga' ? this.ef.komga_track_mode : undefined,
@@ -2479,7 +2561,8 @@ function app() {
     },
 
     async removeSeries(id) {
-      if (!confirm('Remove this series from your library?')) return;
+      const title = this.ds?.title || 'this series';
+      if (!confirm(`Remove "${title}" from your library? This will also delete its release history, notifications, and activity log entries.`)) return;
       try {
         await this.api(`/api/series/${id}`,'DELETE');
         this.library = this.library.filter(s=>s.id!==id);

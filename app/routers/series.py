@@ -398,6 +398,7 @@ def import_library(req: ImportRequest, db: Session = Depends(get_db)):
             simulpub_source=item.get("simulpub_source"),
             simulpub_id=item.get("simulpub_id"),
             komga_track_mode=item.get("komga_track_mode", "chapter"),
+            notification_muted=item.get("notification_muted", False),
             mb_provider_ids=json.dumps(item.get("mb_provider_ids", {})),
             current_chapter=item.get("current_chapter", "0"),
             reading_status=item.get("reading_status", "reading"),
@@ -416,14 +417,25 @@ def import_library(req: ImportRequest, db: Session = Depends(get_db)):
 # ── Reading activity log ─────────────────────────────────────────────
 
 @router.get("/activity/log")
-def get_activity_log(limit: int = 100, db: Session = Depends(get_db)):
-    """Return recent reading activity (chapter changes, status changes)."""
-    entries = (
-        db.query(ReadingLog)
-        .order_by(ReadingLog.created_at.desc())
-        .limit(limit)
-        .all()
-    )
+def get_activity_log(
+    limit: int = 100,
+    action: str | None = None,
+    series_id: int | None = None,
+    db: Session = Depends(get_db),
+):
+    """Return recent reading activity with optional filters.
+
+    Query params:
+      action    — filter by action type: chapter_update, status_change, source_change
+      series_id — filter to a single series
+      limit     — max entries (default 100)
+    """
+    query = db.query(ReadingLog)
+    if action:
+        query = query.filter(ReadingLog.action == action)
+    if series_id is not None:
+        query = query.filter(ReadingLog.series_id == series_id)
+    entries = query.order_by(ReadingLog.created_at.desc()).limit(limit).all()
     return [e.to_dict() for e in entries]
 
 
@@ -447,6 +459,7 @@ class UpdateSeriesRequest(BaseModel):
     current_chapter: str | None = None
     reading_status: str | None = None
     notes: str | None = None
+    notification_muted: bool | None = None
     # Simulpub source configuration
     simulpub_source: str | None = None   # 'mangaplus' | 'custom' | '' (clear)
     simulpub_id: str | None = None       # Platform-specific ID (e.g. MangaPlus title_id)
@@ -484,6 +497,8 @@ def update_series(series_id: int, req: UpdateSeriesRequest, db: Session = Depend
         series.reading_status = req.reading_status
     if req.notes is not None:
         series.notes = req.notes
+    if req.notification_muted is not None:
+        series.notification_muted = req.notification_muted
     # ── Simulpub source change — reset stale polling state ──────────────────
     old_source = series.simulpub_source
     old_sim_id = series.simulpub_id
@@ -554,6 +569,7 @@ def remove_series(series_id: int, db: Session = Depends(get_db)):
     # Clean up related records to avoid orphans
     db.query(Release).filter(Release.series_id == series_id).delete()
     db.query(Notification).filter(Notification.series_id == series_id).delete()
+    db.query(ReadingLog).filter(ReadingLog.series_id == series_id).delete()
 
     db.delete(series)
     db.commit()

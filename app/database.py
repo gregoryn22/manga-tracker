@@ -85,6 +85,11 @@ class TrackedSeries(Base):
     reading_status = Column(String, default="reading")
     notes = Column(Text, nullable=True)
 
+    # ── Notification muting ────────────────────────────────────────────
+    # When True, push notifications (Pushover/webhook) are suppressed for
+    # this series.  In-app notifications are still created.
+    notification_muted = Column(Boolean, default=False)
+
     # ── Polling health ──────────────────────────────────────────────────
     poll_failures = Column(Integer, default=0)            # consecutive failures
     last_poll_error = Column(Text, nullable=True)         # last error message
@@ -153,6 +158,7 @@ class TrackedSeries(Base):
             "current_chapter": self.current_chapter,
             "reading_status": self.reading_status,
             "notes": self.notes,
+            "notification_muted": bool(self.notification_muted),
             "mangabaka_url": self.mangabaka_url,
             "poll_failures": self.poll_failures or 0,
             "last_poll_error": self.last_poll_error,
@@ -308,6 +314,7 @@ def _migrate_db():
         ("tracked_series", "last_poll_error",    "TEXT"),
         ("tracked_series", "last_poll_success",  "DATETIME"),
         ("tracked_series", "komga_track_mode",   "VARCHAR DEFAULT 'chapter'"),
+        ("tracked_series", "notification_muted", "BOOLEAN DEFAULT 0"),
     ]
 
     # Indexes to ensure on hot query columns (idempotent — CREATE IF NOT EXISTS)

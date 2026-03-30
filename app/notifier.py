@@ -106,6 +106,7 @@ def create_notification(
     meta: dict | None = None,
     send_push: bool = True,
     reading_status: str | None = None,
+    notification_muted: bool = False,
 ):
     """
     Persist an in-app notification and optionally dispatch to Pushover.
@@ -113,6 +114,9 @@ def create_notification(
     `send_push` is the caller's intent. Whether Pushover actually fires also
     depends on the user's granular settings (push_chapter_updates, push_news,
     push_reading_only) read from the DB at call time.
+
+    `notification_muted` is a per-series override — when True, the in-app
+    notification is still created but push/webhook is suppressed.
     """
     notif = Notification(
         series_id=series_id,
@@ -127,7 +131,7 @@ def create_notification(
     db.commit()
     db.refresh(notif)
 
-    if send_push:
+    if send_push and not notification_muted:
         _maybe_push(
             db=db,
             notif_type=notif_type,
@@ -136,6 +140,8 @@ def create_notification(
             meta=meta or {},
             reading_status=reading_status,
         )
+    elif notification_muted:
+        logger.debug(f"Push suppressed: series '{series_title}' is muted")
 
     return notif
 

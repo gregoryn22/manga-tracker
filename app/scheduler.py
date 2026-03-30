@@ -83,6 +83,32 @@ def _mark_poll_failure(series: TrackedSeries, error: str):
     series.last_poll_error = error
 
 
+# Max consecutive failures before a series is skipped entirely until manual refresh
+_MAX_BACKOFF_FAILURES = 10
+
+
+def _should_skip_poll(series: TrackedSeries) -> bool:
+    """
+    Exponential backoff: skip polling a series based on its failure count.
+
+    After 5 consecutive failures, skip every other poll cycle.
+    After 7 failures, skip 3 out of 4 cycles.
+    After 10+ failures, skip entirely until manually refreshed.
+
+    Uses a simple modulo on poll_failures to approximate a backoff curve
+    without needing a separate timer or counter.
+    """
+    failures = series.poll_failures or 0
+    if failures < 5:
+        return False
+    if failures >= _MAX_BACKOFF_FAILURES:
+        return True  # fully paused — manual refresh required
+    # Skip increasingly often: 5-6 → every 2nd, 7-8 → every 4th, 9 → every 8th
+    skip_ratio = 2 ** ((failures - 5) // 2 + 1)
+    # Use a simple hash of the series ID to stagger which poll cycle runs
+    return (series.id % skip_ratio) != 0
+
+
 def _titles_plausibly_match(tracked_title: str, release_title: str) -> bool:
     """
     Quick sanity check that a release record plausibly belongs to a tracked series.
@@ -498,6 +524,7 @@ def _send_chapter_notification(
         },
         send_push=True,
         reading_status=series.reading_status,
+        notification_muted=bool(getattr(series, "notification_muted", False)),
     )
 
 
@@ -582,28 +609,41 @@ def _poll_via_simulpub(db: Session, series_list: list[TrackedSeries]):
 
     Runs after Layers 1 & 2.  Only updates mu_latest_chapter if the simulpub
     source reports a strictly higher chapter than what earlier layers already found.
+
+    Series with high consecutive poll failures are skipped via exponential backoff.
     """
-    mp_series = [s for s in series_list if s.simulpub_source == "mangaplus"]
+    # Apply exponential backoff — skip series that have failed too many times in a row
+    active = []
+    skipped = 0
+    for s in series_list:
+        if _should_skip_poll(s):
+            skipped += 1
+        else:
+            active.append(s)
+    if skipped:
+        logger.info(f"Layer 3: skipping {skipped} series due to backoff (consecutive failures)")
+
+    mp_series = [s for s in active if s.simulpub_source == "mangaplus"]
     if mp_series:
         logger.info(f"Layer 3: MangaPlus check for {len(mp_series)} series")
         _poll_mangaplus(db, mp_series)
 
-    km_series = [s for s in series_list if s.simulpub_source == "kmanga"]
+    km_series = [s for s in active if s.simulpub_source == "kmanga"]
     if km_series:
         logger.info(f"Layer 3: K Manga check for {len(km_series)} series")
         _poll_kmanga(db, km_series)
 
-    mup_series = [s for s in series_list if s.simulpub_source == "mangaup"]
+    mup_series = [s for s in active if s.simulpub_source == "mangaup"]
     if mup_series:
         logger.info(f"Layer 3: MangaUp! check for {len(mup_series)} series")
         _poll_mangaup(db, mup_series)
 
-    mdx_series = [s for s in series_list if s.simulpub_source == "mangadex"]
+    mdx_series = [s for s in active if s.simulpub_source == "mangadex"]
     if mdx_series:
         logger.info(f"Layer 3: MangaDex check for {len(mdx_series)} series")
         _poll_mangadex(db, mdx_series)
 
-    kg_series = [s for s in series_list if s.simulpub_source == "komga"]
+    kg_series = [s for s in active if s.simulpub_source == "komga"]
     if kg_series:
         logger.info(f"Layer 3: Komga check for {len(kg_series)} series")
         _poll_komga(db, kg_series)
