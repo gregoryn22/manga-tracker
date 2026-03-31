@@ -320,9 +320,10 @@ def komga_import(req: KomgaImportRequest, background_tasks: BackgroundTasks):
             if current_chapter != "0":
                 db.add(ReadingLog(
                     series_id=series_obj.id,
+                    series_title=title,
                     action="chapter_update",
-                    old_value="0",
-                    new_value=current_chapter,
+                    old_chapter="0",
+                    new_chapter=current_chapter,
                     detail=f"Imported from Komga with {current_chapter} books read",
                 ))
                 series_obj.last_read_at = datetime.utcnow()
