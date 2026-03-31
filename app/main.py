@@ -248,8 +248,17 @@ def komga_import(req: KomgaImportRequest, background_tasks: BackgroundTasks):
     skipped = 0
     errors = []
 
+    # MB series IDs are their own integer namespace. To avoid collisions with
+    # MB IDs when auto-assigning IDs for Komga-only series, we start above
+    # 2_000_000_000 (well above any realistic MB ID range).
+    _KOMGA_ID_FLOOR = 2_000_000_000
+
     db = SessionLocal()
     try:
+        # Find current max ID so we can allocate above it (and above the floor)
+        max_id_row = db.execute(__import__("sqlalchemy").text("SELECT MAX(id) FROM tracked_series")).fetchone()
+        next_id = max((_KOMGA_ID_FLOOR, (max_id_row[0] or 0) + 1))
+
         for item in req.items:
             sid = item.komga_series_id.strip()
             if not sid:
@@ -296,6 +305,7 @@ def komga_import(req: KomgaImportRequest, background_tasks: BackgroundTasks):
             group_name = "Komga (volume)" if is_volume else "Komga"
 
             series_obj = TrackedSeries(
+                id=next_id,
                 title=title,
                 native_title=metadata.get("titleSort"),
                 description=metadata.get("summary", ""),
@@ -308,13 +318,13 @@ def komga_import(req: KomgaImportRequest, background_tasks: BackgroundTasks):
                 komga_track_mode=item.track_mode,
                 current_chapter=current_chapter,
                 reading_status="reading",
-                total_chapters=kg_series.get("booksCount"),
+                total_chapters=str(kg_series.get("booksCount")) if kg_series.get("booksCount") is not None else None,
                 mu_latest_chapter=latest_ch,
                 latest_release_group=group_name,
                 added_at=datetime.utcnow(),
             )
+            next_id += 1
             db.add(series_obj)
-            db.flush()  # get series_obj.id
 
             # Log the initial add as activity
             if current_chapter != "0":
@@ -354,7 +364,7 @@ def komga_import(req: KomgaImportRequest, background_tasks: BackgroundTasks):
 
 def _schedule_mu_lookup(background_tasks: BackgroundTasks, series_id: int, title: str):
     """Queue a MangaUpdates auto-link attempt in the background."""
-    from .mangaupdates import search_series, get_series as get_mu_series, extract_mu_cover
+    from .mangaupdates import search_series, find_best_match, get_series as get_mu_series, extract_mu_cover
 
     def _do_lookup():
         db = SessionLocal()
@@ -367,8 +377,10 @@ def _schedule_mu_lookup(background_tasks: BackgroundTasks, series_id: int, title
             if not results:
                 return
 
-            # Use first result as best match
-            best = results[0]
+            # Use scored best match rather than blind first result
+            best = find_best_match(title, results)
+            if not best:
+                return
             mu_id = best.get("record", {}).get("series_id")
             if not mu_id:
                 return
