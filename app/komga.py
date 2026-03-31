@@ -95,6 +95,24 @@ class KomgaClient:
 
         return resp.json()
 
+    def _post(self, path: str, json_body: dict | None = None, params: dict | None = None) -> dict:
+        """Perform a POST against the Komga API."""
+        url = f"{self.base_url}/api/v1{path}"
+        try:
+            with httpx.Client(timeout=20, follow_redirects=True) as client:
+                resp = client.post(url, json=json_body or {}, params=params or {}, headers=self._headers())
+        except httpx.ConnectError as e:
+            raise KomgaConnectionError(f"Cannot reach Komga at {self.base_url}: {e}") from e
+        except httpx.TimeoutException as e:
+            raise KomgaConnectionError(f"Komga request timed out ({self.base_url}): {e}") from e
+
+        if resp.status_code == 401:
+            raise KomgaAuthError("Komga: invalid API key (401 Unauthorized)")
+        if resp.status_code == 404:
+            raise KomgaNotFound(f"Komga: {path!r} returned 404")
+        resp.raise_for_status()
+        return resp.json()
+
     # ── Series metadata ────────────────────────────────────────────────────
 
     def get_series(self, series_id: str) -> dict:
@@ -197,3 +215,61 @@ class KomgaClient:
             "status":         metadata.get("status"),
             "url":            f"{self.base_url}/series/{series_id}",
         }
+
+    # ── Library browsing ──────────────────────────────────────────────
+
+    def browse_series(
+        self,
+        search: str = "",
+        read_status: list[str] | None = None,
+        page: int = 0,
+        size: int = 20,
+        sort: str = "metadata.titleSort,asc",
+    ) -> dict:
+        """
+        Browse the Komga library with optional filtering by read status.
+
+        Args:
+          search:      Free-text title search
+          read_status: List of read-status filters — "UNREAD", "IN_PROGRESS", "READ"
+          page:        Zero-indexed page number
+          size:        Page size (max 100)
+          sort:        Sort field (default title ascending)
+
+        Returns the raw Komga paginated response with 'content', 'totalElements',
+        'totalPages', 'number', 'size' keys.
+        """
+        params = {"page": page, "size": min(size, 100), "sort": sort}
+        if search:
+            params["search"] = search
+        if read_status:
+            # Komga accepts read_status as repeated query param
+            params["read_status"] = ",".join(read_status)
+        return self._get("/series", params=params)
+
+    def get_series_read_progress(self, series_id: str) -> dict:
+        """
+        Return the read progress for a single series.
+
+        Komga series objects include a 'booksReadCount', 'booksUnreadCount',
+        'booksInProgressCount' breakdown. We get that from the series endpoint.
+
+        Returns:
+          {
+            "books_count":        int,
+            "books_read":         int,
+            "books_unread":       int,
+            "books_in_progress":  int,
+          }
+        """
+        series = self.get_series(series_id)
+        return {
+            "books_count":       series.get("booksCount", 0),
+            "books_read":        series.get("booksReadCount", 0),
+            "books_unread":      series.get("booksUnreadCount", 0),
+            "books_in_progress": series.get("booksInProgressCount", 0),
+        }
+
+    def thumbnail_url(self, series_id: str) -> str:
+        """Return the URL for the series thumbnail image."""
+        return f"{self.base_url}/api/v1/series/{series_id}/thumbnail"

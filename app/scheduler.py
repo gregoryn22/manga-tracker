@@ -37,7 +37,7 @@ from datetime import datetime
 from apscheduler.schedulers.background import BackgroundScheduler
 from sqlalchemy.orm import Session
 
-from .database import Notification, Release, SessionLocal, TrackedSeries, get_setting
+from .database import Notification, Release, SessionLocal, TrackedSeries, get_setting, set_setting
 from .mangabaka import MangaBakaClient
 from .mangaupdates import (
     chapter_is_newer,
@@ -726,8 +726,6 @@ def _poll_kmanga(db: Session, series_list: list[TrackedSeries]):
       - On KMangaAuthError (expired session), attempts one re-login per run.
     """
     import json as _json
-
-    from .database import set_setting
 
     email    = get_setting(db, "kmanga_email", "")
     password = get_setting(db, "kmanga_password", "")

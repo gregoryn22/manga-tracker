@@ -636,6 +636,10 @@
       <div class="nav-item" :class="{active: page==='search'}" @click="page='search'; sidebarOpen=false">
         <span class="nav-icon">🔍</span> Search
       </div>
+      <div class="nav-item" :class="{active: page==='komga'}" @click="page='komga'; loadKomgaBrowse(); sidebarOpen=false"
+           x-show="sf.komga_url && sf.komga_api_key">
+        <span class="nav-icon">📚</span> Komga
+      </div>
 
       <div class="nav-section">Manage</div>
       <div class="nav-item" :class="{active: page==='notifications'}" @click="page='notifications'; loadNotifications(); sidebarOpen=false">
@@ -1301,7 +1305,7 @@
           <template x-if="Object.keys(statsData.by_status).length > 0">
             <div class="card" style="padding:20px 24px;margin-bottom:20px">
               <div class="settings-block-title">📊 Status Breakdown</div>
-              <template x-for="(count, status) in statsData.by_status" :key="status">
+              <template x-for="[status, count] in Object.entries(statsData.by_status)" :key="status">
                 <div style="margin-bottom:12px">
                   <div style="display:flex;justify-content:space-between;margin-bottom:4px;font-size:0.85rem">
                     <span class="fw-600" x-text="status.replace('_',' ').replace(/\b\w/g, c => c.toUpperCase())"></span>
@@ -1319,7 +1323,7 @@
           <template x-if="Object.keys(statsData.by_type).length > 0">
             <div class="card" style="padding:20px 24px;margin-bottom:20px">
               <div class="settings-block-title">📚 Type Distribution</div>
-              <template x-for="(count, type) in statsData.by_type" :key="type">
+              <template x-for="[type, count] in Object.entries(statsData.by_type)" :key="type">
                 <div style="margin-bottom:12px">
                   <div style="display:flex;justify-content:space-between;margin-bottom:4px;font-size:0.85rem">
                     <span class="fw-600" x-text="type"></span>
@@ -1379,6 +1383,135 @@
           </div>
         </template>
       </div><!-- /stats -->
+
+
+      <!-- ══ KOMGA BROWSER ══════════════════════════════════ -->
+      <div x-show="page==='komga'">
+
+        <!-- Filters row -->
+        <div class="card" style="padding:14px 20px;margin-bottom:16px;display:flex;flex-wrap:wrap;gap:10px;align-items:center">
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            <button class="pill" :class="{active: komgaReadFilter==='IN_PROGRESS'}" @click="komgaReadFilter='IN_PROGRESS'; komgaPage=0; loadKomgaBrowse()">📖 In Progress</button>
+            <button class="pill" :class="{active: komgaReadFilter==='UNREAD'}" @click="komgaReadFilter='UNREAD'; komgaPage=0; loadKomgaBrowse()">🆕 Unread</button>
+            <button class="pill" :class="{active: komgaReadFilter==='READ'}" @click="komgaReadFilter='READ'; komgaPage=0; loadKomgaBrowse()">✅ Completed</button>
+            <button class="pill" :class="{active: komgaReadFilter===''}" @click="komgaReadFilter=''; komgaPage=0; loadKomgaBrowse()">📋 All</button>
+          </div>
+          <div style="flex:1;min-width:200px">
+            <input class="input" type="text" placeholder="Search Komga library…" x-model="komgaBrowseSearch"
+                   @keyup.enter="komgaPage=0; loadKomgaBrowse()"
+                   @input.debounce.400ms="komgaPage=0; loadKomgaBrowse()"
+                   style="width:100%;font-size:0.85rem" />
+          </div>
+        </div>
+
+        <!-- Selection controls -->
+        <div x-show="komgaBrowse.length > 0" class="card" style="padding:12px 20px;margin-bottom:16px;display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between">
+          <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+            <label style="font-size:0.82rem;display:flex;align-items:center;gap:6px;cursor:pointer">
+              <input type="checkbox"
+                     :checked="komgaSelected.length > 0 && komgaSelected.length === komgaBrowse.filter(s=>!s.already_tracked).length"
+                     @change="if($el.checked){ komgaSelected = komgaBrowse.filter(s=>!s.already_tracked).map(s=>s.komga_id); } else { komgaSelected = []; }">
+              <span x-text="komgaSelected.length > 0 ? `${komgaSelected.length} selected` : 'Select all'"></span>
+            </label>
+            <div style="display:flex;gap:8px;align-items:center">
+              <span class="text-xs text-muted">Track as:</span>
+              <select class="input" x-model="komgaTrackMode" style="width:auto;padding:4px 8px;font-size:0.8rem">
+                <option value="chapter">Chapters</option>
+                <option value="volume">Volumes</option>
+              </select>
+            </div>
+            <label style="font-size:0.82rem;display:flex;align-items:center;gap:6px;cursor:pointer">
+              <input type="checkbox" x-model="komgaSyncProgress" />
+              <span>Sync read progress</span>
+            </label>
+          </div>
+          <button class="btn btn-primary" :disabled="komgaSelected.length === 0 || komgaImporting"
+                  @click="importFromKomga()"
+                  style="white-space:nowrap">
+            <span x-show="komgaImporting" class="spin" style="width:13px;height:13px;display:inline-block"></span>
+            <span x-text="komgaImporting ? 'Importing…' : `Import ${komgaSelected.length} series`"></span>
+          </button>
+        </div>
+
+        <!-- Loading -->
+        <template x-if="komgaLoading">
+          <div style="text-align:center;padding:60px 0">
+            <div class="spin" style="width:32px;height:32px;margin:0 auto 12px"></div>
+            <div class="text-muted">Loading Komga library…</div>
+          </div>
+        </template>
+
+        <!-- Grid of series cards -->
+        <template x-if="!komgaLoading && komgaBrowse.length > 0">
+          <div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:16px">
+              <template x-for="ks in komgaBrowse" :key="ks.komga_id">
+                <div class="card" style="padding:0;overflow:hidden;cursor:pointer;position:relative;transition:border-color 0.15s"
+                     :style="komgaSelected.includes(ks.komga_id) ? 'border-color:var(--accent);box-shadow:0 0 12px rgba(124,108,255,0.25)' : ''"
+                     @click="if(!ks.already_tracked){ if(komgaSelected.includes(ks.komga_id)){ komgaSelected = komgaSelected.filter(id=>id!==ks.komga_id); } else { komgaSelected = [...komgaSelected, ks.komga_id]; } }">
+
+                  <!-- Thumbnail -->
+                  <div style="width:100%;aspect-ratio:2/3;background:var(--surface2);overflow:hidden;position:relative">
+                    <img :src="ks.thumbnail_url" :alt="ks.title" style="width:100%;height:100%;object-fit:cover"
+                         loading="lazy" onerror="this.style.display='none'" />
+
+                    <!-- Already tracked badge -->
+                    <div x-show="ks.already_tracked" style="position:absolute;top:8px;left:8px;background:var(--green);color:#fff;font-size:0.7rem;font-weight:600;padding:2px 8px;border-radius:20px">
+                      Tracked
+                    </div>
+
+                    <!-- Checkbox (only for untracked) -->
+                    <div x-show="!ks.already_tracked" style="position:absolute;top:8px;right:8px;width:22px;height:22px;border-radius:6px;border:2px solid rgba(255,255,255,0.5);background:rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center"
+                         :style="komgaSelected.includes(ks.komga_id) ? 'background:var(--accent);border-color:var(--accent)' : ''">
+                      <span x-show="komgaSelected.includes(ks.komga_id)" style="color:#fff;font-size:0.75rem;font-weight:700">✓</span>
+                    </div>
+
+                    <!-- Read progress bar -->
+                    <div x-show="ks.books_count > 0" style="position:absolute;bottom:0;left:0;right:0;height:4px;background:rgba(0,0,0,0.5)">
+                      <div style="height:100%;background:var(--accent);border-radius:0 2px 2px 0;transition:width 0.3s"
+                           :style="`width:${(ks.books_read / ks.books_count * 100)}%`"></div>
+                    </div>
+                  </div>
+
+                  <!-- Info -->
+                  <div style="padding:10px 12px">
+                    <div style="font-size:0.82rem;font-weight:600;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden" x-text="ks.title"></div>
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px">
+                      <span class="text-xs text-muted" x-text="`${ks.books_read}/${ks.books_count} read`"></span>
+                      <span class="text-xs" style="padding:1px 6px;border-radius:4px;font-weight:500"
+                            :style="ks.status === 'ENDED' ? 'background:var(--green-dim);color:var(--green)' :
+                                    ks.status === 'ONGOING' ? 'background:var(--blue-dim);color:var(--blue)' :
+                                    ks.status === 'HIATUS' ? 'background:var(--yellow-dim);color:var(--yellow)' :
+                                    'background:var(--surface2);color:var(--text-muted)'"
+                            x-text="ks.status || 'Unknown'"></span>
+                    </div>
+                    <div x-show="ks.books_in_progress > 0" class="text-xs text-muted" style="margin-top:4px">
+                      📖 <span x-text="ks.books_in_progress"></span> in progress
+                    </div>
+                  </div>
+                </div>
+              </template>
+            </div>
+
+            <!-- Pagination -->
+            <div x-show="komgaPages > 1" style="display:flex;justify-content:center;gap:8px;margin-top:20px;padding-bottom:20px">
+              <button class="btn btn-ghost btn-sm" :disabled="komgaPage === 0" @click="komgaPage--; loadKomgaBrowse()">← Prev</button>
+              <span class="text-muted" style="line-height:32px;font-size:0.85rem" x-text="`Page ${komgaPage + 1} of ${komgaPages} (${komgaTotal} series)`"></span>
+              <button class="btn btn-ghost btn-sm" :disabled="komgaPage >= komgaPages - 1" @click="komgaPage++; loadKomgaBrowse()">Next →</button>
+            </div>
+          </div>
+        </template>
+
+        <!-- Empty state -->
+        <template x-if="!komgaLoading && komgaBrowse.length === 0">
+          <div class="empty">
+            <div class="empty-icon">📚</div>
+            <h3 x-text="komgaBrowseSearch ? 'No matching series' : (komgaReadFilter ? 'No series with this status' : 'Your Komga library is empty')"></h3>
+            <p x-text="komgaBrowseSearch ? 'Try a different search term.' : (komgaReadFilter ? 'Try a different filter or browse all series.' : 'Add some manga to your Komga server first.')"></p>
+          </div>
+        </template>
+
+      </div><!-- /komga -->
 
 
       <!-- ══ SETTINGS ══════════════════════════════════════ -->
@@ -1844,8 +1977,8 @@
               </template>
             </div>
             <div style="display:flex;gap:6px;align-items:center">
-              <input class="input" type="text" placeholder="Add a new tag…" x-model="ef.newTag" style="flex:1;font-size:0.85rem" @keyup.enter="ef.tags = [...(ef.tags||[]), ef.newTag]; ef.newTag=''" />
-              <button class="btn btn-primary btn-sm" @click="ef.tags = [...(ef.tags||[]), ef.newTag]; ef.newTag=''">Add</button>
+              <input class="input" type="text" placeholder="Add a new tag…" x-model="ef.newTag" style="flex:1;font-size:0.85rem" @keyup.enter="if(ef.newTag.trim() && !(ef.tags||[]).includes(ef.newTag.trim())){ ef.tags=[...(ef.tags||[]), ef.newTag.trim()]; ef.newTag=''; }" />
+              <button class="btn btn-primary btn-sm" @click="if(ef.newTag.trim() && !(ef.tags||[]).includes(ef.newTag.trim())){ ef.tags=[...(ef.tags||[]), ef.newTag.trim()]; ef.newTag=''; }">Add</button>
             </div>
             <template x-if="allTags.length > 0">
               <div class="text-xs text-muted mt-2" style="margin-bottom:8px">Suggested tags:</div>
@@ -1967,7 +2100,7 @@
                      :href="`https://kmanga.kodansha.com/title/${ef.simulpub_id}`"
                      target="_blank" class="btn btn-ghost btn-sm">K Manga ↗</a>
                 </div>
-                <div class="text-xs text-muted mt-1" x-show="!$store?.kmanga_configured">
+                <div class="text-xs text-muted mt-1" x-show="!sf.kmanga_email || !sf.kmanga_password">
                   Requires K Manga credentials in Settings.
                 </div>
               </div>
@@ -2264,6 +2397,13 @@ function app() {
     // Statistics
     statsData: null, statsLoading: false,
 
+    // Komga browser
+    komgaBrowse: [], komgaTotal: 0, komgaPages: 0, komgaPage: 0,
+    komgaLoading: false, komgaBrowseSearch: '',
+    komgaReadFilter: 'IN_PROGRESS', // IN_PROGRESS, UNREAD, READ, or '' for all
+    komgaSelected: [], komgaTrackMode: 'chapter', komgaSyncProgress: true,
+    komgaImporting: false,
+
     // Polling
     polling: false,
 
@@ -2299,6 +2439,7 @@ function app() {
         else if (defaultPage === 'notifications') { this.loadNotifications().catch(()=>{}); }
         else if (defaultPage === 'activity') { this.loadActivity().catch(()=>{}); }
         else if (defaultPage === 'stats') { this.loadStats().catch(()=>{}); }
+        else if (defaultPage === 'komga') { this.loadKomgaBrowse().catch(()=>{}); }
         else if (defaultPage === 'settings') { this.loadSettings().catch(()=>{}); }
       } else {
         // Silently prefetch feed in background
@@ -2329,7 +2470,7 @@ function app() {
     },
 
     pageTitle() {
-      return { library:'My Library', releases:'Live Feed', search:'Search', notifications:'Notifications', activity:'Activity Log', stats:'Statistics', settings:'Settings' }[this.page] || '';
+      return { library:'My Library', releases:'Live Feed', search:'Search', komga:'Komga Library', notifications:'Notifications', activity:'Activity Log', stats:'Statistics', settings:'Settings' }[this.page] || '';
     },
 
     // ── Library ─────────────────────────────────────────
@@ -2639,6 +2780,57 @@ function app() {
     async testKomga() {
       try { const d = await this.api('/api/settings/test-komga', 'POST'); this.toast(d.message||'Connected!', 'success'); }
       catch(e) { this.toast(e.detail||'Komga connection failed', 'error'); }
+    },
+
+    // ── Komga Browser ─────────────────────────────────────
+    async loadKomgaBrowse() {
+      this.komgaLoading = true;
+      try {
+        const params = new URLSearchParams({
+          page: this.komgaPage,
+          size: 24,
+          sort: 'metadata.titleSort,asc',
+        });
+        if (this.komgaReadFilter) params.set('read_status', this.komgaReadFilter);
+        if (this.komgaBrowseSearch.trim()) params.set('search', this.komgaBrowseSearch.trim());
+        const data = await this.api(`/api/komga/browse?${params}`);
+        this.komgaBrowse = data.content || [];
+        this.komgaTotal = data.total_elements || 0;
+        this.komgaPages = data.total_pages || 0;
+        this.komgaPage = data.page || 0;
+        // Clear selection when changing pages/filters
+        this.komgaSelected = [];
+      } catch(e) {
+        this.toast(e.detail || 'Failed to load Komga library', 'error');
+        this.komgaBrowse = [];
+      } finally {
+        this.komgaLoading = false;
+      }
+    },
+
+    async importFromKomga() {
+      if (this.komgaSelected.length === 0) return;
+      this.komgaImporting = true;
+      try {
+        const items = this.komgaSelected.map(id => ({
+          komga_series_id: id,
+          track_mode: this.komgaTrackMode,
+          sync_progress: this.komgaSyncProgress,
+        }));
+        const resp = await this.api('/api/komga/import', 'POST', { items });
+        const parts = [];
+        if (resp.imported > 0) parts.push(`${resp.imported} imported`);
+        if (resp.skipped > 0) parts.push(`${resp.skipped} already tracked`);
+        if (resp.errors && resp.errors.length > 0) parts.push(`${resp.errors.length} failed`);
+        this.toast(parts.join(', ') || 'Done!', resp.imported > 0 ? 'success' : 'error');
+        // Refresh library and the Komga browse grid
+        await this.loadLibrary();
+        await this.loadKomgaBrowse();
+      } catch(e) {
+        this.toast(e.detail || 'Import failed', 'error');
+      } finally {
+        this.komgaImporting = false;
+      }
     },
 
     async searchKomga() {

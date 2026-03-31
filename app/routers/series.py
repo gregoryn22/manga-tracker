@@ -404,10 +404,11 @@ def import_library(req: ImportRequest, db: Session = Depends(get_db)):
             reading_status=item.get("reading_status", "reading"),
             notes=item.get("notes"),
             tags=json.dumps(item.get("tags", [])) if item.get("tags") else None,
-            last_read_at=item.get("last_read_at"),
+            last_read_at=datetime.fromisoformat(item["last_read_at"]) if item.get("last_read_at") else None,
             mangabaka_url=item.get("mangabaka_url"),
             poll_failures=item.get("poll_failures", 0),
             last_poll_error=item.get("last_poll_error"),
+            last_poll_success=datetime.fromisoformat(item["last_poll_success"]) if item.get("last_poll_success") else None,
             added_at=datetime.utcnow(),
         )
         db.add(s)
