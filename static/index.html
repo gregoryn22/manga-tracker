@@ -645,6 +645,9 @@
       <div class="nav-item" :class="{active: page==='activity'}" @click="page='activity'; loadActivity(); sidebarOpen=false">
         <span class="nav-icon">📋</span> Activity
       </div>
+      <div class="nav-item" :class="{active: page==='stats'}" @click="page='stats'; loadStats(); sidebarOpen=false">
+        <span class="nav-icon">📊</span> Statistics
+      </div>
       <div class="nav-item" :class="{active: page==='settings'}" @click="page='settings'; loadSettings(); sidebarOpen=false">
         <span class="nav-icon">⚙️</span> Settings
       </div>
@@ -772,6 +775,7 @@
             <option value="added_asc">Oldest Added</option>
             <option value="release_desc">Latest Release</option>
             <option value="release_asc">Oldest Release</option>
+            <option value="last_read_desc">Last Read</option>
             <option value="idle_desc">Longest Idle</option>
             <option value="checked_desc">Last Checked</option>
             <option value="unread_desc">Most Unread</option>
@@ -789,6 +793,13 @@
             <option value="">All Authors</option>
             <template x-for="a in allAuthors" :key="a">
               <option :value="a" x-text="a"></option>
+            </template>
+          </select>
+          <select class="input" x-model="tagFilter" style="width:160px;padding:7px 10px;font-size:0.8rem"
+                  x-show="allTags.length > 0">
+            <option value="">All Tags</option>
+            <template x-for="t in allTags" :key="t">
+              <option :value="t" x-text="t"></option>
             </template>
           </select>
           <div class="view-toggle">
@@ -846,7 +857,11 @@
         </div>
 
         <!-- Grid view -->
-        <div class="series-grid" x-show="!loading && filteredLibrary().length > 0 && viewMode==='grid'">
+        <div class="series-grid" x-show="!loading && filteredLibrary().length > 0 && viewMode==='grid'"
+             :style="{
+               'grid-template-columns': sf.grid_density === 'compact' ? 'repeat(auto-fill, minmax(130px, 1fr))' : (sf.grid_density === 'large' ? 'repeat(auto-fill, minmax(220px, 1fr))' : 'repeat(auto-fill, minmax(168px, 1fr))'),
+               'gap': sf.grid_density === 'compact' ? '10px' : (sf.grid_density === 'large' ? '20px' : '16px')
+             }">
           <template x-for="s in filteredLibrary()" :key="s.id">
             <div class="series-card" :class="{'has-update': s.has_update, 'selected': bulkSelected.includes(s.id)}"
                  @click="bulkMode ? toggleBulk(s.id) : openDetail(s)">
@@ -906,6 +921,15 @@
                 <div class="progress-wrap" x-show="s.latest_chapter && s.current_chapter">
                   <div class="progress-bar" :class="{'green': s.has_update}" :style="`width: ${chapterProgress(s)}%`"></div>
                 </div>
+
+                <!-- Tags -->
+                <template x-if="(s.tags || []).length > 0">
+                  <div style="display:flex;gap:3px;flex-wrap:wrap;margin-top:6px">
+                    <template x-for="tag in s.tags" :key="tag">
+                      <span class="tag" style="font-size:0.65rem;padding:2px 6px" x-text="tag"></span>
+                    </template>
+                  </div>
+                </template>
 
                 <!-- Inline chapter controls -->
                 <div class="card-chapter-controls" @click.stop x-show="s.latest_chapter">
@@ -1245,6 +1269,118 @@
       </div><!-- /activity -->
 
 
+      <!-- ══ STATISTICS ════════════════════════════════════ -->
+      <div x-show="page==='stats'">
+        <template x-if="statsLoading">
+          <div style="padding:40px;text-align:center"><span class="spin"></span> Loading statistics…</div>
+        </template>
+
+        <template x-if="!statsLoading && statsData">
+          <!-- Summary cards -->
+          <div class="stats-row">
+            <div class="stat-card">
+              <div class="stat-label">Total Series</div>
+              <div class="stat-value accent" x-text="statsData.total_series"></div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">Chapters Read</div>
+              <div class="stat-value green" x-text="statsData.total_chapters_read"></div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">Completion Rate</div>
+              <div class="stat-value blue" x-text="statsData.completion_rate.toFixed(1) + '%'"></div>
+            </div>
+            <div class="stat-card" x-show="statsData.avg_rating > 0">
+              <div class="stat-label">Avg Rating</div>
+              <div class="stat-value yellow" x-text="statsData.avg_rating.toFixed(2)"></div>
+              <div class="stat-sub">★ (MangaUpdates)</div>
+            </div>
+          </div>
+
+          <!-- Status breakdown -->
+          <template x-if="Object.keys(statsData.by_status).length > 0">
+            <div class="card" style="padding:20px 24px;margin-bottom:20px">
+              <div class="settings-block-title">📊 Status Breakdown</div>
+              <template x-for="(count, status) in statsData.by_status" :key="status">
+                <div style="margin-bottom:12px">
+                  <div style="display:flex;justify-content:space-between;margin-bottom:4px;font-size:0.85rem">
+                    <span class="fw-600" x-text="status.replace('_',' ').replace(/\b\w/g, c => c.toUpperCase())"></span>
+                    <span class="text-muted" x-text="count + ' series'"></span>
+                  </div>
+                  <div style="width:100%;height:8px;background:var(--surface2);border-radius:4px;overflow:hidden">
+                    <div style="height:100%;background:var(--accent);border-radius:4px" :style="`width: ${(count / statsData.total_series * 100)}%`"></div>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </template>
+
+          <!-- Type distribution -->
+          <template x-if="Object.keys(statsData.by_type).length > 0">
+            <div class="card" style="padding:20px 24px;margin-bottom:20px">
+              <div class="settings-block-title">📚 Type Distribution</div>
+              <template x-for="(count, type) in statsData.by_type" :key="type">
+                <div style="margin-bottom:12px">
+                  <div style="display:flex;justify-content:space-between;margin-bottom:4px;font-size:0.85rem">
+                    <span class="fw-600" x-text="type"></span>
+                    <span class="text-muted" x-text="count + ' series'"></span>
+                  </div>
+                  <div style="width:100%;height:8px;background:var(--surface2);border-radius:4px;overflow:hidden">
+                    <div style="height:100%;background:var(--blue);border-radius:4px" :style="`width: ${(count / statsData.total_series * 100)}%`"></div>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </template>
+
+          <!-- Genre breakdown (top 15) -->
+          <template x-if="statsData.by_genre.length > 0">
+            <div class="card" style="padding:20px 24px;margin-bottom:20px">
+              <div class="settings-block-title">🏷️ Top Genres</div>
+              <template x-for="item in statsData.by_genre" :key="item.genre">
+                <div style="margin-bottom:12px">
+                  <div style="display:flex;justify-content:space-between;margin-bottom:4px;font-size:0.85rem">
+                    <span class="fw-600" x-text="item.genre"></span>
+                    <span class="text-muted" x-text="item.count + ' series'"></span>
+                  </div>
+                  <div style="width:100%;height:8px;background:var(--surface2);border-radius:4px;overflow:hidden">
+                    <div style="height:100%;background:var(--green);border-radius:4px" :style="`width: ${(item.count / statsData.total_series * 100)}%`"></div>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </template>
+
+          <!-- Reading pace -->
+          <div class="card" style="padding:20px 24px;margin-bottom:20px">
+            <div class="settings-block-title">🏃 Reading Pace</div>
+            <div class="stats-row">
+              <div class="stat-card">
+                <div class="stat-label">Last 7 Days</div>
+                <div class="stat-value accent" x-text="statsData.reading_pace.last_7_days"></div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-label">Last 30 Days</div>
+                <div class="stat-value accent" x-text="statsData.reading_pace.last_30_days"></div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-label">Last 90 Days</div>
+                <div class="stat-value accent" x-text="statsData.reading_pace.last_90_days"></div>
+              </div>
+            </div>
+          </div>
+        </template>
+
+        <template x-if="!statsLoading && !statsData">
+          <div class="empty">
+            <div class="empty-icon">📊</div>
+            <h3>No data available</h3>
+            <p>Statistics will appear here once you start tracking series.</p>
+          </div>
+        </template>
+      </div><!-- /stats -->
+
+
       <!-- ══ SETTINGS ══════════════════════════════════════ -->
       <div x-show="page==='settings'">
 
@@ -1518,6 +1654,40 @@
           </div>
         </div>
 
+        <!-- UI Customization -->
+        <div class="card" style="padding:20px 24px;margin-bottom:16px">
+          <div class="settings-block-title">🎨 UI Customization</div>
+
+          <div class="settings-row">
+            <label>Default Landing Page</label>
+            <select class="input" x-model="sf.default_page" style="width:200px">
+              <option value="library">📚 Library</option>
+              <option value="releases">⚡ Live Feed</option>
+              <option value="search">🔍 Search</option>
+              <option value="notifications">🔔 Notifications</option>
+              <option value="activity">📋 Activity</option>
+              <option value="stats">📊 Statistics</option>
+              <option value="settings">⚙️ Settings</option>
+            </select>
+          </div>
+
+          <div class="settings-row">
+            <label>Grid Density</label>
+            <select class="input" x-model="sf.grid_density" style="width:200px">
+              <option value="compact">🗜️ Compact (130px)</option>
+              <option value="normal">📦 Normal (168px)</option>
+              <option value="large">📏 Large (220px)</option>
+            </select>
+          </div>
+
+          <div class="flex gap-2 mt-2">
+            <button class="btn btn-primary btn-sm" @click="saveSettings()">💾 Save</button>
+          </div>
+          <div class="text-xs text-muted mt-2">
+            Customize your dashboard experience. Changes are applied immediately.
+          </div>
+        </div>
+
         <div class="card" style="padding:20px 24px">
           <div class="settings-block-title">🔑 MangaBaka API</div>
           <div class="settings-row">
@@ -1653,11 +1823,39 @@
             </div>
             <div class="text-xs text-muted mt-1" x-show="ds.latest_chapter"
                  x-text="`${chapterProgress({...ds, current_chapter: ef.current_chapter}).toFixed(0)}% complete`"></div>
+            <div class="text-xs text-muted mt-2" x-show="ds.last_read_at">
+              Last read: <strong x-text="relativeTime(ds.last_read_at)"></strong>
+            </div>
           </div>
 
           <div class="form-group">
             <div class="form-label">Notes</div>
             <textarea class="input" rows="2" placeholder="Your notes…" x-model="ef.notes" style="width:100%"></textarea>
+          </div>
+
+          <div class="form-group">
+            <div class="form-label">Tags</div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+              <template x-for="tag in (ef.tags || [])" :key="tag">
+                <div style="display:inline-flex;align-items:center;gap:6px;background:var(--accent-dim);color:var(--accent);padding:4px 10px;border-radius:99px;font-size:0.78rem;border:1px solid rgba(124,108,255,0.3)">
+                  <span x-text="tag"></span>
+                  <button type="button" @click="ef.tags = ef.tags.filter(t => t !== tag)" style="background:none;border:none;color:inherit;cursor:pointer;font-weight:bold;padding:0;font-size:0.9rem">×</button>
+                </div>
+              </template>
+            </div>
+            <div style="display:flex;gap:6px;align-items:center">
+              <input class="input" type="text" placeholder="Add a new tag…" x-model="ef.newTag" style="flex:1;font-size:0.85rem" @keyup.enter="ef.tags = [...(ef.tags||[]), ef.newTag]; ef.newTag=''" />
+              <button class="btn btn-primary btn-sm" @click="ef.tags = [...(ef.tags||[]), ef.newTag]; ef.newTag=''">Add</button>
+            </div>
+            <template x-if="allTags.length > 0">
+              <div class="text-xs text-muted mt-2" style="margin-bottom:8px">Suggested tags:</div>
+              <div style="display:flex;gap:4px;flex-wrap:wrap">
+                <template x-for="tag in allTags" :key="tag">
+                  <button type="button" class="btn btn-ghost btn-xs" @click="ef.tags = ef.tags.includes(tag) ? ef.tags.filter(t => t !== tag) : [...(ef.tags||[]), tag]"
+                          :class="{'btn-primary': (ef.tags||[]).includes(tag)}" x-text="tag"></button>
+                </template>
+              </div>
+            </template>
           </div>
 
           <div class="form-group">
@@ -2033,6 +2231,7 @@ function app() {
     sortBy: 'added_desc',
     genreFilter: '',
     authorFilter: '',
+    tagFilter: '',
 
     // Bulk mode
     bulkMode: false, bulkSelected: [], bulkStatus: 'reading',
@@ -2051,7 +2250,7 @@ function app() {
     activityFilter: '',
 
     // Settings form
-    sf: { pushover_user_key:'', pushover_app_token:'', pushover_enabled:'false', push_chapter_updates:'true', push_news:'false', push_reading_only:'false', updates_reading_only:'false', poll_interval_hours:'6', mangabaka_token:'', mu_enabled:'true', kmanga_email:'', kmanga_password:'', kmanga_recaptcha_token:'', komga_url:'', komga_api_key:'', idle_detection_enabled:'false', idle_threshold_days:'90', webhook_enabled:'false', webhook_url:'' },
+    sf: { pushover_user_key:'', pushover_app_token:'', pushover_enabled:'false', push_chapter_updates:'true', push_news:'false', push_reading_only:'false', updates_reading_only:'false', poll_interval_hours:'6', mangabaka_token:'', mu_enabled:'true', kmanga_email:'', kmanga_password:'', kmanga_recaptcha_token:'', komga_url:'', komga_api_key:'', idle_detection_enabled:'false', idle_threshold_days:'90', webhook_enabled:'false', webhook_url:'', default_page:'library', grid_density:'normal' },
 
     // Detail modal
     detailOpen: false, ds: null, ef: {}, detailReleases: [],
@@ -2061,6 +2260,9 @@ function app() {
 
     // Live feed
     feedReleases: [], feedTotal: 0, feedLoading: false, feedGrouped: false,
+
+    // Statistics
+    statsData: null, statsLoading: false,
 
     // Polling
     polling: false,
@@ -2089,8 +2291,19 @@ function app() {
       try { const d = await this.api('/api/settings'); this.sf = {...this.sf,...d}; } catch(e) {}
       await this.loadLibrary();
       await this.pollUnreadCount();
-      // Silently prefetch feed in background
-      this.loadReleaseFeed().catch(()=>{});
+      // Load appropriate page based on default_page setting
+      const defaultPage = this.sf.default_page || 'library';
+      if (defaultPage !== 'library') {
+        this.page = defaultPage;
+        if (defaultPage === 'releases') { this.loadReleaseFeed().catch(()=>{}); }
+        else if (defaultPage === 'notifications') { this.loadNotifications().catch(()=>{}); }
+        else if (defaultPage === 'activity') { this.loadActivity().catch(()=>{}); }
+        else if (defaultPage === 'stats') { this.loadStats().catch(()=>{}); }
+        else if (defaultPage === 'settings') { this.loadSettings().catch(()=>{}); }
+      } else {
+        // Silently prefetch feed in background
+        this.loadReleaseFeed().catch(()=>{});
+      }
       setInterval(() => this.pollUnreadCount(), 30000);
     },
 
@@ -2108,8 +2321,15 @@ function app() {
       return [...set].sort();
     },
 
+    // Computed: all tags from library
+    get allTags() {
+      const set = new Set();
+      this.library.forEach(s => (s.tags||[]).forEach(t => set.add(t)));
+      return [...set].sort();
+    },
+
     pageTitle() {
-      return { library:'My Library', releases:'Live Feed', search:'Search', notifications:'Notifications', activity:'Activity Log', settings:'Settings' }[this.page] || '';
+      return { library:'My Library', releases:'Live Feed', search:'Search', notifications:'Notifications', activity:'Activity Log', stats:'Statistics', settings:'Settings' }[this.page] || '';
     },
 
     // ── Library ─────────────────────────────────────────
@@ -2169,6 +2389,11 @@ function app() {
         list = list.filter(s => (s.authors||[]).includes(this.authorFilter));
       }
 
+      // Tag filter
+      if (this.tagFilter) {
+        list = list.filter(s => (s.tags||[]).includes(this.tagFilter));
+      }
+
       // Sorting
       const [field, dir] = this.sortBy.split('_');
       const mul = dir === 'desc' ? -1 : 1;
@@ -2198,6 +2423,9 @@ function app() {
           case 'progress':
             va = this.chapterProgress(a); vb = this.chapterProgress(b);
             return mul * (va - vb);
+          case 'last_read':
+            va = a.last_read_at || ''; vb = b.last_read_at || '';
+            return mul * va.localeCompare(vb);
           default: return 0;
         }
       });
@@ -2353,6 +2581,25 @@ function app() {
       } catch(e) { this.toast('Failed to load activity', 'error'); }
     },
 
+    // ── Statistics ───────────────────────────────────
+    async loadStats() {
+      this.statsLoading = true;
+      try {
+        this.statsData = await this.api('/api/series/stats');
+      } catch(e) {
+        this.toast('Failed to load statistics', 'error');
+        this.statsData = null;
+      } finally {
+        this.statsLoading = false;
+      }
+    },
+
+    // ── Settings ─────────────────────────────────────
+    async loadSettings() {
+      try { const d = await this.api('/api/settings'); this.sf = {...this.sf,...d}; }
+      catch(e) { this.toast('Failed to load settings', 'error'); }
+    },
+
     // ── Export / Import ──────────────────────────────
     async exportLibrary() {
       try {
@@ -2493,6 +2740,8 @@ function app() {
         current_chapter: series.current_chapter||'0',
         reading_status: series.reading_status||'reading',
         notes: series.notes||'',
+        tags: [...(series.tags||[])],
+        newTag: '',
         notification_muted: !!series.notification_muted,
         simulpub_source: series.simulpub_source||'',
         simulpub_id: series.simulpub_id||'',
@@ -2543,6 +2792,7 @@ function app() {
           current_chapter: this.ef.current_chapter,
           reading_status: this.ef.reading_status,
           notes: this.ef.notes,
+          tags: this.ef.tags,
           notification_muted: this.ef.notification_muted,
           simulpub_source: this.ef.simulpub_source,
           simulpub_id: this.ef.simulpub_id,

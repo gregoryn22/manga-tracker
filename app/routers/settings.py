@@ -33,6 +33,8 @@ EXPOSED_KEYS = [
     "updates_reading_only",
     "webhook_enabled",
     "webhook_url",
+    "default_page",
+    "grid_density",
 ]
 
 
@@ -73,6 +75,8 @@ class UpdateSettingsRequest(BaseModel):
     updates_reading_only: str | None = None
     webhook_enabled: str | None = None
     webhook_url: str | None = None
+    default_page: str | None = None
+    grid_density: str | None = None
 
 
 @router.patch("")

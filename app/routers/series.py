@@ -403,6 +403,8 @@ def import_library(req: ImportRequest, db: Session = Depends(get_db)):
             current_chapter=item.get("current_chapter", "0"),
             reading_status=item.get("reading_status", "reading"),
             notes=item.get("notes"),
+            tags=json.dumps(item.get("tags", [])) if item.get("tags") else None,
+            last_read_at=item.get("last_read_at"),
             mangabaka_url=item.get("mangabaka_url"),
             poll_failures=item.get("poll_failures", 0),
             last_poll_error=item.get("last_poll_error"),
@@ -439,6 +441,100 @@ def get_activity_log(
     return [e.to_dict() for e in entries]
 
 
+# ── Statistics API ───────────────────────────────────────────────────────────
+
+@router.get("/stats")
+def get_stats(db: Session = Depends(get_db)):
+    """Return comprehensive statistics about the user's library."""
+    from datetime import timedelta
+
+    series_list = db.query(TrackedSeries).all()
+    total_series = len(series_list)
+
+    if total_series == 0:
+        return {
+            "total_series": 0,
+            "by_status": {},
+            "by_type": {},
+            "by_genre": [],
+            "total_chapters_read": 0,
+            "avg_rating": 0.0,
+            "reading_pace": {"last_7_days": 0, "last_30_days": 0, "last_90_days": 0},
+            "completion_rate": 0.0,
+        }
+
+    # Count by reading status
+    by_status = {}
+    for s in series_list:
+        status = s.reading_status or "reading"
+        by_status[status] = by_status.get(status, 0) + 1
+
+    # Count by type
+    by_type = {}
+    for s in series_list:
+        stype = (s.series_type or "unknown").replace("_", " ").title()
+        by_type[stype] = by_type.get(stype, 0) + 1
+
+    # Top 15 genres
+    genre_counts = {}
+    for s in series_list:
+        for g in (s._safe_json(s.genres) if s.genres else []):
+            genre_counts[g] = genre_counts.get(g, 0) + 1
+    by_genre = sorted(genre_counts.items(), key=lambda x: -x[1])[:15]
+    by_genre = [{"genre": g, "count": c} for g, c in by_genre]
+
+    # Total chapters read
+    total_chapters_read = sum(
+        float(s.current_chapter or 0) for s in series_list
+        if s.current_chapter and s.current_chapter != "0"
+    )
+    try:
+        total_chapters_read = int(total_chapters_read)
+    except Exception:
+        total_chapters_read = 0
+
+    # Average rating (only series with mu_rating)
+    rated_series = [s for s in series_list if s.mu_rating]
+    avg_rating = (
+        sum(s.mu_rating for s in rated_series) / len(rated_series)
+        if rated_series else 0.0
+    )
+
+    # Reading pace: chapters updated in last 7/30/90 days
+    now = datetime.utcnow()
+    logs_7 = db.query(ReadingLog).filter(
+        ReadingLog.action == "chapter_update",
+        ReadingLog.created_at >= now - timedelta(days=7)
+    ).count()
+    logs_30 = db.query(ReadingLog).filter(
+        ReadingLog.action == "chapter_update",
+        ReadingLog.created_at >= now - timedelta(days=30)
+    ).count()
+    logs_90 = db.query(ReadingLog).filter(
+        ReadingLog.action == "chapter_update",
+        ReadingLog.created_at >= now - timedelta(days=90)
+    ).count()
+
+    # Completion rate
+    completed = sum(1 for s in series_list if s.reading_status == "completed")
+    completion_rate = (completed / total_series * 100) if total_series > 0 else 0.0
+
+    return {
+        "total_series": total_series,
+        "by_status": by_status,
+        "by_type": by_type,
+        "by_genre": by_genre,
+        "total_chapters_read": total_chapters_read,
+        "avg_rating": round(avg_rating, 2),
+        "reading_pace": {
+            "last_7_days": logs_7,
+            "last_30_days": logs_30,
+            "last_90_days": logs_90,
+        },
+        "completion_rate": round(completion_rate, 1),
+    }
+
+
 # ── Get single series ─────────────────────────────────────────────────────────
 
 @router.get("/{series_id}")
@@ -467,6 +563,8 @@ class UpdateSeriesRequest(BaseModel):
     komga_track_mode: str | None = None
     # Editable for 'custom' source — lets the user manually record the latest chapter
     mu_latest_chapter: str | None = None
+    # Tags for filtering
+    tags: list[str] | None = None
 
 
 @router.patch("/{series_id}")
@@ -486,6 +584,7 @@ def update_series(series_id: int, req: UpdateSeriesRequest, db: Session = Depend
                 old_chapter=old_ch, new_chapter=req.current_chapter,
                 action="chapter_update", created_at=datetime.utcnow(),
             ))
+            series.last_read_at = datetime.utcnow()
         series.current_chapter = req.current_chapter
     if req.reading_status is not None:
         if req.reading_status != series.reading_status:
@@ -497,6 +596,8 @@ def update_series(series_id: int, req: UpdateSeriesRequest, db: Session = Depend
         series.reading_status = req.reading_status
     if req.notes is not None:
         series.notes = req.notes
+    if req.tags is not None:
+        series.tags = json.dumps(req.tags) if req.tags else None
     if req.notification_muted is not None:
         series.notification_muted = req.notification_muted
     # ── Simulpub source change — reset stale polling state ──────────────────
