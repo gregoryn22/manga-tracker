@@ -20,6 +20,7 @@ from ..mangaupdates import (
     extract_mu_cover,
     find_best_match,
     get_series,
+    get_series_related,
     search_releases,
     search_series,
 )
@@ -208,6 +209,7 @@ def add_series(req: AddSeriesRequest, background_tasks: BackgroundTasks, db: Ses
         rating=flat["rating"],
         mangabaka_url=flat["mangabaka_url"],
         mb_provider_ids=flat.get("mb_provider_ids"),
+        external_links=flat.get("external_links"),
         # Seed MU series ID immediately if MB already has it
         mu_series_id=mu_id_from_mb,
         current_chapter=req.current_chapter,
@@ -282,11 +284,22 @@ def _bg_enrich_with_mu(series_id: int, title: str, known_mu_id: int | None = Non
             if latest_ch:
                 series.mu_latest_chapter = latest_ch
 
-            # Authors
+            # Authors — flat list (backwards compat) + role-aware list
+            raw_authors = detail.get("authors", [])
+            flat_authors = [a.get("author_name", "") for a in raw_authors if a.get("author_name")]
             if not series.authors or series.authors == "[]":
-                authors = [a.get("author_name", "") for a in detail.get("authors", []) if a.get("author_name")]
-                if authors:
-                    series.authors = json.dumps(authors)
+                if flat_authors:
+                    series.authors = json.dumps(flat_authors)
+            # Always refresh author_roles so roles stay up to date
+            if raw_authors:
+                roles = []
+                for a in raw_authors:
+                    name = a.get("author_name", "").strip()
+                    role = (a.get("type") or "Author").strip().title()
+                    if name:
+                        roles.append({"name": name, "role": role})
+                if roles:
+                    series.author_roles = json.dumps(roles)
 
             # Publishers
             pubs = [p.get("publisher_name", "") for p in detail.get("publishers", []) if p.get("publisher_name")]
@@ -304,8 +317,22 @@ def _bg_enrich_with_mu(series_id: int, title: str, known_mu_id: int | None = Non
                 if mu_genres:
                     series.genres = json.dumps(mu_genres)
 
+            # Associated / alternate titles
+            assoc = detail.get("associated", [])
+            alt_titles = [t.get("title", "").strip() for t in assoc if t.get("title", "").strip()]
+            if alt_titles:
+                series.associated_titles = json.dumps(alt_titles)
+
         except Exception as e:
             logger.warning(f"MU detail fetch failed for '{title}': {e}")
+
+        # Related series (separate try so a failure doesn't break the rest)
+        try:
+            related = get_series_related(mu_id)
+            if related:
+                series.related_series = json.dumps(related)
+        except Exception as e:
+            logger.debug(f"MU related series fetch skipped for '{title}': {e}")
 
         db.commit()
         logger.info(f"Enriched '{title}' with MU ID {mu_id}")
@@ -711,6 +738,9 @@ def refresh_series(series_id: int, background_tasks: BackgroundTasks, db: Sessio
             # Refresh provider ID map (links may have been updated since initial add)
             if flat.get("mb_provider_ids"):
                 series.mb_provider_ids = flat["mb_provider_ids"]
+            # Refresh external links (MB may add/update links over time)
+            if flat.get("external_links"):
+                series.external_links = flat["external_links"]
     except Exception as e:
         logger.warning(f"MB refresh failed for series {series_id}: {e}")
 

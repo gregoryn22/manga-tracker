@@ -115,6 +115,84 @@ def extract_provider_ids(source: dict | None, links: list[str] | None) -> dict:
     return result
 
 
+# Ordered list of (label, domain_fragment, link_type).
+# First match wins for each URL.
+_EXTERNAL_LINK_CATALOG = [
+    # ── Trackers / community databases ───────────────────────────────
+    ("MangaBaka",      "mangabaka.org",                   "tracker"),
+    ("MangaUpdates",   "mangaupdates.com",                "tracker"),
+    ("MangaUpdates",   "baka-updates.com",                "tracker"),
+    ("MyAnimeList",    "myanimelist.net",                  "tracker"),
+    ("AniList",        "anilist.co",                       "tracker"),
+    ("AniDB",          "anidb.net",                        "tracker"),
+    ("Kitsu",          "kitsu.io",                         "tracker"),
+    ("Anime-Planet",   "anime-planet.com",                 "tracker"),
+    # ── Official simulpub platforms ───────────────────────────────────
+    ("MangaPlus",      "mangaplus.shueisha.co.jp",         "official"),
+    ("K Manga",        "kmanga.kodansha.com",              "official"),
+    ("MangaUp!",       "global.manga-up.com",              "official"),
+    ("Comikey",        "comikey.com",                      "official"),
+    ("Tapas",          "tapas.io",                         "official"),
+    ("Webtoons",       "webtoons.com",                     "official"),
+    # ── Community scanlation / aggregators ───────────────────────────
+    ("MangaDex",       "mangadex.org",                     "community"),
+    # ── Publishers ────────────────────────────────────────────────────
+    ("VIZ Media",      "viz.com",                          "publisher"),
+    ("Yen Press",      "yenpress.com",                     "publisher"),
+    ("Kodansha",       "kodansha.us",                      "publisher"),
+    ("Seven Seas",     "sevenseasentertainment.com",        "publisher"),
+    ("Dark Horse",     "darkhorse.com",                    "publisher"),
+    ("Square Enix",    "squareenixmanga.com",              "publisher"),
+    ("J-Novel Club",   "j-novel.club",                     "publisher"),
+    ("Shueisha",       "shueisha.co.jp",                   "publisher"),
+    ("Hakusensha",     "hakusensha.co.jp",                 "publisher"),
+    ("Shogakukan",     "shogakukan.co.jp",                 "publisher"),
+    ("Kadokawa",       "kadokawa.co.jp",                   "publisher"),
+    ("Tokyopop",       "tokyopop.com",                     "publisher"),
+    # ── Reference / info ─────────────────────────────────────────────
+    ("Wikipedia",      "wikipedia.org",                    "info"),
+]
+
+
+def extract_external_links(links: list[str] | None) -> list[dict]:
+    """
+    Convert MangaBaka's raw links array into a categorised list for display.
+
+    Each entry: {"label": str, "url": str, "type": str}
+    where type ∈ tracker | official | publisher | community | info | other
+    """
+    if not links:
+        return []
+
+    seen_labels: set[str] = set()
+    result: list[dict] = []
+
+    for url in links:
+        if not url or not isinstance(url, str):
+            continue
+        url = url.strip()
+        matched = False
+        for label, fragment, link_type in _EXTERNAL_LINK_CATALOG:
+            if fragment in url:
+                if label not in seen_labels:
+                    seen_labels.add(label)
+                    result.append({"label": label, "url": url, "type": link_type})
+                matched = True
+                break
+        if not matched:
+            # Include unknown links labelled with their domain
+            try:
+                from urllib.parse import urlparse
+                domain = urlparse(url).netloc.lstrip("www.")
+                if domain and domain not in seen_labels:
+                    seen_labels.add(domain)
+                    result.append({"label": domain, "url": url, "type": "other"})
+            except Exception:
+                pass
+
+    return result
+
+
 def extract_cover_url(cover_data: dict | None) -> str | None:
     """Extract best cover image URL from API cover object."""
     if not cover_data:
@@ -143,6 +221,9 @@ def series_from_api(data: dict) -> dict:
     provider_ids = extract_provider_ids(source, links)
     mu_numeric_id = extract_mu_series_id(source)
 
+    # Categorised external links (tracker / official / publisher / community / info)
+    ext_links = extract_external_links(links)
+
     return {
         "id":            data["id"],
         "title":         data.get("title", "Unknown"),
@@ -157,7 +238,9 @@ def series_from_api(data: dict) -> dict:
         "year":          data.get("year"),
         "rating":        str(data.get("rating")) if data.get("rating") is not None else None,
         "mangabaka_url": mangabaka_url,
-        # Provider cross-references (new)
-        "mu_numeric_id":  mu_numeric_id,     # int | None — use directly as mu_series_id
-        "mb_provider_ids": json.dumps(provider_ids),  # JSON string for DB storage
+        # Provider cross-references
+        "mu_numeric_id":   mu_numeric_id,            # int | None — use directly as mu_series_id
+        "mb_provider_ids": json.dumps(provider_ids), # JSON string for DB storage
+        # Rich external links (ready to display in UI)
+        "external_links":  json.dumps(ext_links),    # JSON string for DB storage
     }

@@ -80,6 +80,20 @@ class TrackedSeries(Base):
     # when the user selects a provider source.
     mb_provider_ids = Column(Text, nullable=True)
 
+    # ── Rich cross-reference data ──────────────────────────────────────
+    # Categorised external links from MB's links array.
+    # JSON array of {label, url, type} where type ∈ tracker|official|publisher|community|info
+    external_links = Column(Text, nullable=True)
+    # Alternate/associated titles from MU (stored for display + search).
+    # JSON array of strings.
+    associated_titles = Column(Text, nullable=True)
+    # Related series from MU (sequel, prequel, spin-off, etc.).
+    # JSON array of {series_id, title, relation_type, url}.
+    related_series = Column(Text, nullable=True)
+    # Author roles from MU — richer than flat authors list.
+    # JSON array of {name, role} where role ∈ Story|Art|Story & Art|Author|Artist|...
+    author_roles = Column(Text, nullable=True)
+
     # ── User progress ─────────────────────────────────────────────────
     current_chapter = Column(String, nullable=True, default="0")
     reading_status = Column(String, default="reading")
@@ -170,6 +184,10 @@ class TrackedSeries(Base):
             "last_checked": self.last_checked.isoformat() if self.last_checked else None,
             "added_at": self.added_at.isoformat() if self.added_at else None,
             "has_update": self.has_update(),
+            "external_links": self._safe_json(self.external_links, default=[]),
+            "associated_titles": self._safe_json(self.associated_titles, default=[]),
+            "related_series": self._safe_json(self.related_series, default=[]),
+            "author_roles": self._safe_json(self.author_roles, default=[]),
         }
 
 
@@ -321,6 +339,10 @@ def _migrate_db():
         ("tracked_series", "notification_muted", "BOOLEAN DEFAULT 0"),
         ("tracked_series", "last_read_at",       "DATETIME"),
         ("tracked_series", "tags",               "TEXT"),
+        ("tracked_series", "external_links",     "TEXT"),
+        ("tracked_series", "associated_titles",  "TEXT"),
+        ("tracked_series", "related_series",     "TEXT"),
+        ("tracked_series", "author_roles",       "TEXT"),
     ]
 
     # Indexes to ensure on hot query columns (idempotent — CREATE IF NOT EXISTS)

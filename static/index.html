@@ -493,7 +493,7 @@
     .mb-4 { margin-bottom: 16px; }
 
     /* ── Providers row ─────────────────────────────────── */
-    .provider-row { display: flex; gap: 6px; align-items: center; margin-top: 6px; }
+    .provider-row { display: flex; gap: 6px; align-items: center; margin-top: 6px; flex-wrap: wrap; }
     .provider-chip { font-size: 0.65rem; padding: 1px 6px; border-radius: 4px; font-weight: 600; }
     .p-mb { background: rgba(124,108,255,0.2); color: var(--accent); }
     .p-mu { background: rgba(59,130,246,0.2); color: var(--blue); }
@@ -501,6 +501,59 @@
     .p-km  { background: rgba(30,120,255,0.2);  color: #4d9dff; }
     .p-mup { background: rgba(0,190,100,0.2);   color: #2ed87a; }
     .p-mdx { background: rgba(240,60,40,0.2);   color: #f05a46; }
+
+    /* ── Simulpub source badge (on library cards) ───────── */
+    .source-badge {
+      position: absolute; bottom: 0; left: 0; right: 0;
+      font-size: 0.6rem; font-weight: 700; text-align: center;
+      padding: 2px 0; letter-spacing: 0.04em; text-transform: uppercase;
+      border-radius: 0 0 4px 4px;
+    }
+    .source-badge.src-mangaplus  { background: rgba(255,100,30,0.85);  color: #fff; }
+    .source-badge.src-kmanga     { background: rgba(30,120,255,0.85);  color: #fff; }
+    .source-badge.src-mangaup    { background: rgba(0,190,100,0.85);   color: #fff; }
+    .source-badge.src-mangadex   { background: rgba(240,60,40,0.85);   color: #fff; }
+    .source-badge.src-komga      { background: rgba(100,160,60,0.85);  color: #fff; }
+    .source-badge.src-custom     { background: rgba(120,120,120,0.7);  color: #fff; }
+
+    /* ── External links section in detail modal ─────────── */
+    .ext-links-section { margin-top: 14px; }
+    .ext-links-grid { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 8px; }
+    .ext-link-chip {
+      display: inline-flex; align-items: center; gap: 4px;
+      font-size: 0.72rem; font-weight: 600; padding: 4px 10px;
+      border-radius: 6px; text-decoration: none; transition: filter 0.15s;
+      border: 1px solid transparent;
+    }
+    .ext-link-chip:hover { filter: brightness(1.15); text-decoration: none; }
+    .ext-link-chip.type-tracker   { background: rgba(124,108,255,0.15); color: var(--accent);  border-color: rgba(124,108,255,0.3); }
+    .ext-link-chip.type-official  { background: rgba(255,140,20,0.15);  color: #e8900a;        border-color: rgba(255,140,20,0.3); }
+    .ext-link-chip.type-publisher { background: rgba(59,130,246,0.15);  color: var(--blue);    border-color: rgba(59,130,246,0.3); }
+    .ext-link-chip.type-community { background: rgba(240,60,40,0.15);   color: #f05a46;        border-color: rgba(240,60,40,0.3); }
+    .ext-link-chip.type-info      { background: rgba(100,200,80,0.15);  color: #5aba42;        border-color: rgba(100,200,80,0.3); }
+    .ext-link-chip.type-other     { background: var(--surface2);        color: var(--text-muted); border-color: var(--border); }
+
+    /* ── Related series section in detail modal ─────────── */
+    .related-section { margin-top: 20px; }
+    .related-grid { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+    .related-item {
+      display: flex; align-items: center; gap: 10px;
+      padding: 8px 12px; border-radius: 8px;
+      background: var(--surface2); border: 1px solid var(--border);
+    }
+    .related-badge {
+      font-size: 0.6rem; font-weight: 700; padding: 2px 7px; border-radius: 4px;
+      background: rgba(124,108,255,0.2); color: var(--accent); flex-shrink: 0; white-space: nowrap;
+    }
+    .related-title { font-size: 0.82rem; font-weight: 600; flex: 1; color: var(--text); }
+    .related-link { font-size: 0.72rem; color: var(--blue); text-decoration: none; flex-shrink: 0; }
+    .related-link:hover { text-decoration: underline; }
+
+    /* ── Poll error indicator (card level) ──────────────── */
+    .poll-error-dot {
+      display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+      background: var(--red); margin-left: 3px; vertical-align: middle; cursor: help;
+    }
     .p-kg  { background: rgba(76,175,80,0.2);   color: #66bb6a; }
     .p-custom { background: rgba(150,150,150,0.2); color: var(--text-muted); }
 
@@ -820,6 +873,13 @@
               <option :value="t" x-text="t"></option>
             </template>
           </select>
+          <select class="input" x-model="typeFilter" style="width:150px;padding:7px 10px;font-size:0.8rem">
+            <option value="">All Types</option>
+            <option value="manga">Manga</option>
+            <option value="manhwa">Manhwa</option>
+            <option value="manhua">Manhua</option>
+            <option value="light_novel">Light Novel</option>
+          </select>
           <div class="view-toggle">
             <button :class="{active: viewMode==='grid'}" @click="viewMode='grid'" title="Grid view">▦</button>
             <button :class="{active: viewMode==='list'}" @click="viewMode='list'" title="List view">☰</button>
@@ -901,9 +961,15 @@
                 MU
                 <span class="poll-health" :class="pollHealthClass(s)" :title="pollHealthTitle(s)"></span>
               </div>
+              <!-- Poll error indicator (shown even without MU link, e.g. simulpub failures) -->
+              <div x-show="!s.mu_series_id && s.poll_failures > 0"
+                   class="chip-linked" style="background:rgba(239,68,68,0.15);color:var(--red)"
+                   :title="s.last_poll_error || 'Polling errors detected'">
+                ⚠ <span x-text="s.poll_failures"></span>
+              </div>
 
               <!-- Cover -->
-              <div class="cover-wrap">
+              <div class="cover-wrap" style="position:relative">
                 <template x-if="s.cover_url">
                   <img class="cover-img" :src="s.cover_url" :alt="s.title" loading="lazy"
                        @error="$el.style.display='none'" />
@@ -918,6 +984,11 @@
                     <span x-show="s.mu_rating_votes" class="rating-votes" style="font-size:0.62rem">(<span x-text="formatVotes(s.mu_rating_votes)"></span>)</span>
                   </div>
                 </div>
+                <!-- Simulpub source badge -->
+                <template x-if="s.simulpub_source && s.simulpub_source !== 'custom' && s.simulpub_source !== ''">
+                  <div class="source-badge" :class="'src-' + s.simulpub_source"
+                       x-text="{'mangaplus':'MangaPlus','kmanga':'K Manga','mangaup':'MangaUp!','mangadex':'MangaDex','komga':'Komga'}[s.simulpub_source] || s.simulpub_source"></div>
+                </template>
               </div>
 
               <div class="card-body">
@@ -1002,9 +1073,15 @@
                   <span x-text="(s.series_type || 'manga')" style="text-transform:capitalize"></span>
                   <span x-show="s.year" x-text="s.year"></span>
                   <span class="list-rating" x-show="s.mu_rating">★ <span x-text="s.mu_rating ? s.mu_rating.toFixed(1) : ''"></span></span>
-                  <span x-show="s.mu_series_id" style="font-size:0.65rem;color:var(--accent);font-weight:600">
+                  <span x-show="s.mu_series_id" style="font-size:0.65rem;color:var(--accent);font-weight:600"
+                        :title="pollHealthTitle(s)">
                     MU <span class="poll-health" :class="pollHealthClass(s)"></span>
                   </span>
+                  <template x-if="s.simulpub_source && s.simulpub_source !== 'custom' && s.simulpub_source !== ''">
+                    <span class="provider-chip"
+                          :class="{'p-mp':s.simulpub_source==='mangaplus','p-km':s.simulpub_source==='kmanga','p-mup':s.simulpub_source==='mangaup','p-mdx':s.simulpub_source==='mangadex','p-kg':s.simulpub_source==='komga'}"
+                          x-text="{'mangaplus':'MangaPlus','kmanga':'K Manga','mangaup':'MangaUp!','mangadex':'MangaDex','komga':'Komga'}[s.simulpub_source] || s.simulpub_source"></span>
+                  </template>
                   <span class="chip-idle list-status-chip" x-show="isIdle(s) && sf.idle_detection_enabled==='true'">💤 idle</span>
                 </div>
               </div>
@@ -1088,7 +1165,7 @@
 
                     <div class="release-info">
                       <div class="release-title" x-text="r.series_title"></div>
-                      <div class="release-ch" x-text="'Chapter ' + r.chapter + (r.volume ? ' · Vol. ' + r.volume : '')"></div>
+                      <div class="release-ch" x-text="(r.volume ? 'Vol. ' + r.volume + '  ' : '') + 'Ch. ' + r.chapter"></div>
                       <div class="release-group" x-text="r.group_name ? 'by ' + r.group_name : ''"></div>
                       <div style="margin-top:5px;display:flex;align-items:center;gap:6px">
                         <span class="list-status-chip"
@@ -1103,6 +1180,9 @@
                               x-show="r.reading_status"
                               x-text="(r.reading_status||'').replace('_',' ')"></span>
                         <span x-show="r.current_chapter" class="text-xs text-muted" x-text="'at ch. ' + r.current_chapter"></span>
+                        <span x-show="r.source && r.source !== 'mangaupdates'" class="text-xs"
+                              style="color:var(--text-dim);font-style:italic"
+                              x-text="r.source"></span>
                       </div>
                     </div>
 
@@ -1892,6 +1972,12 @@
             <div class="modal-title" x-text="ds.title"></div>
             <div class="modal-native" x-text="ds.native_title"></div>
 
+            <!-- Associated / alternate titles -->
+            <template x-if="ds.associated_titles && ds.associated_titles.length > 0">
+              <div class="text-xs text-muted mt-1" style="font-style:italic"
+                   x-text="'Also: ' + ds.associated_titles.slice(0,3).join(' · ') + (ds.associated_titles.length > 3 ? ' +' + (ds.associated_titles.length - 3) + ' more' : '')"></div>
+            </template>
+
             <div class="modal-tags">
               <span x-show="ds.status" :class="'sb sb-' + (ds.status||'').toLowerCase()" x-text="ds.status"></span>
               <span x-show="ds.series_type" class="tag" x-text="(ds.series_type||'').replace('_',' ')"></span>
@@ -1916,9 +2002,9 @@
             </div>
 
             <!-- Authors / Publishers -->
-            <div class="text-xs text-muted mt-1" x-show="ds.authors && ds.authors.length">
-              By <strong x-text="(ds.authors||[]).join(', ')"></strong>
-            </div>
+            <div class="text-xs text-muted mt-1"
+                 x-show="ds.authors && ds.authors.length || ds.author_roles && ds.author_roles.length"
+                 x-html="formatAuthors(ds)"></div>
             <div class="text-xs text-muted mt-1" x-show="ds.publishers && ds.publishers.length">
               Pub. <span x-text="(ds.publishers||[]).slice(0,2).join(', ')"></span>
             </div>
@@ -2283,26 +2369,57 @@
             </div>
           </template>
 
-          <!-- Links -->
-          <div class="flex gap-2 mt-2">
-            <a x-show="ds.mangabaka_url" :href="ds.mangabaka_url" target="_blank" class="btn btn-ghost btn-sm">MangaBaka ↗</a>
-            <a x-show="ds.mu_url" :href="ds.mu_url" target="_blank" class="btn btn-ghost btn-sm">MangaUpdates ↗</a>
-            <a x-show="ds.simulpub_source === 'mangaplus' && ds.simulpub_id"
-               :href="`https://mangaplus.shueisha.co.jp/titles/${ds.simulpub_id}`"
-               target="_blank" class="btn btn-ghost btn-sm">MangaPlus ↗</a>
-            <a x-show="ds.simulpub_source === 'kmanga' && ds.simulpub_id"
-               :href="`https://kmanga.kodansha.com/title/${ds.simulpub_id}`"
-               target="_blank" class="btn btn-ghost btn-sm">K Manga ↗</a>
-            <a x-show="ds.simulpub_source === 'mangaup' && ds.simulpub_id"
-               :href="`https://global.manga-up.com/en/manga/${ds.simulpub_id}`"
-               target="_blank" class="btn btn-ghost btn-sm">MangaUp! ↗</a>
-            <a x-show="ds.simulpub_source === 'mangadex' && ds.simulpub_id"
-               :href="`https://mangadex.org/title/${ds.simulpub_id}`"
-               target="_blank" class="btn btn-ghost btn-sm">MangaDex ↗</a>
-            <a x-show="ds.simulpub_source === 'komga' && ds.simulpub_id && sf.komga_url"
-               :href="`${sf.komga_url}/series/${ds.simulpub_id}`"
-               target="_blank" class="btn btn-ghost btn-sm">Komga ↗</a>
+          <!-- External links — rich cross-references from MB + hard-coded simulpub links -->
+          <div class="ext-links-section">
+            <div class="form-label" style="margin-bottom:6px">Links</div>
+            <div class="ext-links-grid">
+              <!-- Dynamic links from MB's links array (categorised) -->
+              <template x-for="lnk in (ds.external_links || [])" :key="lnk.url">
+                <a :href="lnk.url" target="_blank" rel="noopener"
+                   class="ext-link-chip" :class="'type-' + (lnk.type || 'other')"
+                   x-text="lnk.label + ' ↗'"></a>
+              </template>
+              <!-- Simulpub platform links (from active source, shown even if not in MB links) -->
+              <a x-show="ds.simulpub_source === 'mangaplus' && ds.simulpub_id && !externalLinkExists(ds, 'mangaplus.shueisha')"
+                 :href="`https://mangaplus.shueisha.co.jp/titles/${ds.simulpub_id}`"
+                 target="_blank" class="ext-link-chip type-official">MangaPlus ↗</a>
+              <a x-show="ds.simulpub_source === 'kmanga' && ds.simulpub_id && !externalLinkExists(ds, 'kmanga.kodansha')"
+                 :href="`https://kmanga.kodansha.com/title/${ds.simulpub_id}`"
+                 target="_blank" class="ext-link-chip type-official">K Manga ↗</a>
+              <a x-show="ds.simulpub_source === 'mangaup' && ds.simulpub_id && !externalLinkExists(ds, 'manga-up')"
+                 :href="`https://global.manga-up.com/en/manga/${ds.simulpub_id}`"
+                 target="_blank" class="ext-link-chip type-official">MangaUp! ↗</a>
+              <a x-show="ds.simulpub_source === 'mangadex' && ds.simulpub_id && !externalLinkExists(ds, 'mangadex')"
+                 :href="`https://mangadex.org/title/${ds.simulpub_id}`"
+                 target="_blank" class="ext-link-chip type-community">MangaDex ↗</a>
+              <a x-show="ds.simulpub_source === 'komga' && ds.simulpub_id && sf.komga_url"
+                 :href="`${sf.komga_url}/series/${ds.simulpub_id}`"
+                 target="_blank" class="ext-link-chip type-other">Komga ↗</a>
+              <!-- Fallback plain links when no rich external_links data yet -->
+              <a x-show="ds.mangabaka_url && !externalLinkExists(ds, 'mangabaka')"
+                 :href="ds.mangabaka_url" target="_blank" class="ext-link-chip type-tracker">MangaBaka ↗</a>
+              <a x-show="ds.mu_url && !externalLinkExists(ds, 'mangaupdates')"
+                 :href="ds.mu_url" target="_blank" class="ext-link-chip type-tracker">MangaUpdates ↗</a>
+            </div>
           </div>
+
+          <!-- Related series -->
+          <template x-if="ds.related_series && ds.related_series.length > 0">
+            <div class="related-section">
+              <hr class="divider" />
+              <div class="form-label" style="margin-bottom:8px">Related Series</div>
+              <div class="related-grid">
+                <template x-for="rel in ds.related_series" :key="rel.series_id">
+                  <div class="related-item">
+                    <span class="related-badge" x-text="rel.relation_type || 'Related'"></span>
+                    <span class="related-title" x-text="rel.title"></span>
+                    <a x-show="rel.url" :href="rel.url" target="_blank" rel="noopener"
+                       class="related-link">MU ↗</a>
+                  </div>
+                </template>
+              </div>
+            </div>
+          </template>
         </div>
 
         <div class="modal-footer">
@@ -2397,6 +2514,7 @@ function app() {
     genreFilter: '',
     authorFilter: '',
     tagFilter: '',
+    typeFilter: '',
 
     // Bulk mode
     bulkMode: false, bulkSelected: [], bulkStatus: 'reading',
@@ -2505,6 +2623,42 @@ function app() {
       return { library:'My Library', releases:'Live Feed', search:'Search', komga:'Komga Library', notifications:'Notifications', activity:'Activity Log', stats:'Statistics', settings:'Settings' }[this.page] || '';
     },
 
+    // ── Metadata helpers ────────────────────────────────
+
+    /**
+     * Format authors line: use role-aware display when author_roles is available.
+     * Returns an HTML string like "Story: Oda Eiichiro · Art: Oda Eiichiro"
+     * or falls back to "By AuthorA, AuthorB"
+     */
+    formatAuthors(s) {
+      const roles = s.author_roles || [];
+      if (roles.length > 0) {
+        // Group by role
+        const groups = {};
+        for (const r of roles) {
+          const role = r.role || 'Author';
+          if (!groups[role]) groups[role] = [];
+          groups[role].push(r.name);
+        }
+        return Object.entries(groups)
+          .map(([role, names]) => `<span>${role}:</span> <strong>${names.join(', ')}</strong>`)
+          .join(' &nbsp;·&nbsp; ');
+      }
+      const authors = s.authors || [];
+      if (authors.length > 0) {
+        return `By <strong>${authors.join(', ')}</strong>`;
+      }
+      return '';
+    },
+
+    /**
+     * Check if a given domain fragment already appears in the series' external_links.
+     * Used to prevent showing duplicate fallback links when MB already provides them.
+     */
+    externalLinkExists(s, domainFragment) {
+      return (s.external_links || []).some(lnk => (lnk.url || '').includes(domainFragment));
+    },
+
     // ── Library ─────────────────────────────────────────
     async loadLibrary() {
       this.loading = true;
@@ -2565,6 +2719,11 @@ function app() {
       // Tag filter
       if (this.tagFilter) {
         list = list.filter(s => (s.tags||[]).includes(this.tagFilter));
+      }
+
+      // Series type filter
+      if (this.typeFilter) {
+        list = list.filter(s => (s.series_type || 'manga') === this.typeFilter);
       }
 
       // Sorting
