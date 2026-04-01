@@ -101,7 +101,7 @@
       backdrop-filter: blur(8px);
     }
     .topbar-title { font-size: 1rem; font-weight: 600; flex: 1; }
-    .content { padding: 24px 28px; flex: 1; }
+    .content { padding: 24px 28px; flex: 1; max-width: 1440px; width: 100%; margin: 0 auto; }
 
     /* ── Buttons ───────────────────────────────────────── */
     .btn {
@@ -233,8 +233,8 @@
     .card-chapter { font-size: 0.7rem; color: var(--text-muted); margin-top: 3px; }
     .card-chapter.new { color: var(--green); font-weight: 600; }
 
-    .progress-wrap { height: 2px; background: var(--surface3); border-radius: 1px; margin-top: 6px; }
-    .progress-bar { height: 100%; background: var(--accent); border-radius: 1px; max-width: 100%; transition: width 0.3s; }
+    .progress-wrap { height: 3px; background: var(--surface3); border-radius: 2px; margin-top: 6px; }
+    .progress-bar { height: 100%; background: var(--accent); border-radius: 2px; max-width: 100%; transition: width 0.3s; }
     .progress-bar.green { background: var(--green); }
 
     /* ── Inline chapter controls on cards ──────────────── */
@@ -435,6 +435,15 @@
     .rating-val { font-weight: 700; font-size: 0.9rem; }
     .rating-votes { font-size: 0.72rem; color: var(--text-muted); }
 
+    /* ── Section heading (stats/content pages) ─────────── */
+    .section-heading {
+      font-size: 0.82rem; font-weight: 700; margin-bottom: 14px;
+      padding-bottom: 10px; border-bottom: 1px solid var(--border);
+      color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .section-heading-icon { font-size: 1rem; }
+
     /* ── Toast ─────────────────────────────────────────── */
     .toast-wrap { position: fixed; bottom: 22px; right: 22px; z-index: 200; display: flex; flex-direction: column; gap: 7px; pointer-events: none; }
     .toast {
@@ -445,6 +454,10 @@
     }
     .toast.success { border-color: var(--green); }
     .toast.error   { border-color: var(--red); }
+    .toast-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+    .toast.success .toast-dot { background: var(--green); }
+    .toast.error   .toast-dot { background: var(--red); }
+    .toast:not(.success):not(.error) .toast-dot { background: var(--accent); }
     @keyframes slideIn { from { transform: translateX(20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
 
     /* ── Empty state ───────────────────────────────────── */
@@ -619,7 +632,7 @@
       <span class="brand-icon">📚</span>
       <div>
         <div class="brand-name">Manga Tracker</div>
-        <div class="brand-sub">MB + MangaUpdates</div>
+        <div class="brand-sub">Reading Tracker</div>
       </div>
     </div>
 
@@ -638,7 +651,7 @@
       </div>
       <div class="nav-item" :class="{active: page==='komga'}" @click="page='komga'; loadKomgaBrowse(); sidebarOpen=false"
            x-show="sf.komga_url && sf.komga_api_key">
-        <span class="nav-icon">📚</span> Komga
+        <span class="nav-icon">🏠</span> Komga
       </div>
 
       <div class="nav-section">Manage</div>
@@ -1076,9 +1089,19 @@
                       <div class="release-title" x-text="r.series_title"></div>
                       <div class="release-ch" x-text="'Chapter ' + r.chapter + (r.volume ? ' · Vol. ' + r.volume : '')"></div>
                       <div class="release-group" x-text="r.group_name ? 'by ' + r.group_name : ''"></div>
-                      <div style="margin-top:4px">
-                        <span class="genre-chip" x-text="r.reading_status?.replace('_',' ') || ''"></span>
-                        <span x-show="r.current_chapter" class="text-xs text-muted" x-text="' · at ch. ' + r.current_chapter"></span>
+                      <div style="margin-top:5px;display:flex;align-items:center;gap:6px">
+                        <span class="list-status-chip"
+                              :class="{
+                                'chip-new':         r.reading_status==='reading',
+                                'chip-plan':        r.reading_status==='plan_to_read',
+                                'chip-hold':        r.reading_status==='on_hold',
+                                'chip-dropped':     r.reading_status==='dropped',
+                                'chip-done':        r.reading_status==='completed',
+                                'chip-considering': r.reading_status==='considering',
+                              }"
+                              x-show="r.reading_status"
+                              x-text="(r.reading_status||'').replace('_',' ')"></span>
+                        <span x-show="r.current_chapter" class="text-xs text-muted" x-text="'at ch. ' + r.current_chapter"></span>
                       </div>
                     </div>
 
@@ -1202,6 +1225,7 @@
         </div>
 
         <div x-show="notifications.length>0">
+          <div class="card" style="padding:0 16px">
           <template x-for="n in notifications" :key="n.id">
             <div class="notif-item" :class="{'read': n.is_read}">
               <div class="notif-icon" x-text="n.notif_type==='chapter_update' ? '📖' : n.notif_type==='news' ? '📰' : '🔔'"></div>
@@ -1229,7 +1253,8 @@
               </div>
             </div>
           </template>
-          <div style="text-align:center;margin-top:20px">
+          </div><!-- /.card -->
+          <div style="text-align:center;margin-top:16px">
             <button class="btn btn-danger btn-sm" @click="clearAllNotifs()">🗑 Clear All</button>
           </div>
         </div>
@@ -1276,7 +1301,10 @@
       <!-- ══ STATISTICS ════════════════════════════════════ -->
       <div x-show="page==='stats'">
         <template x-if="statsLoading">
-          <div style="padding:40px;text-align:center"><span class="spin"></span> Loading statistics…</div>
+          <div style="text-align:center;padding:60px 0">
+            <div class="spin" style="width:28px;height:28px;margin:0 auto 12px"></div>
+            <div class="text-muted text-sm">Loading statistics…</div>
+          </div>
         </template>
 
         <template x-if="!statsLoading && statsData">
@@ -1304,7 +1332,7 @@
           <!-- Status breakdown -->
           <template x-if="Object.keys(statsData.by_status).length > 0">
             <div class="card" style="padding:20px 24px;margin-bottom:20px">
-              <div class="settings-block-title">📊 Status Breakdown</div>
+              <div class="section-heading"><span class="section-heading-icon">📊</span> Status Breakdown</div>
               <template x-for="[status, count] in Object.entries(statsData.by_status)" :key="status">
                 <div style="margin-bottom:12px">
                   <div style="display:flex;justify-content:space-between;margin-bottom:4px;font-size:0.85rem">
@@ -1322,7 +1350,7 @@
           <!-- Type distribution -->
           <template x-if="Object.keys(statsData.by_type).length > 0">
             <div class="card" style="padding:20px 24px;margin-bottom:20px">
-              <div class="settings-block-title">📚 Type Distribution</div>
+              <div class="section-heading"><span class="section-heading-icon">📚</span> Type Distribution</div>
               <template x-for="[type, count] in Object.entries(statsData.by_type)" :key="type">
                 <div style="margin-bottom:12px">
                   <div style="display:flex;justify-content:space-between;margin-bottom:4px;font-size:0.85rem">
@@ -1340,7 +1368,7 @@
           <!-- Genre breakdown (top 15) -->
           <template x-if="statsData.by_genre.length > 0">
             <div class="card" style="padding:20px 24px;margin-bottom:20px">
-              <div class="settings-block-title">🏷️ Top Genres</div>
+              <div class="section-heading"><span class="section-heading-icon">🏷️</span> Top Genres</div>
               <template x-for="item in statsData.by_genre" :key="item.genre">
                 <div style="margin-bottom:12px">
                   <div style="display:flex;justify-content:space-between;margin-bottom:4px;font-size:0.85rem">
@@ -1357,19 +1385,22 @@
 
           <!-- Reading pace -->
           <div class="card" style="padding:20px 24px;margin-bottom:20px">
-            <div class="settings-block-title">🏃 Reading Pace</div>
+            <div class="section-heading"><span class="section-heading-icon">🏃</span> Reading Pace</div>
             <div class="stats-row">
               <div class="stat-card">
                 <div class="stat-label">Last 7 Days</div>
-                <div class="stat-value accent" x-text="statsData.reading_pace.last_7_days"></div>
+                <div class="stat-value green" x-text="statsData.reading_pace.last_7_days"></div>
+                <div class="stat-sub">chapters read</div>
               </div>
               <div class="stat-card">
                 <div class="stat-label">Last 30 Days</div>
-                <div class="stat-value accent" x-text="statsData.reading_pace.last_30_days"></div>
+                <div class="stat-value blue" x-text="statsData.reading_pace.last_30_days"></div>
+                <div class="stat-sub">chapters read</div>
               </div>
               <div class="stat-card">
                 <div class="stat-label">Last 90 Days</div>
                 <div class="stat-value accent" x-text="statsData.reading_pace.last_90_days"></div>
+                <div class="stat-sub">chapters read</div>
               </div>
             </div>
           </div>
@@ -2344,7 +2375,7 @@
 <div class="toast-wrap">
   <template x-for="t in toasts" :key="t.id">
     <div class="toast" :class="t.type">
-      <span x-text="t.type==='success' ? '✓' : '✕'"></span>
+      <div class="toast-dot"></div>
       <span x-text="t.message"></span>
     </div>
   </template>
