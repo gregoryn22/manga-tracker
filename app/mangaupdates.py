@@ -62,6 +62,33 @@ def get_series(mu_id: int) -> dict[str, Any]:
     return _get(f"/series/{mu_id}")
 
 
+def get_series_related(mu_id: int) -> list[dict]:
+    """
+    Fetch related series (sequels, prequels, spin-offs, etc.) for a series.
+    Returns normalised list of {series_id, title, relation_type, url}.
+    """
+    try:
+        data = _get(f"/series/{mu_id}/related")
+        results = []
+        for item in data if isinstance(data, list) else data.get("results", []):
+            rel_type = item.get("relation_type", "Related")
+            series   = item.get("series") or {}
+            sid      = series.get("series_id") or item.get("id")
+            title    = series.get("title") or item.get("title", "")
+            url      = series.get("url") or item.get("url", "")
+            if sid and title:
+                results.append({
+                    "series_id":     sid,
+                    "title":         title,
+                    "relation_type": rel_type,
+                    "url":           url,
+                })
+        return results
+    except Exception as e:
+        logger.debug("MU related series fetch failed for %s: %s", mu_id, e)
+        return []
+
+
 def get_series_releases(mu_id: int, per_page: int = 10) -> dict[str, Any]:
     """Historical release list for a specific series."""
     return _post(f"/series/{mu_id}/releases", {"perpage": per_page, "asc": "false"})
