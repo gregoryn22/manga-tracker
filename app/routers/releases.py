@@ -7,7 +7,7 @@ GET /api/releases/feed      — live MU global feed + local DB releases (last 24
                               filtered to tracked series, merged and deduplicated
 """
 import logging
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -60,7 +60,30 @@ def live_feed(db: Session = Depends(get_db)):
     Results are sorted newest-first.
     """
     # ── Build lookups for all tracked series ────────────────────────────────
-    all_tracked = db.query(TrackedSeries).all()
+    # Select only the columns needed for feed construction — avoids loading
+    # heavy text columns (description, genres, notes, etc.) for every series.
+    all_tracked = db.query(
+        TrackedSeries.id,
+        TrackedSeries.mu_series_id,
+        TrackedSeries.title,
+        TrackedSeries.cover_url,
+        TrackedSeries.mu_cover_url,
+        TrackedSeries.mu_url,
+        TrackedSeries.current_chapter,
+        TrackedSeries.reading_status,
+    ).all()
+
+    # Build lightweight namedtuple-like dicts for the feed
+    class _SeriesProxy:
+        __slots__ = ("id", "mu_series_id", "title", "cover_url", "mu_cover_url",
+                     "mu_url", "current_chapter", "reading_status")
+        def __init__(self, row):
+            for attr, val in zip(self.__slots__, row):
+                setattr(self, attr, val)
+        def best_cover(self):
+            return self.cover_url or self.mu_cover_url
+
+    all_tracked = [_SeriesProxy(row) for row in all_tracked]
     series_map = {s.id: s for s in all_tracked}                        # id → series
     mu_map     = {s.mu_series_id: s for s in all_tracked if s.mu_series_id}  # mu_id → series
 
@@ -120,9 +143,11 @@ def live_feed(db: Session = Depends(get_db)):
             })
 
     # ── 2. Local DB releases — last 24 hours ────────────────────────────────
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
-    # created_at may be stored as naive UTC; compare against naive cutoff too
-    cutoff_naive = cutoff.replace(tzinfo=None)
+    # Release.created_at uses `default=datetime.utcnow` (naive UTC, no tzinfo).
+    # We must compare against a naive datetime — stripping tzinfo from the
+    # aware cutoff keeps the arithmetic correct without needing to migrate the
+    # column to timezone-aware storage.
+    cutoff_naive = datetime.utcnow() - timedelta(hours=24)
 
     local_releases = (
         db.query(Release)

@@ -14,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from sqlalchemy import func
 
 from .database import ReadingLog, TrackedSeries, init_db, get_db, get_setting, SessionLocal
 from .routers import notifications, releases, series, settings
@@ -255,9 +256,10 @@ def komga_import(req: KomgaImportRequest, background_tasks: BackgroundTasks):
 
     db = SessionLocal()
     try:
-        # Find current max ID so we can allocate above it (and above the floor)
-        max_id_row = db.execute(__import__("sqlalchemy").text("SELECT MAX(id) FROM tracked_series")).fetchone()
-        next_id = max((_KOMGA_ID_FLOOR, (max_id_row[0] or 0) + 1))
+        # Find current max ID so we can allocate above it (and above the floor).
+        # Using func.max() via ORM avoids a raw SQL string and the __import__ hack.
+        max_id = db.query(func.max(TrackedSeries.id)).scalar() or 0
+        next_id = max(_KOMGA_ID_FLOOR, max_id + 1)
 
         for item in req.items:
             sid = item.komga_series_id.strip()

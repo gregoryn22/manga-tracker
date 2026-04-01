@@ -11,6 +11,7 @@ Push behaviour is governed by three settings (all toggled in the UI):
 """
 import json
 import logging
+import threading
 from datetime import datetime
 
 import httpx
@@ -25,22 +26,28 @@ PUSHOVER_API_URL = "https://api.pushover.net/1/messages.json"
 # ── Per-poll settings cache ───────────────────────────────────────────────────
 # Avoids re-querying the settings table on every notification within a single
 # poll cycle.  Call clear_settings_cache() at the start of each poll run.
+#
+# Lock guards _settings_cache because APScheduler runs poll_updates() in a
+# thread pool — multiple concurrent polls could corrupt the dict without it.
 
 _settings_cache: dict[str, str] | None = None
+_settings_cache_lock = threading.Lock()
 
 
 def _load_settings(db: Session) -> dict[str, str]:
     """Load all settings from DB, caching for the duration of a poll cycle."""
     global _settings_cache
-    if _settings_cache is None:
-        _settings_cache = {r.key: r.value for r in db.query(Settings).all()}
-    return _settings_cache
+    with _settings_cache_lock:
+        if _settings_cache is None:
+            _settings_cache = {r.key: r.value for r in db.query(Settings).all()}
+        return dict(_settings_cache)  # return a copy to avoid mutation races
 
 
 def clear_settings_cache():
     """Call at the start of each poll cycle to refresh cached settings."""
     global _settings_cache
-    _settings_cache = None
+    with _settings_cache_lock:
+        _settings_cache = None
 
 
 # ── Settings helpers ──────────────────────────────────────────────────────────

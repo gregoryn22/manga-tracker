@@ -427,6 +427,11 @@ def import_library(req: ImportRequest, db: Session = Depends(get_db)):
             komga_track_mode=item.get("komga_track_mode", "chapter"),
             notification_muted=item.get("notification_muted", False),
             mb_provider_ids=json.dumps(item.get("mb_provider_ids", {})),
+            # Rich cross-reference metadata (added post v1)
+            external_links=json.dumps(item["external_links"]) if item.get("external_links") else None,
+            associated_titles=json.dumps(item["associated_titles"]) if item.get("associated_titles") else None,
+            related_series=json.dumps(item["related_series"]) if item.get("related_series") else None,
+            author_roles=json.dumps(item["author_roles"]) if item.get("author_roles") else None,
             current_chapter=item.get("current_chapter", "0"),
             reading_status=item.get("reading_status", "reading"),
             notes=item.get("notes"),

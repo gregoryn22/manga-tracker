@@ -27,3 +27,5 @@ docker-compose.override.yml
 .idea/
 .DS_Store
 Thumbs.db
+
+claude.md

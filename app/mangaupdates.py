@@ -10,6 +10,7 @@ Key endpoints used:
   GET  /v1/releases/days              → today's global release feed (all series)
 """
 import logging
+import time
 from typing import Any
 
 import httpx
@@ -19,14 +20,46 @@ logger = logging.getLogger(__name__)
 BASE_URL = "https://api.mangaupdates.com/v1"
 _TIMEOUT = 15.0
 
+# Retry settings for 429 rate-limit responses
+_MAX_RETRIES = 3
+_RETRY_BASE_DELAY = 2.0   # seconds; doubles on each retry (2 → 4 → 8)
+
+
+def _request(method: str, url: str, **kwargs) -> httpx.Response:
+    """
+    Execute an HTTP request with automatic retry on 429 Too Many Requests.
+
+    Respects the Retry-After header when present; otherwise uses an
+    exponential backoff starting at _RETRY_BASE_DELAY seconds.
+    """
+    delay = _RETRY_BASE_DELAY
+    for attempt in range(_MAX_RETRIES + 1):
+        with httpx.Client(timeout=_TIMEOUT) as client:
+            resp = getattr(client, method)(url, **kwargs)
+
+        if resp.status_code != 429:
+            resp.raise_for_status()
+            return resp
+
+        if attempt >= _MAX_RETRIES:
+            logger.error(f"MU {method.upper()} {url} → 429 after {_MAX_RETRIES} retries")
+            resp.raise_for_status()  # will raise HTTPStatusError
+
+        retry_after = resp.headers.get("Retry-After")
+        wait = float(retry_after) if retry_after and retry_after.isdigit() else delay
+        logger.warning(f"MU rate-limited (429) — retrying in {wait:.1f}s (attempt {attempt + 1}/{_MAX_RETRIES})")
+        time.sleep(wait)
+        delay *= 2
+
+    # unreachable, but satisfies type checker
+    raise RuntimeError("Retry loop exited unexpectedly")
+
 
 def _get(path: str, params: dict | None = None) -> dict[str, Any]:
     url = f"{BASE_URL}{path}"
     try:
-        with httpx.Client(timeout=_TIMEOUT) as client:
-            resp = client.get(url, params=params)
-            resp.raise_for_status()
-            return resp.json()
+        resp = _request("get", url, params=params)
+        return resp.json()
     except httpx.HTTPStatusError as e:
         logger.error(f"MU GET {url} → {e.response.status_code}")
         raise
@@ -38,10 +71,8 @@ def _get(path: str, params: dict | None = None) -> dict[str, Any]:
 def _post(path: str, body: dict) -> dict[str, Any]:
     url = f"{BASE_URL}{path}"
     try:
-        with httpx.Client(timeout=_TIMEOUT) as client:
-            resp = client.post(url, json=body)
-            resp.raise_for_status()
-            return resp.json()
+        resp = _request("post", url, json=body)
+        return resp.json()
     except httpx.HTTPStatusError as e:
         logger.error(f"MU POST {url} → {e.response.status_code}")
         raise
