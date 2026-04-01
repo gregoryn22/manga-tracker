@@ -263,7 +263,7 @@
     .card-chapter-controls .ch-btn.catch-up:hover { background: var(--green); color: #fff; }
     .card-chapter-controls .ch-label { color: var(--text-muted); }
 
-    /* ── Today's drops feed ────────────────────────────── */
+    /* ── Recent drops feed (last 24h) ──────────────────── */
     .drops-section { margin-bottom: 28px; }
     .section-header {
       display: flex; align-items: center; gap: 10px; margin-bottom: 14px;
@@ -736,11 +736,11 @@
           </div>
         </div>
 
-        <!-- Today's Drops (from live feed) -->
+        <!-- Recent Drops (last 24h, from live feed + local DB) -->
         <div class="drops-section" x-show="feedReleases.length > 0">
           <div class="section-header">
             <span style="font-size:1.2rem">⚡</span>
-            <span class="section-title">Today's Drops</span>
+            <span class="section-title">Recent Drops</span>
             <span class="section-badge" x-text="feedReleases.length + ' new'"></span>
             <button class="btn btn-ghost btn-xs ml-auto" @click="page='releases'">See all →</button>
           </div>
@@ -1045,7 +1045,7 @@
       <div x-show="page==='releases'">
         <div x-show="feedLoading" style="text-align:center;padding:40px">
           <div class="spin" style="width:28px;height:28px;margin:0 auto"></div>
-          <div class="text-muted text-sm" style="margin-top:12px">Fetching today's releases from MangaUpdates…</div>
+          <div class="text-muted text-sm" style="margin-top:12px">Fetching recent releases…</div>
         </div>
 
         <div x-show="!feedLoading">
@@ -1061,17 +1061,17 @@
           <template x-if="feedReleases.length === 0 && library.length > 0">
             <div class="empty">
               <div class="empty-icon">💤</div>
-              <h3>No tracked drops today</h3>
-              <p>None of your tracked series had releases on MangaUpdates today. Check back later!</p>
+              <h3>No recent releases</h3>
+              <p>None of your tracked series had releases in the last 24 hours. Check back later!</p>
             </div>
           </template>
 
           <template x-if="feedReleases.length > 0">
             <div>
               <div class="section-header mb-4">
-                <span class="section-title">Today's Releases for Your Library</span>
+                <span class="section-title">Releases in the Last 24 Hours</span>
                 <span class="section-badge" x-text="feedReleases.length + ' releases'"></span>
-                <span class="text-xs text-muted ml-auto" x-text="'of ' + feedTotal + ' total on MU today'"></span>
+                <span class="text-xs text-muted ml-auto" x-text="feedTotal ? 'of ' + feedTotal + ' total on MU' : ''"></span>
               </div>
 
               <!-- Flat view -->
