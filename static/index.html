@@ -199,13 +199,19 @@
       align-items: center; justify-content: center; font-size: 2.8rem;
     }
     .cover-overlay {
-      position: absolute; bottom: 0; left: 0; right: 0;
-      background: linear-gradient(to top, rgba(0,0,0,0.85) 0%, transparent 100%);
-      padding: 20px 10px 8px;
+      position: absolute; bottom: 22px; left: 5px;
+      /* Sits above the source badge (≈18px tall) with 4px gap */
+    }
+    /* When there's no source badge, pull the rating to the very bottom */
+    .cover-wrap:not(:has(.source-badge)) .cover-overlay {
+      bottom: 5px;
     }
     .cover-rating {
-      font-size: 0.72rem; font-weight: 600; color: var(--yellow);
-      display: flex; align-items: center; gap: 3px;
+      display: inline-flex; align-items: center; gap: 3px;
+      font-size: 0.68rem; font-weight: 700; color: #fff;
+      background: rgba(0,0,0,0.62); backdrop-filter: blur(4px);
+      border-radius: 4px; padding: 2px 6px;
+      border: 1px solid rgba(255,255,255,0.12);
     }
 
     .status-chip {
@@ -505,9 +511,10 @@
     /* ── Simulpub source badge (on library cards) ───────── */
     .source-badge {
       position: absolute; bottom: 0; left: 0; right: 0;
-      font-size: 0.6rem; font-weight: 700; text-align: center;
-      padding: 2px 0; letter-spacing: 0.04em; text-transform: uppercase;
+      font-size: 0.58rem; font-weight: 700; text-align: center;
+      padding: 3px 0; line-height: 1; letter-spacing: 0.05em; text-transform: uppercase;
       border-radius: 0 0 4px 4px;
+      /* Fixed height ≈ 18px — cover-overlay uses bottom: 22px to clear this */
     }
     .source-badge.src-mangaplus  { background: rgba(255,100,30,0.85);  color: #fff; }
     .source-badge.src-kmanga     { background: rgba(30,120,255,0.85);  color: #fff; }
