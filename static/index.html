@@ -992,7 +992,7 @@
                   </div>
                 </div>
                 <!-- Simulpub source badge -->
-                <template x-if="s.simulpub_source && s.simulpub_source !== 'custom' && s.simulpub_source !== ''">
+                <template x-if="sf.show_source_badges !== 'false' && s.simulpub_source && s.simulpub_source !== 'custom' && s.simulpub_source !== ''">
                   <div class="source-badge" :class="'src-' + s.simulpub_source"
                        x-text="{'mangaplus':'MangaPlus','kmanga':'K Manga','mangaup':'MangaUp!','mangadex':'MangaDex','komga':'Komga'}[s.simulpub_source] || s.simulpub_source"></div>
                 </template>
@@ -1084,7 +1084,7 @@
                         :title="pollHealthTitle(s)">
                     MU <span class="poll-health" :class="pollHealthClass(s)"></span>
                   </span>
-                  <template x-if="s.simulpub_source && s.simulpub_source !== 'custom' && s.simulpub_source !== ''">
+                  <template x-if="sf.show_source_badges !== 'false' && s.simulpub_source && s.simulpub_source !== 'custom' && s.simulpub_source !== ''">
                     <span class="provider-chip"
                           :class="{'p-mp':s.simulpub_source==='mangaplus','p-km':s.simulpub_source==='kmanga','p-mup':s.simulpub_source==='mangaup','p-mdx':s.simulpub_source==='mangadex','p-kg':s.simulpub_source==='komga'}"
                           x-text="{'mangaplus':'MangaPlus','kmanga':'K Manga','mangaup':'MangaUp!','mangadex':'MangaDex','komga':'Komga'}[s.simulpub_source] || s.simulpub_source"></span>
@@ -1932,6 +1932,15 @@
             </select>
           </div>
 
+          <div class="settings-row">
+            <label>Source Badges on Cards</label>
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+              <input type="checkbox" :checked="sf.show_source_badges !== 'false'"
+                     @change="sf.show_source_badges = $event.target.checked ? 'true' : 'false'" />
+              <span class="text-sm" x-text="sf.show_source_badges !== 'false' ? 'Show platform banner (MangaPlus, K Manga, etc.)' : 'Hidden'"></span>
+            </label>
+          </div>
+
           <div class="flex gap-2 mt-2">
             <button class="btn btn-primary btn-sm" @click="saveSettings()">💾 Save</button>
           </div>
@@ -2540,7 +2549,7 @@ function app() {
     activityFilter: '',
 
     // Settings form
-    sf: { pushover_user_key:'', pushover_app_token:'', pushover_enabled:'false', push_chapter_updates:'true', push_news:'false', push_reading_only:'false', updates_reading_only:'false', poll_interval_hours:'6', mangabaka_token:'', mu_enabled:'true', kmanga_email:'', kmanga_password:'', kmanga_recaptcha_token:'', komga_url:'', komga_api_key:'', idle_detection_enabled:'false', idle_threshold_days:'90', webhook_enabled:'false', webhook_url:'', default_page:'library', grid_density:'normal' },
+    sf: { pushover_user_key:'', pushover_app_token:'', pushover_enabled:'false', push_chapter_updates:'true', push_news:'false', push_reading_only:'false', updates_reading_only:'false', poll_interval_hours:'6', mangabaka_token:'', mu_enabled:'true', kmanga_email:'', kmanga_password:'', kmanga_recaptcha_token:'', komga_url:'', komga_api_key:'', idle_detection_enabled:'false', idle_threshold_days:'90', webhook_enabled:'false', webhook_url:'', default_page:'library', grid_density:'normal', show_source_badges:'true' },
 
     // Detail modal
     detailOpen: false, ds: null, ef: {}, detailReleases: [],
