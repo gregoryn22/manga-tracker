@@ -968,10 +968,13 @@
                 MU
                 <span class="poll-health" :class="pollHealthClass(s)" :title="pollHealthTitle(s)"></span>
               </div>
-              <!-- Poll error indicator (shown even without MU link, e.g. simulpub failures) -->
-              <div x-show="!s.mu_series_id && s.poll_failures > 0"
+              <!-- Poll error indicator for simulpub failures.
+                   Shown whenever a simulpub source is configured and has failures —
+                   regardless of whether a MU ID is also present — since poll_failures
+                   tracks simulpub health, not MU health. -->
+              <div x-show="s.simulpub_source && s.simulpub_source !== '' && s.poll_failures > 0"
                    class="chip-linked" style="background:rgba(239,68,68,0.15);color:var(--red)"
-                   :title="s.last_poll_error || 'Polling errors detected'">
+                   :title="s.last_poll_error || 'Simulpub polling errors detected'">
                 ⚠ <span x-text="s.poll_failures"></span>
               </div>
 
@@ -985,10 +988,10 @@
                   <div class="cover-placeholder">📖</div>
                 </template>
                 <!-- Rating overlay -->
-                <div class="cover-overlay" x-show="s.mu_rating">
+                <div class="cover-overlay" x-show="sf.show_ratings_on_cards !== 'false' && s.mu_rating">
                   <div class="cover-rating">
                     ★ <span x-text="s.mu_rating ? s.mu_rating.toFixed(1) : ''"></span>
-                    <span x-show="s.mu_rating_votes" class="rating-votes" style="font-size:0.62rem">(<span x-text="formatVotes(s.mu_rating_votes)"></span>)</span>
+                    <span x-show="sf.show_rating_votes !== 'false' && s.mu_rating_votes" class="rating-votes" style="font-size:0.62rem">(<span x-text="formatVotes(s.mu_rating_votes)"></span>)</span>
                   </div>
                 </div>
                 <!-- Simulpub source badge -->
@@ -1000,7 +1003,7 @@
 
               <div class="card-body">
                 <div class="card-title" x-text="s.title"></div>
-                <div class="card-meta">
+                <div class="card-meta" x-show="sf.show_card_meta !== 'false'">
                   <span x-text="s.series_type || 'manga'" style="text-transform:capitalize"></span>
                   <span x-text="s.year || ''"></span>
                 </div>
@@ -1011,15 +1014,16 @@
                     <span style="font-size:0.62rem;color:var(--text-muted)"> ← <span x-text="s.current_chapter || '0'"></span> read</span>
                   </template>
                 </div>
-                <div x-show="s.latest_release_group" class="text-xs text-muted" style="margin-top:1px" x-text="s.latest_release_group"></div>
+                <div x-show="sf.show_release_group !== 'false' && s.latest_release_group"
+                     class="text-xs text-muted" style="margin-top:1px" x-text="s.latest_release_group"></div>
 
                 <!-- Progress bar -->
-                <div class="progress-wrap" x-show="s.latest_chapter && s.current_chapter">
+                <div class="progress-wrap" x-show="sf.show_progress_bars !== 'false' && s.latest_chapter && s.current_chapter">
                   <div class="progress-bar" :class="{'green': s.has_update}" :style="`width: ${chapterProgress(s)}%`"></div>
                 </div>
 
                 <!-- Tags -->
-                <template x-if="(s.tags || []).length > 0">
+                <template x-if="sf.show_tags_on_cards !== 'false' && (s.tags || []).length > 0">
                   <div style="display:flex;gap:3px;flex-wrap:wrap;margin-top:6px">
                     <template x-for="tag in s.tags" :key="tag">
                       <span class="tag" style="font-size:0.65rem;padding:2px 6px" x-text="tag"></span>
@@ -1028,7 +1032,8 @@
                 </template>
 
                 <!-- Inline chapter controls -->
-                <div class="card-chapter-controls" @click.stop x-show="s.latest_chapter">
+                <div class="card-chapter-controls" @click.stop
+                     x-show="sf.show_card_controls !== 'false' && s.latest_chapter">
                   <span class="ch-label">Read:</span>
                   <input class="ch-read-input" type="number" min="0" step="1"
                          :value="s.current_chapter || '0'"
@@ -1077,9 +1082,11 @@
                           'chip-considering': !s.has_update && s.reading_status==='considering',
                         }"
                         x-text="s.has_update ? 'NEW' : (s.reading_status||'').replace('_',' ')"></span>
-                  <span x-text="(s.series_type || 'manga')" style="text-transform:capitalize"></span>
-                  <span x-show="s.year" x-text="s.year"></span>
-                  <span class="list-rating" x-show="s.mu_rating">★ <span x-text="s.mu_rating ? s.mu_rating.toFixed(1) : ''"></span></span>
+                  <span x-show="sf.show_card_meta !== 'false'" x-text="(s.series_type || 'manga')" style="text-transform:capitalize"></span>
+                  <span x-show="sf.show_card_meta !== 'false' && s.year" x-text="s.year"></span>
+                  <span class="list-rating" x-show="sf.show_ratings_on_cards !== 'false' && s.mu_rating">★ <span x-text="s.mu_rating ? s.mu_rating.toFixed(1) : ''"></span>
+                    <span x-show="sf.show_rating_votes !== 'false' && s.mu_rating_votes" style="font-size:0.6rem;opacity:0.7">(<span x-text="formatVotes(s.mu_rating_votes)"></span>)</span>
+                  </span>
                   <span x-show="s.mu_series_id" style="font-size:0.65rem;color:var(--accent);font-weight:600"
                         :title="pollHealthTitle(s)">
                     MU <span class="poll-health" :class="pollHealthClass(s)"></span>
@@ -1101,14 +1108,15 @@
               </div>
 
               <!-- Progress -->
-              <div class="list-progress" x-show="s.latest_chapter && s.current_chapter">
+              <div class="list-progress" x-show="sf.show_progress_bars !== 'false' && s.latest_chapter && s.current_chapter">
                 <div class="progress-wrap">
                   <div class="progress-bar" :class="{'green': s.has_update}" :style="`width: ${chapterProgress(s)}%`"></div>
                 </div>
               </div>
 
               <!-- Inline controls -->
-              <div class="list-controls" @click.stop x-show="s.latest_chapter">
+              <div class="list-controls" @click.stop
+                   x-show="sf.show_card_controls !== 'false' && s.latest_chapter">
                 <input class="ch-read-input" type="number" min="0" step="1"
                        :value="s.current_chapter || '0'"
                        @keydown.enter="quickSetChapter(s, $event.target.value); $event.target.blur()"
@@ -1173,7 +1181,7 @@
                     <div class="release-info">
                       <div class="release-title" x-text="r.series_title"></div>
                       <div class="release-ch" x-text="(r.volume ? 'Vol. ' + r.volume + '  ' : '') + 'Ch. ' + r.chapter"></div>
-                      <div class="release-group" x-text="r.group_name ? 'by ' + r.group_name : ''"></div>
+                      <div class="release-group" x-show="sf.show_release_group !== 'false'" x-text="r.group_name ? 'by ' + r.group_name : ''"></div>
                       <div style="margin-top:5px;display:flex;align-items:center;gap:6px">
                         <span class="list-status-chip"
                               :class="{
@@ -1222,7 +1230,7 @@
                       <div class="release-row" style="padding:8px 0">
                         <div class="release-info">
                           <div class="release-ch" x-text="releaseUnit(r) + ' ' + r.chapter + (r.volume ? ' · Vol. ' + r.volume : '')"></div>
-                          <div class="release-group" x-text="r.group_name ? 'by ' + r.group_name : ''"></div>
+                          <div class="release-group" x-show="sf.show_release_group !== 'false'" x-text="r.group_name ? 'by ' + r.group_name : ''"></div>
                         </div>
                         <div class="release-date" x-text="r.release_date"></div>
                       </div>
@@ -1933,12 +1941,21 @@
           </div>
 
           <div class="settings-row">
-            <label>Source Badges on Cards</label>
-            <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-              <input type="checkbox" :checked="sf.show_source_badges !== 'false'"
-                     @change="sf.show_source_badges = $event.target.checked ? 'true' : 'false'" />
-              <span class="text-sm" x-text="sf.show_source_badges !== 'false' ? 'Show platform banner (MangaPlus, K Manga, etc.)' : 'Hidden'"></span>
-            </label>
+            <label>Default View Mode</label>
+            <select class="input" x-model="sf.default_view_mode" style="width:200px"
+                    @change="viewMode = sf.default_view_mode">
+              <option value="grid">▦ Grid</option>
+              <option value="list">☰ List</option>
+            </select>
+          </div>
+
+          <div class="settings-row">
+            <label>Default Feed View</label>
+            <select class="input" x-model="sf.default_feed_grouped" style="width:200px"
+                    @change="feedGrouped = sf.default_feed_grouped === 'true'">
+              <option value="false">Flat (chronological)</option>
+              <option value="true">Grouped by series</option>
+            </select>
           </div>
 
           <div class="flex gap-2 mt-2">
@@ -1946,6 +1963,68 @@
           </div>
           <div class="text-xs text-muted mt-2">
             Customize your dashboard experience. Changes are applied immediately.
+          </div>
+        </div>
+
+        <!-- Library Card Display -->
+        <div class="card" style="padding:20px 24px;margin-bottom:16px">
+          <div class="settings-block-title">🃏 Library Card Display</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 24px">
+
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+              <input type="checkbox" :checked="sf.show_ratings_on_cards !== 'false'"
+                     @change="sf.show_ratings_on_cards = $event.target.checked ? 'true' : 'false'" />
+              <span class="text-sm">Rating overlay on cover</span>
+            </label>
+
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+              <input type="checkbox" :checked="sf.show_rating_votes !== 'false'"
+                     @change="sf.show_rating_votes = $event.target.checked ? 'true' : 'false'" />
+              <span class="text-sm">Vote count next to rating</span>
+            </label>
+
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+              <input type="checkbox" :checked="sf.show_source_badges !== 'false'"
+                     @change="sf.show_source_badges = $event.target.checked ? 'true' : 'false'" />
+              <span class="text-sm">Platform banner (MangaPlus, K Manga…)</span>
+            </label>
+
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+              <input type="checkbox" :checked="sf.show_progress_bars !== 'false'"
+                     @change="sf.show_progress_bars = $event.target.checked ? 'true' : 'false'" />
+              <span class="text-sm">Chapter progress bars</span>
+            </label>
+
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+              <input type="checkbox" :checked="sf.show_card_meta !== 'false'"
+                     @change="sf.show_card_meta = $event.target.checked ? 'true' : 'false'" />
+              <span class="text-sm">Type &amp; year metadata row</span>
+            </label>
+
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+              <input type="checkbox" :checked="sf.show_release_group !== 'false'"
+                     @change="sf.show_release_group = $event.target.checked ? 'true' : 'false'" />
+              <span class="text-sm">Release group name</span>
+            </label>
+
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+              <input type="checkbox" :checked="sf.show_tags_on_cards !== 'false'"
+                     @change="sf.show_tags_on_cards = $event.target.checked ? 'true' : 'false'" />
+              <span class="text-sm">User tags on cards</span>
+            </label>
+
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+              <input type="checkbox" :checked="sf.show_card_controls !== 'false'"
+                     @change="sf.show_card_controls = $event.target.checked ? 'true' : 'false'" />
+              <span class="text-sm">Inline chapter controls</span>
+            </label>
+
+          </div>
+          <div class="flex gap-2 mt-4">
+            <button class="btn btn-primary btn-sm" @click="saveSettings()">💾 Save</button>
+          </div>
+          <div class="text-xs text-muted mt-2">
+            Hiding elements reduces visual noise — useful with compact grid density.
           </div>
         </div>
 
@@ -2549,7 +2628,19 @@ function app() {
     activityFilter: '',
 
     // Settings form
-    sf: { pushover_user_key:'', pushover_app_token:'', pushover_enabled:'false', push_chapter_updates:'true', push_news:'false', push_reading_only:'false', updates_reading_only:'false', poll_interval_hours:'6', mangabaka_token:'', mu_enabled:'true', kmanga_email:'', kmanga_password:'', kmanga_recaptcha_token:'', komga_url:'', komga_api_key:'', idle_detection_enabled:'false', idle_threshold_days:'90', webhook_enabled:'false', webhook_url:'', default_page:'library', grid_density:'normal', show_source_badges:'true' },
+    sf: { pushover_user_key:'', pushover_app_token:'', pushover_enabled:'false', push_chapter_updates:'true', push_news:'false', push_reading_only:'false', updates_reading_only:'false', poll_interval_hours:'6', mangabaka_token:'', mu_enabled:'true', kmanga_email:'', kmanga_password:'', kmanga_recaptcha_token:'', komga_url:'', komga_api_key:'', idle_detection_enabled:'false', idle_threshold_days:'90', webhook_enabled:'false', webhook_url:'', default_page:'library', grid_density:'normal',
+      // ── Display preferences ────────────────────────────────────────────
+      show_source_badges:    'true',   // platform banner (MangaPlus, K Manga, etc.) on cards
+      show_ratings_on_cards: 'true',   // ★ score overlay on cover image
+      show_rating_votes:     'true',   // vote count next to rating (e.g. "(2.4K)")
+      show_progress_bars:    'true',   // chapter progress bars on cards
+      show_card_meta:        'true',   // type + year row on grid cards
+      show_release_group:    'true',   // scanlation/release group name on cards + feed
+      show_tags_on_cards:    'true',   // user tag chips on library cards
+      show_card_controls:    'true',   // inline "Read:" input + catch-up button on cards
+      default_view_mode:     'grid',   // persisted view mode: 'grid' or 'list'
+      default_feed_grouped:  'false',  // persisted feed grouping: 'true' or 'false'
+    },
 
     // Detail modal
     detailOpen: false, ds: null, ef: {}, detailReleases: [],
@@ -2593,8 +2684,11 @@ function app() {
     },
 
     async init() {
-      // Load settings first (needed for idle detection, etc.)
+      // Load settings first (needed for idle detection, display prefs, etc.)
       try { const d = await this.api('/api/settings'); this.sf = {...this.sf,...d}; } catch(e) {}
+      // Apply persisted view/feed preferences immediately after settings load
+      this.viewMode    = this.sf.default_view_mode    || 'grid';
+      this.feedGrouped = this.sf.default_feed_grouped === 'true';
       await this.loadLibrary();
       await this.pollUnreadCount();
       // Load appropriate page based on default_page setting
@@ -2652,13 +2746,16 @@ function app() {
         // Group by role
         const groups = {};
         for (const r of roles) {
+          const name = (r.name || '').trim();
+          if (!name) continue;           // skip malformed entries
           const role = r.role || 'Author';
           if (!groups[role]) groups[role] = [];
-          groups[role].push(r.name);
+          groups[role].push(name);
         }
-        return Object.entries(groups)
-          .map(([role, names]) => `<span>${role}:</span> <strong>${names.join(', ')}</strong>`)
-          .join(' &nbsp;·&nbsp; ');
+        const parts = Object.entries(groups)
+          .filter(([, names]) => names.length > 0)
+          .map(([role, names]) => `<span>${role}:</span> <strong>${names.join(', ')}</strong>`);
+        if (parts.length > 0) return parts.join(' &nbsp;·&nbsp; ');
       }
       const authors = s.authors || [];
       if (authors.length > 0) {

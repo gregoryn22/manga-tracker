@@ -7,7 +7,7 @@ GET /api/releases/feed      — live MU global feed + local DB releases (last 24
                               filtered to tracked series, merged and deduplicated
 """
 import logging
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -120,9 +120,11 @@ def live_feed(db: Session = Depends(get_db)):
             })
 
     # ── 2. Local DB releases — last 24 hours ────────────────────────────────
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
-    # created_at may be stored as naive UTC; compare against naive cutoff too
-    cutoff_naive = cutoff.replace(tzinfo=None)
+    # Release.created_at uses `default=datetime.utcnow` (naive UTC, no tzinfo).
+    # We must compare against a naive datetime — stripping tzinfo from the
+    # aware cutoff keeps the arithmetic correct without needing to migrate the
+    # column to timezone-aware storage.
+    cutoff_naive = datetime.utcnow() - timedelta(hours=24)
 
     local_releases = (
         db.query(Release)
