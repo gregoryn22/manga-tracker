@@ -60,7 +60,30 @@ def live_feed(db: Session = Depends(get_db)):
     Results are sorted newest-first.
     """
     # ── Build lookups for all tracked series ────────────────────────────────
-    all_tracked = db.query(TrackedSeries).all()
+    # Select only the columns needed for feed construction — avoids loading
+    # heavy text columns (description, genres, notes, etc.) for every series.
+    all_tracked = db.query(
+        TrackedSeries.id,
+        TrackedSeries.mu_series_id,
+        TrackedSeries.title,
+        TrackedSeries.cover_url,
+        TrackedSeries.mu_cover_url,
+        TrackedSeries.mu_url,
+        TrackedSeries.current_chapter,
+        TrackedSeries.reading_status,
+    ).all()
+
+    # Build lightweight namedtuple-like dicts for the feed
+    class _SeriesProxy:
+        __slots__ = ("id", "mu_series_id", "title", "cover_url", "mu_cover_url",
+                     "mu_url", "current_chapter", "reading_status")
+        def __init__(self, row):
+            for attr, val in zip(self.__slots__, row):
+                setattr(self, attr, val)
+        def best_cover(self):
+            return self.cover_url or self.mu_cover_url
+
+    all_tracked = [_SeriesProxy(row) for row in all_tracked]
     series_map = {s.id: s for s in all_tracked}                        # id → series
     mu_map     = {s.mu_series_id: s for s in all_tracked if s.mu_series_id}  # mu_id → series
 

@@ -42,16 +42,17 @@ EXPOSED_KEYS = [
 def get_settings(db: Session = Depends(get_db)):
     rows = db.query(Settings).filter(Settings.key.in_(EXPOSED_KEYS)).all()
     result = {r.key: r.value for r in rows}
-    # Mask sensitive values in response
-    token = result.get("mangabaka_token", "")
-    if token and len(token) > 12:
-        result["mangabaka_token"] = token[:6] + "..." + token[-6:]
-    pw = result.get("kmanga_password", "")
-    if pw:
-        result["kmanga_password"] = "••••••••"
-    kg_key = result.get("komga_api_key", "")
-    if kg_key and len(kg_key) > 12:
-        result["komga_api_key"] = kg_key[:6] + "..." + kg_key[-6:]
+    # Mask sensitive values with a fixed-length placeholder so key length
+    # is never revealed (avoids partial-reconstruction attacks).
+    _MASK = "••••••••••••"
+    if result.get("mangabaka_token"):
+        result["mangabaka_token"] = _MASK
+    if result.get("kmanga_password"):
+        result["kmanga_password"] = _MASK
+    if result.get("komga_api_key"):
+        result["komga_api_key"] = _MASK
+    if result.get("pushover_app_token"):
+        result["pushover_app_token"] = _MASK
     return result
 
 
@@ -79,25 +80,44 @@ class UpdateSettingsRequest(BaseModel):
     grid_density: str | None = None
 
 
+# Sensitive keys that are masked in GET responses.  If a PATCH request sends
+# back the exact mask placeholder, that means the user left the field unchanged —
+# we must NOT overwrite the real stored value with the placeholder string.
+_MASKED_KEYS = {"mangabaka_token", "kmanga_password", "komga_api_key", "pushover_app_token"}
+_MASK = "••••••••••••"
+
+
 @router.patch("")
 def update_settings(req: UpdateSettingsRequest, db: Session = Depends(get_db)):
     updates = req.model_dump(exclude_none=True)
     for key, value in updates.items():
-        if key in EXPOSED_KEYS:
-            set_setting(db, key, value)
+        if key not in EXPOSED_KEYS:
+            continue
+        # Skip masked placeholder — user didn't change this field
+        if key in _MASKED_KEYS and value == _MASK:
+            continue
+        set_setting(db, key, value)
 
     # If K Manga credentials changed, clear cached session cookies so next poll re-logs in
-    if "kmanga_email" in updates or "kmanga_password" in updates:
+    if "kmanga_email" in updates or ("kmanga_password" in updates and updates["kmanga_password"] != _MASK):
         set_setting(db, "kmanga_cookies", "")
         logger.info("K Manga credentials updated — session cookies cleared")
 
-    # If poll interval changed, reschedule
+    # If poll interval changed, validate and reschedule
     if "poll_interval_hours" in updates:
         try:
             hours = float(updates["poll_interval_hours"])
+            if hours <= 0:
+                raise HTTPException(
+                    status_code=422,
+                    detail="poll_interval_hours must be a positive number (e.g. 1, 6, 24)",
+                )
             start_scheduler(hours)
         except ValueError:
-            pass
+            raise HTTPException(
+                status_code=422,
+                detail="poll_interval_hours must be a valid number",
+            )
 
     return {"success": True}
 

@@ -385,6 +385,15 @@ def _migrate_db():
                 f"CREATE INDEX IF NOT EXISTS {idx_name} ON {table} ({columns})"
             ))
 
+        # Unique constraint on releases to prevent duplicate chapter entries.
+        # Uses a partial-style unique index: NULL group_name is treated as a
+        # distinct slot so it won't block simulpub-only entries (group = NULL).
+        conn.execute(text("""
+            CREATE UNIQUE INDEX IF NOT EXISTS
+                uq_releases_series_chapter_group
+            ON releases (series_id, chapter, COALESCE(group_name, ''))
+        """))
+
         conn.commit()
 
 
