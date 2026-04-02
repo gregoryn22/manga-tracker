@@ -1,0 +1,93 @@
+/* ── Utilities ─────────────────────────────────────────────────────── */
+/* Loaded LAST so these always win in cascade ties.                    */
+
+/* Layout */
+.flex { display: flex; }
+.flex-wrap { flex-wrap: wrap; }
+.flex-col { flex-direction: column; }
+.items-center { align-items: center; }
+.items-start { align-items: flex-start; }
+.justify-between { justify-content: space-between; }
+.justify-center { justify-content: center; }
+.flex-1 { flex: 1; min-width: 0; }
+.flex-shrink-0 { flex-shrink: 0; }
+
+/* Gap */
+.gap-1 { gap: var(--sp-1); }
+.gap-2 { gap: var(--sp-2); }
+.gap-3 { gap: var(--sp-3); }
+.gap-4 { gap: var(--sp-4); }
+
+/* Margin */
+.ml-auto { margin-left: auto; }
+.mt-1 { margin-top: var(--sp-1); }
+.mt-2 { margin-top: var(--sp-2); }
+.mt-3 { margin-top: var(--sp-3); }
+.mt-4 { margin-top: var(--sp-4); }
+.mb-1 { margin-bottom: var(--sp-1); }
+.mb-2 { margin-bottom: var(--sp-2); }
+.mb-3 { margin-bottom: var(--sp-3); }
+.mb-4 { margin-bottom: var(--sp-4); }
+
+/* Typography */
+.text-2xs { font-size: var(--fs-2xs); }
+.text-xs  { font-size: var(--fs-xs); }
+.text-sm  { font-size: var(--fs-base); }
+.text-md  { font-size: var(--fs-md); }
+.text-lg  { font-size: var(--fs-lg); }
+
+.text-muted  { color: var(--text-muted); }
+.text-dim    { color: var(--text-dim); }
+.text-green  { color: var(--green); }
+.text-accent { color: var(--accent); }
+.text-yellow { color: var(--yellow); }
+
+.fw-400 { font-weight: 400; }
+.fw-600 { font-weight: 600; }
+
+.capitalize { text-transform: capitalize; }
+
+/* Text alignment */
+.text-right { text-align: right; }
+.text-center { text-align: center; }
+
+/* Font style */
+.italic { font-style: italic; }
+.font-mono { font-family: monospace; }
+
+/* Line height */
+.leading-relaxed { line-height: 1.5; }
+.leading-snug { line-height: 1.6; }
+
+/* Display */
+.hidden { display: none; }
+.block { display: block; }
+.grid { display: grid; }
+
+/* Positioning */
+.mx-auto { margin-left: auto; margin-right: auto; }
+.self-center { align-self: center; }
+
+/* Cursor */
+.cursor-pointer { cursor: pointer; }
+
+/* Opacity */
+.opacity-70 { opacity: 0.7; }
+
+/* Border color overrides */
+.border-yellow { border-color: var(--yellow); }
+.border-green  { border-color: var(--green); }
+.border-red    { border-color: var(--red); }
+
+/* Accent checkbox */
+.accent-check { accent-color: var(--accent); }
+
+/* Width helpers */
+.w-full { width: 100%; }
+
+/* Settings-specific helpers */
+.input-compact { width: 100px; padding: 4px 8px; font-size: var(--fs-base); }
+.input-mid { width: 140px; }
+.input-wide { width: 220px; }
+.settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 4px; }
+.detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 24px; }
