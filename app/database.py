@@ -385,9 +385,32 @@ def _migrate_db():
                 f"CREATE INDEX IF NOT EXISTS {idx_name} ON {table} ({columns})"
             ))
 
-        # Unique constraint on releases to prevent duplicate chapter entries.
-        # Uses a partial-style unique index: NULL group_name is treated as a
-        # distinct slot so it won't block simulpub-only entries (group = NULL).
+        # Unique index on (series_id, chapter, COALESCE(group_name, '')).
+        # NULL and empty group_name both map to '' — they share one slot per series/chapter.
+        uq_idx = conn.execute(text(
+            "SELECT 1 FROM sqlite_master WHERE type='index' "
+            "AND name='uq_releases_series_chapter_group'"
+        )).fetchone()
+        if not uq_idx:
+            conn.execute(text("""
+                DELETE FROM releases WHERE id IN (
+                    SELECT id FROM (
+                        SELECT id,
+                            ROW_NUMBER() OVER (
+                                PARTITION BY series_id, chapter, COALESCE(group_name, '')
+                                ORDER BY (mu_release_id IS NULL), id DESC
+                            ) AS rn
+                        FROM releases
+                    ) AS ranked
+                    WHERE ranked.rn > 1
+                )
+            """))
+            removed = conn.execute(text("SELECT changes()")).scalar_one()
+            if removed:
+                _log.info(
+                    "DB migration: removed %s duplicate release row(s) before unique index",
+                    removed,
+                )
         conn.execute(text("""
             CREATE UNIQUE INDEX IF NOT EXISTS
                 uq_releases_series_chapter_group

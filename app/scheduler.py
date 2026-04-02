@@ -35,6 +35,7 @@ import threading
 from datetime import datetime
 
 from apscheduler.schedulers.background import BackgroundScheduler
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from .database import Notification, Release, SessionLocal, TrackedSeries, get_setting, set_setting
@@ -434,7 +435,7 @@ def _check_mu_series(
 def _process_release(db: Session, series: TrackedSeries, rec: dict):
     """
     Given a MU release record, decide if it's new and notify if so.
-    Deduplicates by mu_release_id.
+    Deduplicates by mu_release_id, then by (series_id, chapter, coalesced group_name).
     """
     mu_release_id = rec.get("id")
     chapter = rec.get("chapter")
@@ -454,6 +455,14 @@ def _process_release(db: Session, series: TrackedSeries, rec: dict):
         # Not newer than what we know — but still log if brand new release record
         if not mu_release_id:
             return
+
+    gn_key = group_name or ""
+    if db.query(Release).filter(
+        Release.series_id == series.id,
+        Release.chapter == chapter,
+        func.coalesce(Release.group_name, "") == gn_key,
+    ).first():
+        return
 
     # Log the release
     rel = Release(
