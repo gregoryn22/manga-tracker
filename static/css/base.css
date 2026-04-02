@@ -1,0 +1,38 @@
+/* ── Base / Reset ──────────────────────────────────────────────────── */
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { font-family: 'Inter', sans-serif; font-size: 15px; }
+body { background: var(--bg); color: var(--text); min-height: 100vh; }
+
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+[x-cloak] { display: none !important; }
+
+/* ── App layout ───────────────────────────────────────────────────── */
+.app { display: flex; height: 100vh; overflow: hidden; }
+
+/* ── Keyframes ────────────────────────────────────────────────────── */
+@keyframes slideIn {
+  from { transform: translateX(20px); opacity: 0; }
+  to   { transform: translateX(0); opacity: 1; }
+}
+@keyframes rotate {
+  to { transform: rotate(360deg); }
+}
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+/* ── Responsive ───────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .sidebar { display: none; position: fixed; left: 0; top: 0; bottom: 0; z-index: 50; }
+  .sidebar.open { display: flex; }
+  .sidebar-overlay.open { display: block; }
+  .hamburger { display: block; }
+  .series-grid { grid-template-columns: repeat(auto-fill, minmax(140px,1fr)); }
+  .stats-row { grid-template-columns: repeat(2,1fr); }
+}
