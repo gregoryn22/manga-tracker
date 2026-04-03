@@ -24,6 +24,7 @@ Layer 3 (Simulpub direct — for officially licensed series dropped by scanlator
   - 'kmanga':    polls K Manga API; cookie-based auth with x-kmanga-hash signing.
   - 'mangaup':   polls MangaUp! (Square Enix) via __NEXT_DATA__ HTML parsing; no auth.
   - 'mangadex':  polls MangaDex REST API (public, no auth); UUID manga IDs.
+  - 'weebdex':   polls WeebDex REST API (public, no auth); string manga IDs.
   - 'custom':    skipped entirely — user manages the chapter number manually.
   - Only updates mu_latest_chapter if the simulpub source reports a higher chapter
     than what Layers 1/2 already found (MU data is preferred when both are present).
@@ -58,6 +59,8 @@ from .kmanga import (
 from .mangaplus import get_latest_chapter as mp_get_latest_chapter
 from .mangadex import MangaDexError, MangaDexNotFound, MangaDexRateLimited
 from .mangadex import get_latest_chapter as mdx_get_latest_chapter
+from .weebdex import WeebDexError, WeebDexNotFound, WeebDexRateLimited
+from .weebdex import get_latest_chapter as wdx_get_latest_chapter
 from .komga import KomgaClient, KomgaAuthError, KomgaConnectionError, KomgaError, KomgaNotFound
 from .mangaup import MangaUpError, MangaUpNotFound
 from .mangaup import get_latest_chapter as mup_get_latest_chapter
@@ -652,6 +655,11 @@ def _poll_via_simulpub(db: Session, series_list: list[TrackedSeries]):
         logger.info(f"Layer 3: MangaDex check for {len(mdx_series)} series")
         _poll_mangadex(db, mdx_series)
 
+    wdx_series = [s for s in active if s.simulpub_source == "weebdex"]
+    if wdx_series:
+        logger.info(f"Layer 3: WeebDex check for {len(wdx_series)} series")
+        _poll_weebdex(db, wdx_series)
+
     kg_series = [s for s in active if s.simulpub_source == "komga"]
     if kg_series:
         logger.info(f"Layer 3: Komga check for {len(kg_series)} series")
@@ -1065,6 +1073,95 @@ def _poll_mangadex(db: Session, series_list: list[TrackedSeries]):
             db.commit()
         except Exception as e:
             logger.error(f"MangaDex unexpected error for '{series.title}': {e}")
+            _mark_poll_failure(series, str(e))
+            db.commit()
+
+
+def _poll_weebdex(db: Session, series_list: list[TrackedSeries]):
+    """
+    Poll the WeebDex public REST API for each series and notify on new chapters.
+
+    Manga IDs are strings stored in simulpub_id.  No authentication required.
+    Chapter numbers come directly from the API as strings ("68", "19.6", etc.).
+    """
+    for series in series_list:
+        try:
+            chapter = wdx_get_latest_chapter(series.simulpub_id)
+            if not chapter:
+                logger.debug(
+                    f"WeebDex: no chapter data for '{series.title}' (id={series.simulpub_id})"
+                )
+                series.last_checked = datetime.utcnow()
+                db.commit()
+                continue
+
+            if chapter_is_newer(chapter, series.mu_latest_chapter):
+                if _simulpub_release_exists(db, series.id, chapter, "WeebDex"):
+                    logger.debug(f"WeebDex: release already logged for '{series.title}' Ch. {chapter}")
+                    series.last_checked = datetime.utcnow()
+                    db.commit()
+                    continue
+
+                old_chapter = series.mu_latest_chapter
+                series.mu_latest_chapter    = chapter
+                series.latest_release_date  = datetime.utcnow().strftime("%Y-%m-%d")
+                series.latest_release_group = "WeebDex"
+
+                ch_str  = f"Ch. {chapter}"
+                message = f"{series.title} — {ch_str} · WeebDex"
+
+                wdx_url = f"https://weebdex.org/manga/{series.simulpub_id}"
+                rel = Release(
+                    series_id=series.id,
+                    mu_series_id=series.mu_series_id,
+                    series_title=series.title,
+                    chapter=chapter,
+                    volume=None,
+                    release_date=series.latest_release_date,
+                    group_name="WeebDex",
+                    mu_release_id=None,
+                    cover_url=series.best_cover(),
+                    mu_url=wdx_url,
+                )
+                db.add(rel)
+
+                _send_chapter_notification(
+                    db=db,
+                    series=series,
+                    message=message,
+                    chapter=chapter,
+                    volume=None,
+                    group_name="WeebDex",
+                    release_date=series.latest_release_date,
+                    old_chapter=old_chapter,
+                )
+                logger.info(f"✓ WeebDex new chapter: {message}")
+            else:
+                logger.debug(
+                    f"WeebDex: '{series.title}' still at Ch. {chapter} "
+                    f"(known: {series.mu_latest_chapter})"
+                )
+
+            _mark_poll_success(series)
+            series.last_checked = datetime.utcnow()
+            db.commit()
+
+        except WeebDexNotFound:
+            logger.error(
+                f"WeebDex manga not found for '{series.title}' (id={series.simulpub_id})"
+                f" — check the ID in series settings"
+            )
+            _mark_poll_failure(series, f"Manga not found (id={series.simulpub_id})")
+            db.commit()
+        except WeebDexRateLimited:
+            logger.warning("WeebDex rate limit hit — skipping remaining series this run")
+            break
+        except WeebDexError as e:
+            logger.error(f"WeebDex poll failed for '{series.title}': {e}")
+            _mark_poll_failure(series, str(e))
+            db.commit()
+        except Exception as e:
+            logger.error(f"WeebDex unexpected error for '{series.title}': {e}")
             _mark_poll_failure(series, str(e))
             db.commit()
 

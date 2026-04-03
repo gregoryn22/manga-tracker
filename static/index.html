@@ -507,6 +507,7 @@
     .p-km  { background: rgba(30,120,255,0.2);  color: #4d9dff; }
     .p-mup { background: rgba(0,190,100,0.2);   color: #2ed87a; }
     .p-mdx { background: rgba(240,60,40,0.2);   color: #f05a46; }
+    .p-wdx { background: rgba(120,60,220,0.2);  color: #9b6fe0; }
 
     /* ── Simulpub source badge (on library cards) ───────── */
     .source-badge {
@@ -520,6 +521,7 @@
     .source-badge.src-kmanga     { background: rgba(30,120,255,0.85);  color: #fff; }
     .source-badge.src-mangaup    { background: rgba(0,190,100,0.85);   color: #fff; }
     .source-badge.src-mangadex   { background: rgba(240,60,40,0.85);   color: #fff; }
+    .source-badge.src-weebdex    { background: rgba(120,60,220,0.85);  color: #fff; }
     .source-badge.src-komga      { background: rgba(100,160,60,0.85);  color: #fff; }
     .source-badge.src-custom     { background: rgba(120,120,120,0.7);  color: #fff; }
 
@@ -997,7 +999,7 @@
                 <!-- Simulpub source badge -->
                 <template x-if="sf.show_source_badges !== 'false' && s.simulpub_source && s.simulpub_source !== 'custom' && s.simulpub_source !== ''">
                   <div class="source-badge" :class="'src-' + s.simulpub_source"
-                       x-text="{'mangaplus':'MangaPlus','kmanga':'K Manga','mangaup':'MangaUp!','mangadex':'MangaDex','komga':'Komga'}[s.simulpub_source] || s.simulpub_source"></div>
+                       x-text="{'mangaplus':'MangaPlus','kmanga':'K Manga','mangaup':'MangaUp!','mangadex':'MangaDex','weebdex':'WeebDex','komga':'Komga'}[s.simulpub_source] || s.simulpub_source"></div>
                 </template>
               </div>
 
@@ -1093,8 +1095,8 @@
                   </span>
                   <template x-if="sf.show_source_badges !== 'false' && s.simulpub_source && s.simulpub_source !== 'custom' && s.simulpub_source !== ''">
                     <span class="provider-chip"
-                          :class="{'p-mp':s.simulpub_source==='mangaplus','p-km':s.simulpub_source==='kmanga','p-mup':s.simulpub_source==='mangaup','p-mdx':s.simulpub_source==='mangadex','p-kg':s.simulpub_source==='komga'}"
-                          x-text="{'mangaplus':'MangaPlus','kmanga':'K Manga','mangaup':'MangaUp!','mangadex':'MangaDex','komga':'Komga'}[s.simulpub_source] || s.simulpub_source"></span>
+                          :class="{'p-mp':s.simulpub_source==='mangaplus','p-km':s.simulpub_source==='kmanga','p-mup':s.simulpub_source==='mangaup','p-mdx':s.simulpub_source==='mangadex','p-wdx':s.simulpub_source==='weebdex','p-kg':s.simulpub_source==='komga'}"
+                          x-text="{'mangaplus':'MangaPlus','kmanga':'K Manga','mangaup':'MangaUp!','mangadex':'MangaDex','weebdex':'WeebDex','komga':'Komga'}[s.simulpub_source] || s.simulpub_source"></span>
                   </template>
                   <span class="chip-idle list-status-chip" x-show="isIdle(s) && sf.idle_detection_enabled==='true'">💤 idle</span>
                 </div>
@@ -2112,6 +2114,7 @@
               <span class="provider-chip p-km"  x-show="ds.simulpub_source === 'kmanga'">K Manga</span>
               <span class="provider-chip p-mup" x-show="ds.simulpub_source === 'mangaup'">MangaUp!</span>
               <span class="provider-chip p-mdx" x-show="ds.simulpub_source === 'mangadex'">MangaDex</span>
+              <span class="provider-chip p-wdx" x-show="ds.simulpub_source === 'weebdex'">WeebDex</span>
               <span class="provider-chip p-kg"  x-show="ds.simulpub_source === 'komga'">Komga</span>
               <span class="provider-chip p-custom" x-show="ds.simulpub_source === 'custom'">Manual</span>
             </div>
@@ -2249,6 +2252,7 @@
               <option value="kmanga">🔵 K Manga / Kodansha (simulpub)</option>
               <option value="mangaup">🟢 MangaUp! / Square Enix (simulpub)</option>
               <option value="mangadex">🔴 MangaDex</option>
+              <option value="weebdex">🟣 WeebDex</option>
               <option value="komga">📚 Komga (self-hosted)</option>
               <option value="custom">✏️ Manual / Custom</option>
             </select>
