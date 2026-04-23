@@ -31,6 +31,8 @@ EXPOSED_KEYS = [
     "idle_detection_enabled",
     "idle_threshold_days",
     "updates_reading_only",
+    "poll_failure_push_enabled",
+    "poll_failure_push_threshold",
     "webhook_enabled",
     "webhook_url",
     "default_page",
@@ -74,6 +76,8 @@ class UpdateSettingsRequest(BaseModel):
     idle_detection_enabled: str | None = None
     idle_threshold_days: str | None = None
     updates_reading_only: str | None = None
+    poll_failure_push_enabled: str | None = None
+    poll_failure_push_threshold: str | None = None
     webhook_enabled: str | None = None
     webhook_url: str | None = None
     default_page: str | None = None
