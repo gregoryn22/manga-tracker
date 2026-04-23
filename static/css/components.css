@@ -160,8 +160,11 @@ textarea.input { resize: vertical; }
 .chip-hold        { background: var(--yellow); color: #111; }
 .chip-dropped     { background: var(--red); color: white; }
 .chip-done        { background: var(--text-muted); color: white; }
-.chip-linked {
+.chip-right-stack {
   position: absolute; top: 7px; right: 7px;
+  display: flex; flex-direction: column; align-items: flex-end; gap: 4px;
+}
+.chip-linked {
   background: var(--overlay-light); backdrop-filter: blur(4px);
   font-size: var(--fs-3xs); padding: var(--sp-0-5) var(--sp-1-5); border-radius: var(--radius-sm);
   color: var(--accent); font-weight: 600;

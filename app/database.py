@@ -449,6 +449,9 @@ def _seed_settings():
             "komga_api_key": os.getenv("KOMGA_API_KEY", ""),
             # Dashboard behaviour
             "updates_reading_only": "false",
+            # Poll failure push notifications
+            "poll_failure_push_enabled": "false",
+            "poll_failure_push_threshold": "5",
             # Discord/Slack webhook
             "webhook_enabled": "false",
             "webhook_url": "",
