@@ -31,6 +31,8 @@ EXPOSED_KEYS = [
     "idle_detection_enabled",
     "idle_threshold_days",
     "updates_reading_only",
+    "poll_failure_push_enabled",
+    "poll_failure_push_threshold",
     "webhook_enabled",
     "webhook_url",
     "default_page",
@@ -74,6 +76,8 @@ class UpdateSettingsRequest(BaseModel):
     idle_detection_enabled: str | None = None
     idle_threshold_days: str | None = None
     updates_reading_only: str | None = None
+    poll_failure_push_enabled: str | None = None
+    poll_failure_push_threshold: str | None = None
     webhook_enabled: str | None = None
     webhook_url: str | None = None
     default_page: str | None = None
@@ -229,6 +233,19 @@ def test_komga(db: Session = Depends(get_db)):
         return {"success": True, "message": f"Connected! Your Komga library has {total} series."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Komga connection failed: {e}")
+
+
+@router.get("/poll/status")
+def poll_status():
+    """Return current scheduler state: running flag, last start/finish, series count."""
+    from ..scheduler import _poll_state
+    state = _poll_state
+    return {
+        "running":        state["running"],
+        "last_started":   state["last_started"].isoformat() if state["last_started"] else None,
+        "last_finished":  state["last_finished"].isoformat() if state["last_finished"] else None,
+        "total_series":   state["total_series"],
+    }
 
 
 @router.post("/poll-now")

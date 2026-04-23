@@ -62,7 +62,7 @@ function app() {
     komgaLoading: false, komgaBrowseSearch: '',
     komgaReadFilter: 'IN_PROGRESS', // IN_PROGRESS, UNREAD, READ, or '' for all
     komgaSelected: [], komgaTrackMode: 'chapter', komgaSyncProgress: true,
-    komgaImporting: false,
+    komgaImporting: false, komgaImportProgress: null,
 
     // Polling
     polling: false,
@@ -382,7 +382,17 @@ function app() {
 
     async bulkDelete() {
       const count = this.bulkSelected.length;
-      if (!confirm(`Delete ${count} series from your library? This cannot be undone.`)) return;
+      let msg;
+      if (count <= 5) {
+        const titles = this.bulkSelected
+          .map(id => this.library.find(s => s.id === id)?.title || `#${id}`)
+          .map(t => `• ${t}`)
+          .join('\n');
+        msg = `Delete ${count} series from your library? This cannot be undone.\n\n${titles}`;
+      } else {
+        msg = `Delete ${count} series from your library? This cannot be undone.`;
+      }
+      if (!confirm(msg)) return;
       try {
         let deleted = 0;
         for (const id of this.bulkSelected) {
@@ -518,6 +528,14 @@ function app() {
     async importFromKomga() {
       if (this.komgaSelected.length === 0) return;
       this.komgaImporting = true;
+      this.komgaImportProgress = null;
+      // Poll progress endpoint every 600ms while import runs
+      const pollInterval = setInterval(async () => {
+        try {
+          const p = await this.api('/api/komga/import/progress');
+          if (p.running) this.komgaImportProgress = p;
+        } catch {}
+      }, 600);
       try {
         const items = this.komgaSelected.map(id => ({
           komga_series_id: id,
@@ -536,7 +554,9 @@ function app() {
       } catch(e) {
         this.toast(e.detail || 'Import failed', 'error');
       } finally {
+        clearInterval(pollInterval);
         this.komgaImporting = false;
+        this.komgaImportProgress = null;
       }
     },
 

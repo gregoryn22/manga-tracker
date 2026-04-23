@@ -9,10 +9,12 @@ Push behaviour is governed by three settings (all toggled in the UI):
                           Pushover; series on hold, considering, etc. create in-app
                           notifications but stay silent on the phone (default: false)
 """
+import ipaddress
 import json
 import logging
 import threading
 from datetime import datetime
+from urllib.parse import urlparse
 
 import httpx
 from sqlalchemy.orm import Session
@@ -221,6 +223,32 @@ def notify_chapter_update(
     )
 
 
+def _validate_webhook_url(url: str) -> None:
+    """Raise ValueError if the URL could be used for SSRF (private/loopback/reserved IPs)."""
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        raise ValueError("Invalid URL format")
+
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError("Webhook URL must use http or https")
+
+    hostname = parsed.hostname or ""
+    if not hostname:
+        raise ValueError("Webhook URL missing hostname")
+
+    # Block literal private/loopback/reserved IPs — domain names pass through
+    # (full DNS rebinding prevention would require an egress proxy)
+    try:
+        ip = ipaddress.ip_address(hostname)
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast:
+            raise ValueError("Webhook URL cannot target private or internal addresses")
+    except ValueError as e:
+        if "Webhook URL" in str(e):
+            raise
+        # hostname is a domain name — allow it
+
+
 def send_webhook_raw(webhook_url: str, title: str, message: str, url: str | None = None):
     """
     Send a formatted message to a Discord or Slack webhook.
@@ -228,6 +256,8 @@ def send_webhook_raw(webhook_url: str, title: str, message: str, url: str | None
     Detects the webhook type from the URL and formats accordingly.
     Raises on failure — callers should handle exceptions.
     """
+    _validate_webhook_url(webhook_url)
+
     if "discord.com/api/webhooks" in webhook_url or "discordapp.com/api/webhooks" in webhook_url:
         payload = {
             "embeds": [{

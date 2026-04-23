@@ -25,7 +25,7 @@ def recent_releases(limit: int = 50, db: Session = Depends(get_db)):
     releases = (
         db.query(Release)
         .order_by(Release.release_date.desc(), Release.id.desc())
-        .limit(limit)
+        .limit(min(limit, 500))
         .all()
     )
     return [r.to_dict() for r in releases]
