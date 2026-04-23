@@ -78,10 +78,38 @@ def _mark_poll_success(series: TrackedSeries):
     series.last_poll_success = datetime.utcnow()
 
 
-def _mark_poll_failure(series: TrackedSeries, error: str):
+def _mark_poll_failure(series: TrackedSeries, error: str, db: "Session | None" = None):
     """Increment poll failure counter and record the error message."""
     series.poll_failures = (series.poll_failures or 0) + 1
     series.last_poll_error = error
+    if db is not None:
+        _maybe_notify_poll_failure(db, series)
+
+
+def _maybe_notify_poll_failure(db: "Session", series: TrackedSeries):
+    """Send a Pushover alert when poll_failures hits the configured threshold (or a power-of-2 multiple of it)."""
+    from .database import get_setting
+    if get_setting(db, "poll_failure_push_enabled", "false") != "true":
+        return
+    threshold = int(get_setting(db, "poll_failure_push_threshold", "5") or 5)
+    failures = series.poll_failures or 0
+    # Fire at threshold, then at each doubling (threshold*2, threshold*4, ...)
+    if failures < threshold or (failures % threshold) != 0:
+        return
+    # Only fire at exact powers of 2 of the threshold to avoid spamming
+    ratio = failures // threshold
+    if ratio & (ratio - 1) != 0:
+        return
+    user_key, app_token, pushover_enabled = get_pushover_creds(db)
+    if not pushover_enabled or not user_key or not app_token:
+        return
+    send_pushover(
+        user_key=user_key,
+        app_token=app_token,
+        title="Polling failure",
+        message=f"{series.title} — {failures} consecutive poll failures\n{series.last_poll_error or ''}".strip(),
+        priority=0,
+    )
 
 
 # Max consecutive failures before a series is skipped entirely until manual refresh
@@ -721,7 +749,7 @@ def _poll_mangaplus(db: Session, series_list: list[TrackedSeries]):
             db.commit()
         except Exception as e:
             logger.error(f"MangaPlus poll failed for '{series.title}': {e}")
-            _mark_poll_failure(series, str(e))
+            _mark_poll_failure(series, str(e), db)
             db.commit()
 
 
@@ -883,11 +911,11 @@ def _poll_kmanga(db: Session, series_list: list[TrackedSeries]):
             break
         except KMangaError as e:
             logger.error(f"K Manga poll failed for '{series.title}': {e}")
-            _mark_poll_failure(series, str(e))
+            _mark_poll_failure(series, str(e), db)
             db.commit()
         except Exception as e:
             logger.error(f"K Manga unexpected error for '{series.title}': {e}")
-            _mark_poll_failure(series, str(e))
+            _mark_poll_failure(series, str(e), db)
             db.commit()
 
     # Persist latest cookies (birthday refresh, etc.) back to DB
@@ -968,15 +996,15 @@ def _poll_mangaup(db: Session, series_list: list[TrackedSeries]):
                 f"MangaUp! title not found for '{series.title}' (id={series.simulpub_id})"
                 f" — check the title ID in series settings"
             )
-            _mark_poll_failure(series, f"Title not found (id={series.simulpub_id})")
+            _mark_poll_failure(series, f"Title not found (id={series.simulpub_id})", db)
             db.commit()
         except MangaUpError as e:
             logger.error(f"MangaUp! poll failed for '{series.title}': {e}")
-            _mark_poll_failure(series, str(e))
+            _mark_poll_failure(series, str(e), db)
             db.commit()
         except Exception as e:
             logger.error(f"MangaUp! unexpected error for '{series.title}': {e}")
-            _mark_poll_failure(series, str(e))
+            _mark_poll_failure(series, str(e), db)
             db.commit()
 
 
@@ -1054,18 +1082,18 @@ def _poll_mangadex(db: Session, series_list: list[TrackedSeries]):
                 f"MangaDex manga not found for '{series.title}' (id={series.simulpub_id})"
                 f" — check the UUID in series settings"
             )
-            _mark_poll_failure(series, f"Manga not found (id={series.simulpub_id})")
+            _mark_poll_failure(series, f"Manga not found (id={series.simulpub_id})", db)
             db.commit()
         except MangaDexRateLimited:
             logger.warning("MangaDex rate limit hit — skipping remaining series this run")
             break
         except MangaDexError as e:
             logger.error(f"MangaDex poll failed for '{series.title}': {e}")
-            _mark_poll_failure(series, str(e))
+            _mark_poll_failure(series, str(e), db)
             db.commit()
         except Exception as e:
             logger.error(f"MangaDex unexpected error for '{series.title}': {e}")
-            _mark_poll_failure(series, str(e))
+            _mark_poll_failure(series, str(e), db)
             db.commit()
 
 
@@ -1154,13 +1182,13 @@ def _poll_komga(db: Session, series_list: list[TrackedSeries]):
             logger.error("Komga: API key is invalid — check Settings")
             # Mark all remaining Komga series as failed before breaking
             for s in series_list:
-                _mark_poll_failure(s, "API key invalid")
+                _mark_poll_failure(s, "API key invalid", db)
             db.commit()
             break
         except KomgaConnectionError as e:
             logger.error(f"Komga: server unreachable — {e}")
             for s in series_list:
-                _mark_poll_failure(s, f"Server unreachable: {e}")
+                _mark_poll_failure(s, f"Server unreachable: {e}", db)
             db.commit()
             break
         except KomgaNotFound:
@@ -1168,13 +1196,13 @@ def _poll_komga(db: Session, series_list: list[TrackedSeries]):
                 f"Komga: series not found for '{series.title}' (id={series.simulpub_id})"
                 f" — check the series ID in Settings"
             )
-            _mark_poll_failure(series, f"Series not found (id={series.simulpub_id})")
+            _mark_poll_failure(series, f"Series not found (id={series.simulpub_id})", db)
             db.commit()
         except KomgaError as e:
             logger.error(f"Komga poll failed for '{series.title}': {e}")
-            _mark_poll_failure(series, str(e))
+            _mark_poll_failure(series, str(e), db)
             db.commit()
         except Exception as e:
             logger.error(f"Komga unexpected error for '{series.title}': {e}")
-            _mark_poll_failure(series, str(e))
+            _mark_poll_failure(series, str(e), db)
             db.commit()

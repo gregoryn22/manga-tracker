@@ -295,14 +295,16 @@
               <div class="status-chip chip-hold"    x-show="!s.has_update && s.reading_status==='on_hold'">HOLD</div>
               <div class="status-chip chip-dropped" x-show="!s.has_update && s.reading_status==='dropped'">DROP</div>
               <div class="status-chip chip-done"    x-show="!s.has_update && s.reading_status==='completed'">DONE</div>
-              <div class="chip-linked" x-show="s.mu_series_id">
-                MU
-                <span class="poll-health" :class="pollHealthClass(s)" :title="pollHealthTitle(s)"></span>
-              </div>
-              <div x-show="s.simulpub_source && s.simulpub_source !== '' && s.poll_failures > 0"
-                   class="chip-linked chip-error"
-                   :title="s.last_poll_error || 'Simulpub polling errors detected'">
-                ⚠ <span x-text="s.poll_failures"></span>
+              <div class="chip-right-stack">
+                <div class="chip-linked" x-show="s.mu_series_id">
+                  MU
+                  <span class="poll-health" :class="pollHealthClass(s)" :title="pollHealthTitle(s)"></span>
+                </div>
+                <div x-show="s.simulpub_source && s.simulpub_source !== '' && s.poll_failures > 0"
+                     class="chip-linked chip-error"
+                     :title="s.last_poll_error || 'Simulpub polling errors detected'">
+                  ⚠ <span x-text="s.poll_failures"></span>
+                </div>
               </div>
 
               <!-- Cover -->
@@ -1024,6 +1026,27 @@
                 still create in-app notifications but won't ping your device.
                 Useful if you have a large backlog you haven't started yet.
               </div>
+            </div>
+
+            <div class="notif-behaviour-card">
+              <div class="notif-behaviour-header">
+                <div class="notif-behaviour-title">⚠ Polling failure alerts → Pushover</div>
+                <select class="input input-compact" x-model="sf.poll_failure_push_enabled">
+                  <option value="false">Off</option>
+                  <option value="true">On</option>
+                </select>
+              </div>
+              <div class="notif-behaviour-desc">
+                Send a Pushover notification when a series reaches the consecutive failure threshold below.
+                Fires once when the threshold is hit, then again each time it doubles (e.g. 5, 10, 20…).
+              </div>
+              <template x-if="sf.poll_failure_push_enabled === 'true'">
+                <div class="settings-row mt-2">
+                  <label>Notify after <em>N</em> failures</label>
+                  <input type="number" class="input input-compact" min="1" max="50"
+                         x-model="sf.poll_failure_push_threshold" style="width:70px" />
+                </div>
+              </template>
             </div>
 
             <div class="notif-behaviour-card">
