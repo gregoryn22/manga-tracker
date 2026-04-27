@@ -207,6 +207,7 @@ def notify_chapter_update(
     new_chapters: str,
     mangabaka_url: str | None = None,
     reading_status: str | None = None,
+    notification_muted: bool = False,
 ):
     """MB-fallback: chapter count changed notification."""
     old_str = old_chapters or "?"
@@ -220,6 +221,7 @@ def notify_chapter_update(
         meta={"old_chapters": old_chapters, "new_chapters": new_chapters, "url": mangabaka_url},
         send_push=True,
         reading_status=reading_status,
+        notification_muted=notification_muted,
     )
 
 
@@ -241,12 +243,12 @@ def _validate_webhook_url(url: str) -> None:
     # (full DNS rebinding prevention would require an egress proxy)
     try:
         ip = ipaddress.ip_address(hostname)
+    except ValueError:
+        # hostname is a domain name, not a literal IP — allow it
+        pass
+    else:
         if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast:
             raise ValueError("Webhook URL cannot target private or internal addresses")
-    except ValueError as e:
-        if "Webhook URL" in str(e):
-            raise
-        # hostname is a domain name — allow it
 
 
 def send_webhook_raw(webhook_url: str, title: str, message: str, url: str | None = None):

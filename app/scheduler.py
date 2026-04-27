@@ -271,6 +271,9 @@ def poll_updates():
         if simulpub_series:
             _poll_via_simulpub(db, simulpub_series)
 
+        # ── Auto-archive idle series ────────────────────────────────────────
+        _auto_archive_idle(db)
+
         logger.info("✓ Poll complete.")
     except Exception as e:
         logger.error(f"Poll failed: {e}", exc_info=True)
@@ -325,6 +328,7 @@ def _poll_via_mangaupdates(db: Session, series_list: list[TrackedSeries]):
             _check_mu_series(db, series, feed_by_mu_id)
         except Exception as e:
             logger.error(f"MU check failed for '{series.title}': {e}")
+            db.rollback()
 
     # Step 5: MB fallback for still-unlinked series
     still_unlinked = [s for s in series_list if not s.mu_series_id]
@@ -474,7 +478,7 @@ def _check_mu_series(
     db.commit()
 
 
-def _process_release(db: Session, series: TrackedSeries, rec: dict):
+def _process_release(db: Session, series: TrackedSeries, rec: dict, send_push: bool = True):
     """
     Given a MU release record, decide if it's new and notify if so.
     Deduplicates by mu_release_id, then by (series_id, chapter, coalesced group_name).
@@ -520,6 +524,7 @@ def _process_release(db: Session, series: TrackedSeries, rec: dict):
         mu_url=series.mu_url,
     )
     db.add(rel)
+    db.flush()  # make visible to subsequent dedup queries in same transaction (autoflush=False)
 
     # Update series latest chapter
     if chapter_is_newer(chapter, series.mu_latest_chapter):
@@ -543,6 +548,7 @@ def _process_release(db: Session, series: TrackedSeries, rec: dict):
             group_name=group_name,
             release_date=release_date,
             old_chapter=old_chapter,
+            send_push=send_push,
         )
 
         logger.info(f"✓ New chapter: {message}")
@@ -557,6 +563,7 @@ def _send_chapter_notification(
     group_name: str | None,
     release_date: str | None,
     old_chapter: str | None,
+    send_push: bool = True,
 ):
     create_notification(
         db=db,
@@ -573,7 +580,7 @@ def _send_chapter_notification(
             "url": series.mu_url or series.mangabaka_url,
             "cover_url": series.best_cover(),
         },
-        send_push=True,
+        send_push=send_push,
         reading_status=series.reading_status,
         notification_muted=bool(getattr(series, "notification_muted", False)),
     )
@@ -618,6 +625,12 @@ def _poll_via_mangabaka_fallback(db: Session, series_list: list[TrackedSeries]):
                         f"{series.title} — chapter count updated to {new_total}"
                         f" (was {old or '?'}) · via MangaBaka (approximate)"
                     )
+                    # Guard against double-notification: if MU later seeds
+                    # mu_latest_chapter from a stale summary value (< new_total),
+                    # the next poll would see chapter_is_newer(stale, None) = True
+                    # and fire again. Setting it now prevents that window.
+                    if not series.mu_latest_chapter:
+                        series.mu_latest_chapter = new_total
                     _send_chapter_notification(
                         db=db,
                         series=series,
@@ -785,7 +798,8 @@ def _poll_kmanga(db: Session, series_list: list[TrackedSeries]):
     cookies_raw = get_setting(db, "kmanga_cookies", "")
     try:
         cookies = _json.loads(cookies_raw) if cookies_raw else {}
-    except Exception:
+    except Exception as _e:
+        logger.warning(f"K Manga: failed to parse stored cookies (session reset): {_e}")
         cookies = {}
 
     # reCAPTCHA v3 token (optional — manually provided via Settings when re-login is needed).
@@ -910,15 +924,20 @@ def _poll_kmanga(db: Session, series_list: list[TrackedSeries]):
             series.last_checked = datetime.utcnow()
             db.commit()
 
-        except KMangaAuthError:
+        except KMangaAuthError as e:
             # Session expired mid-run — try to re-login once and continue
             logger.warning("K Manga session expired during poll, re-logging in…")
+            _mark_poll_failure(series, str(e), db)
+            db.commit()
             try:
-                updated = client.login()
+                updated = client.login(recaptcha_token=recaptcha_token)
                 set_setting(db, "kmanga_cookies", _json.dumps(updated))
+                if recaptcha_token:
+                    set_setting(db, "kmanga_recaptcha_token", "")
+                    recaptcha_token = None
                 logged_in = True
-            except Exception as e:
-                logger.error(f"K Manga re-login failed: {e}")
+            except Exception as re_e:
+                logger.error(f"K Manga re-login failed: {re_e}")
                 break
         except KMangaRegionError as e:
             logger.error(f"K Manga region block: {e} — aborting K Manga poll")
@@ -1220,3 +1239,55 @@ def _poll_komga(db: Session, series_list: list[TrackedSeries]):
             logger.error(f"Komga unexpected error for '{series.title}': {e}")
             _mark_poll_failure(series, str(e), db)
             db.commit()
+
+
+def _auto_archive_idle(db: Session):
+    """
+    If idle_auto_archive=true, move 'reading' series with no release in
+    idle_threshold_days days to 'dropped' status.  Runs at end of each poll cycle.
+    """
+    from datetime import timedelta
+    from .database import ReadingLog as _RL
+
+    if get_setting(db, "idle_auto_archive", "false") != "true":
+        return
+    if get_setting(db, "idle_detection_enabled", "false") != "true":
+        return
+
+    try:
+        threshold_days = int(get_setting(db, "idle_threshold_days", "90") or 90)
+    except ValueError:
+        threshold_days = 90
+
+    cutoff = datetime.utcnow() - timedelta(days=threshold_days)
+    cutoff_str = cutoff.strftime("%Y-%m-%d")
+
+    candidates = db.query(TrackedSeries).filter(
+        TrackedSeries.reading_status == "reading",
+        TrackedSeries.simulpub_source.is_(None)
+        | (TrackedSeries.simulpub_source == "")
+        | (TrackedSeries.simulpub_source == "custom"),
+    ).all()
+
+    archived = 0
+    for series in candidates:
+        # Skip series recently added — they may not have a release yet
+        if series.added_at and series.added_at >= cutoff:
+            continue
+        last_release = series.latest_release_date or ""
+        if last_release and last_release >= cutoff_str:
+            continue
+        series.reading_status = "dropped"
+        db.add(_RL(
+            series_id=series.id,
+            series_title=series.title,
+            old_chapter=None, new_chapter=None,
+            action="status_change",
+            detail=f"Auto-archived: no release detected in {threshold_days}+ days",
+            created_at=datetime.utcnow(),
+        ))
+        archived += 1
+
+    if archived:
+        db.commit()
+        logger.info(f"Auto-archived {archived} idle series → dropped")
