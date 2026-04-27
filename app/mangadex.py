@@ -106,7 +106,7 @@ def get_latest_chapter(manga_id: str) -> str | None:
         httpx.HTTPError      — network / HTTP error
     """
     params: dict = {
-        "manga":                manga_id.strip(),
+        "manga":                manga_id.strip().strip('/'),
         "translatedLanguage[]": "en",
         "order[chapter]":       "desc",
         "limit":                1,

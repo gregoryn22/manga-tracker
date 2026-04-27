@@ -423,7 +423,7 @@ def import_library(req: ImportRequest, db: Session = Depends(get_db)):
             latest_release_date=item.get("latest_release_date"),
             latest_release_group=item.get("latest_release_group"),
             simulpub_source=item.get("simulpub_source"),
-            simulpub_id=item.get("simulpub_id"),
+            simulpub_id=(item.get("simulpub_id") or "").strip().strip('/') or None,
             komga_track_mode=item.get("komga_track_mode", "chapter"),
             notification_muted=item.get("notification_muted", False),
             mb_provider_ids=json.dumps(item.get("mb_provider_ids", {})),
@@ -642,8 +642,9 @@ def update_series(series_id: int, req: UpdateSeriesRequest, db: Session = Depend
     if req.simulpub_id is not None:
         # Validate the ID format matches the source platform
         effective_source = req.simulpub_source if req.simulpub_source is not None else series.simulpub_source
-        _validate_simulpub_id(effective_source, req.simulpub_id)
-        series.simulpub_id = req.simulpub_id or None
+        clean_id = req.simulpub_id.strip().strip('/') if req.simulpub_id else None
+        _validate_simulpub_id(effective_source, clean_id)
+        series.simulpub_id = clean_id or None
     if req.komga_track_mode is not None:
         series.komga_track_mode = req.komga_track_mode
 
