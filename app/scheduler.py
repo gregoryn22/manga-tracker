@@ -70,6 +70,13 @@ _JOB_ID = "poll_updates"
 
 ACTIVE_STATUSES = {"reading", "on_hold"}
 
+_poll_state: dict = {
+    "running": False,
+    "last_started": None,
+    "last_finished": None,
+    "total_series": 0,
+}
+
 
 def _mark_poll_success(series: TrackedSeries):
     """Reset poll health counters on a successful poll."""
@@ -221,6 +228,9 @@ def trigger_manual_poll():
 # ── Main poll ─────────────────────────────────────────────────────────────────
 
 def poll_updates():
+    _poll_state["running"] = True
+    _poll_state["last_started"] = datetime.utcnow()
+    _poll_state["total_series"] = 0
     db: Session = SessionLocal()
     try:
         clear_settings_cache()  # Fresh settings for this poll cycle
@@ -231,6 +241,8 @@ def poll_updates():
         all_active = db.query(TrackedSeries).filter(
             TrackedSeries.reading_status.in_(ACTIVE_STATUSES)
         ).all()
+
+        _poll_state["total_series"] = len(all_active)
 
         if not all_active:
             logger.info("No active series to poll.")
@@ -263,6 +275,8 @@ def poll_updates():
     except Exception as e:
         logger.error(f"Poll failed: {e}", exc_info=True)
     finally:
+        _poll_state["running"] = False
+        _poll_state["last_finished"] = datetime.utcnow()
         db.close()
 
 

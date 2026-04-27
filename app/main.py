@@ -4,6 +4,7 @@ Manga Tracker — FastAPI application entry point.
 import json
 import logging
 import os
+import threading
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
@@ -59,6 +60,12 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+
+# Serializes concurrent Komga import requests to prevent duplicate ID allocation
+_komga_import_lock = threading.Lock()
+
+# Tracks live progress of an ongoing Komga import for the frontend to poll
+_komga_import_progress: dict = {"running": False, "total": 0, "done": 0, "imported": 0, "skipped": 0}
 
 app.add_middleware(
     CORSMiddleware,
@@ -254,107 +261,118 @@ def komga_import(req: KomgaImportRequest, background_tasks: BackgroundTasks):
     # 2_000_000_000 (well above any realistic MB ID range).
     _KOMGA_ID_FLOOR = 2_000_000_000
 
-    db = SessionLocal()
-    try:
-        # Find current max ID so we can allocate above it (and above the floor).
-        # Using func.max() via ORM avoids a raw SQL string and the __import__ hack.
-        max_id = db.query(func.max(TrackedSeries.id)).scalar() or 0
-        next_id = max(_KOMGA_ID_FLOOR, max_id + 1)
+    # Lock prevents concurrent imports from reading the same max(id) and
+    # allocating duplicate IDs before either request commits.
+    with _komga_import_lock:
+        _komga_import_progress.update({"running": True, "total": len(req.items), "done": 0, "imported": 0, "skipped": 0})
+        db = SessionLocal()
+        try:
+            # Find current max ID so we can allocate above it (and above the floor).
+            # Using func.max() via ORM avoids a raw SQL string and the __import__ hack.
+            max_id = db.query(func.max(TrackedSeries.id)).scalar() or 0
+            next_id = max(_KOMGA_ID_FLOOR, max_id + 1)
 
-        for item in req.items:
-            sid = item.komga_series_id.strip()
-            if not sid:
-                skipped += 1
-                continue
+            for item in req.items:
+                sid = item.komga_series_id.strip()
+                if not sid:
+                    skipped += 1
+                    _komga_import_progress["skipped"] += 1
+                    _komga_import_progress["done"] += 1
+                    continue
 
-            # Skip if already tracked with this Komga ID
-            existing = db.query(TrackedSeries).filter(
-                TrackedSeries.simulpub_source == "komga",
-                TrackedSeries.simulpub_id == sid,
-            ).first()
-            if existing:
-                skipped += 1
-                continue
+                # Skip if already tracked with this Komga ID
+                existing = db.query(TrackedSeries).filter(
+                    TrackedSeries.simulpub_source == "komga",
+                    TrackedSeries.simulpub_id == sid,
+                ).first()
+                if existing:
+                    skipped += 1
+                    _komga_import_progress["skipped"] += 1
+                    _komga_import_progress["done"] += 1
+                    continue
 
-            try:
-                kg_series = client.get_series(sid)
-            except KomgaAuthError:
-                raise HTTPException(status_code=401, detail="Komga API key is invalid")
-            except KomgaConnectionError as e:
-                raise HTTPException(status_code=502, detail=f"Komga unreachable: {e}")
-            except KomgaError as e:
-                errors.append({"komga_id": sid, "error": str(e)})
-                continue
+                try:
+                    kg_series = client.get_series(sid)
+                except KomgaAuthError:
+                    raise HTTPException(status_code=401, detail="Komga API key is invalid")
+                except KomgaConnectionError as e:
+                    raise HTTPException(status_code=502, detail=f"Komga unreachable: {e}")
+                except KomgaError as e:
+                    errors.append({"komga_id": sid, "error": str(e)})
+                    continue
 
-            metadata = kg_series.get("metadata", {})
-            title = metadata.get("title") or kg_series.get("name", "Unknown")
+                metadata = kg_series.get("metadata", {})
+                title = metadata.get("title") or kg_series.get("name", "Unknown")
 
-            # Determine current chapter from read progress
-            current_chapter = "0"
-            if item.sync_progress:
-                books_read = kg_series.get("booksReadCount", 0)
-                if books_read > 0:
-                    current_chapter = str(books_read)
+                # Determine current chapter from read progress
+                current_chapter = "0"
+                if item.sync_progress:
+                    books_read = kg_series.get("booksReadCount", 0)
+                    if books_read > 0:
+                        current_chapter = str(books_read)
 
-            # Get latest chapter number
-            latest_ch = None
-            try:
-                latest_ch = client.get_latest_chapter(sid)
-            except Exception:
-                pass
+                # Get latest chapter number
+                latest_ch = None
+                try:
+                    latest_ch = client.get_latest_chapter(sid)
+                except Exception:
+                    pass
 
-            is_volume = item.track_mode == "volume"
-            group_name = "Komga (volume)" if is_volume else "Komga"
+                is_volume = item.track_mode == "volume"
+                group_name = "Komga (volume)" if is_volume else "Komga"
 
-            series_obj = TrackedSeries(
-                id=next_id,
-                title=title,
-                native_title=metadata.get("titleSort"),
-                description=metadata.get("summary", ""),
-                status=metadata.get("status", "").lower() if metadata.get("status") else None,
-                genres=json.dumps(metadata.get("genres", [])),
-                publishers=json.dumps([metadata.get("publisher")] if metadata.get("publisher") else []),
-                cover_url=f"/api/komga/thumbnail/{sid}",
-                simulpub_source="komga",
-                simulpub_id=sid,
-                komga_track_mode=item.track_mode,
-                current_chapter=current_chapter,
-                reading_status="reading",
-                total_chapters=str(kg_series.get("booksCount")) if kg_series.get("booksCount") is not None else None,
-                mu_latest_chapter=latest_ch,
-                latest_release_group=group_name,
-                added_at=datetime.utcnow(),
-            )
-            next_id += 1
-            db.add(series_obj)
+                series_obj = TrackedSeries(
+                    id=next_id,
+                    title=title,
+                    native_title=metadata.get("titleSort"),
+                    description=metadata.get("summary", ""),
+                    status=metadata.get("status", "").lower() if metadata.get("status") else None,
+                    genres=json.dumps(metadata.get("genres", [])),
+                    publishers=json.dumps([metadata.get("publisher")] if metadata.get("publisher") else []),
+                    cover_url=f"/api/komga/thumbnail/{sid}",
+                    simulpub_source="komga",
+                    simulpub_id=sid,
+                    komga_track_mode=item.track_mode,
+                    current_chapter=current_chapter,
+                    reading_status="reading",
+                    total_chapters=str(kg_series.get("booksCount")) if kg_series.get("booksCount") is not None else None,
+                    mu_latest_chapter=latest_ch,
+                    latest_release_group=group_name,
+                    added_at=datetime.utcnow(),
+                )
+                next_id += 1
+                db.add(series_obj)
 
-            # Log the initial add as activity
-            if current_chapter != "0":
-                db.add(ReadingLog(
-                    series_id=series_obj.id,
-                    series_title=title,
-                    action="chapter_update",
-                    old_chapter="0",
-                    new_chapter=current_chapter,
-                    detail=f"Imported from Komga with {current_chapter} books read",
-                ))
-                series_obj.last_read_at = datetime.utcnow()
+                # Log the initial add as activity
+                if current_chapter != "0":
+                    db.add(ReadingLog(
+                        series_id=series_obj.id,
+                        series_title=title,
+                        action="chapter_update",
+                        old_chapter="0",
+                        new_chapter=current_chapter,
+                        detail=f"Imported from Komga with {current_chapter} books read",
+                    ))
+                    series_obj.last_read_at = datetime.utcnow()
 
-            imported += 1
+                imported += 1
+                _komga_import_progress["imported"] += 1
+                _komga_import_progress["done"] += 1
 
-            # Queue MU auto-link in background
-            _schedule_mu_lookup(background_tasks, series_obj.id, title)
+                # Queue MU auto-link in background
+                _schedule_mu_lookup(background_tasks, series_obj.id, title)
 
-        db.commit()
-    except HTTPException:
-        db.rollback()
-        raise
-    except Exception as e:
-        db.rollback()
-        logger.error(f"Komga import failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Import failed: {e}")
-    finally:
-        db.close()
+            db.commit()
+        except HTTPException:
+            db.rollback()
+            raise
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Komga import failed: {e}")
+            raise HTTPException(status_code=500, detail=f"Import failed: {e}")
+        finally:
+            _komga_import_progress["running"] = False
+            db.close()
 
     return {
         "success": True,
@@ -362,6 +380,12 @@ def komga_import(req: KomgaImportRequest, background_tasks: BackgroundTasks):
         "skipped": skipped,
         "errors": errors,
     }
+
+
+@app.get("/api/komga/import/progress")
+def komga_import_progress():
+    """Poll this endpoint during a Komga import to show live progress."""
+    return dict(_komga_import_progress)
 
 
 def _schedule_mu_lookup(background_tasks: BackgroundTasks, series_id: int, title: str):

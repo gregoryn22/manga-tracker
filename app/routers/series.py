@@ -141,9 +141,20 @@ def _refresh_simulpub(series: TrackedSeries, db: Session) -> str | None:
 
 @router.get("/search")
 def search_series_endpoint(q: str, page: int = 1, db: Session = Depends(get_db)):
+    import httpx as _httpx
     client = get_mb_client(db)
     try:
         result = client.search(q, page=page)
+    except _httpx.TimeoutException:
+        raise HTTPException(status_code=502, detail="MangaBaka API request timed out. Try again in a moment.")
+    except _httpx.ConnectError:
+        raise HTTPException(status_code=502, detail="Cannot connect to MangaBaka API. The service may be temporarily down.")
+    except _httpx.HTTPStatusError as e:
+        if e.response.status_code == 401:
+            raise HTTPException(status_code=502, detail="MangaBaka API token is invalid or expired. Check your token in Settings.")
+        if e.response.status_code == 429:
+            raise HTTPException(status_code=502, detail="MangaBaka API rate limit reached. Wait a moment and try again.")
+        raise HTTPException(status_code=502, detail=f"MangaBaka API returned an error ({e.response.status_code}).")
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"MangaBaka API error: {e}")
 
@@ -178,9 +189,18 @@ def add_series(req: AddSeriesRequest, background_tasks: BackgroundTasks, db: Ses
         raise HTTPException(status_code=409, detail="Series already tracked")
 
     # Fetch from MangaBaka
+    import httpx as _httpx
     client = get_mb_client(db)
     try:
         resp = client.get_series(req.series_id)
+    except _httpx.TimeoutException:
+        raise HTTPException(status_code=502, detail="MangaBaka API request timed out.")
+    except _httpx.ConnectError:
+        raise HTTPException(status_code=502, detail="Cannot connect to MangaBaka API.")
+    except _httpx.HTTPStatusError as e:
+        if e.response.status_code == 401:
+            raise HTTPException(status_code=502, detail="MangaBaka API token is invalid. Check Settings.")
+        raise HTTPException(status_code=502, detail=f"MangaBaka API error ({e.response.status_code}).")
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"MangaBaka API error: {e}")
 
@@ -338,6 +358,7 @@ def _bg_enrich_with_mu(series_id: int, title: str, known_mu_id: int | None = Non
         logger.info(f"Enriched '{title}' with MU ID {mu_id}")
     except Exception as e:
         logger.error(f"MU enrichment failed for '{title}': {e}")
+        db.rollback()
     finally:
         db.close()
 
@@ -400,6 +421,14 @@ def import_library(req: ImportRequest, db: Session = Depends(get_db)):
         if existing:
             skipped += 1
             continue
+        sim_source = item.get("simulpub_source")
+        sim_id = (item.get("simulpub_id") or "").strip().strip('/') or None
+        try:
+            _validate_simulpub_id(sim_source, sim_id)
+        except HTTPException:
+            skipped += 1
+            continue
+
         s = TrackedSeries(
             id=sid,
             title=item.get("title", "Unknown"),
@@ -422,8 +451,8 @@ def import_library(req: ImportRequest, db: Session = Depends(get_db)):
             mu_latest_chapter=item.get("mu_latest_chapter"),
             latest_release_date=item.get("latest_release_date"),
             latest_release_group=item.get("latest_release_group"),
-            simulpub_source=item.get("simulpub_source"),
-            simulpub_id=(item.get("simulpub_id") or "").strip().strip('/') or None,
+            simulpub_source=sim_source,
+            simulpub_id=sim_id,
             komga_track_mode=item.get("komga_track_mode", "chapter"),
             notification_muted=item.get("notification_muted", False),
             mb_provider_ids=json.dumps(item.get("mb_provider_ids", {})),
@@ -661,12 +690,14 @@ def update_series(series_id: int, req: UpdateSeriesRequest, db: Session = Depend
         series.poll_failures = 0
         series.last_poll_error = None
         series.last_poll_success = None
-        # Clear stale chapter/release data so the new source starts fresh.
-        # The immediate _refresh_simulpub call below will re-populate these
-        # from the new source, so the user sees correct data right away.
-        series.mu_latest_chapter = None
-        series.latest_release_group = None
-        series.latest_release_date = None
+        # Snapshot old chapter data so we can restore it if the initial refresh fails.
+        # We clear the fields optimistically, then restore if the new source can't be reached.
+        _old_chapter   = series.mu_latest_chapter
+        _old_group     = series.latest_release_group
+        _old_rel_date  = series.latest_release_date
+        series.mu_latest_chapter  = None
+        series.latest_release_group  = None
+        series.latest_release_date   = None
         # Log the source change in the activity log
         detail = f"Simulpub source changed: {old_source or 'none'}({old_sim_id or '?'}) → {series.simulpub_source or 'none'}({series.simulpub_id or '?'})"
         db.add(ReadingLog(
@@ -685,6 +716,12 @@ def update_series(series_id: int, req: UpdateSeriesRequest, db: Session = Depend
     # doesn't have to wait for the next scheduled cycle to see results.
     if source_changed and series.simulpub_source and series.simulpub_id:
         _refresh_simulpub(series, db)
+        # If the immediate refresh failed (poll_failures > 0) and we have no chapter
+        # data yet, restore the previous values to avoid a blank display.
+        if series.poll_failures > 0 and series.mu_latest_chapter is None:
+            series.mu_latest_chapter = _old_chapter
+            series.latest_release_group = _old_group
+            series.latest_release_date = _old_rel_date
 
     db.commit()
     db.refresh(series)

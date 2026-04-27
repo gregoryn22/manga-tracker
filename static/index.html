@@ -302,7 +302,7 @@
                 </div>
                 <div x-show="s.simulpub_source && s.simulpub_source !== '' && s.poll_failures > 0"
                      class="chip-linked chip-error"
-                     :title="s.last_poll_error || 'Simulpub polling errors detected'">
+                     :title="(s.poll_failures >= 10 ? 'Polling paused — click series then Refresh to reset. ' : (s.poll_failures >= 5 ? 'Polling slowed (backoff active). ' : '')) + (s.last_poll_error || 'Simulpub polling errors detected')">
                   ⚠ <span x-text="s.poll_failures"></span>
                 </div>
               </div>
@@ -881,7 +881,10 @@
           <button class="btn btn-primary" :disabled="komgaSelected.length === 0 || komgaImporting"
                   @click="importFromKomga()">
             <span x-show="komgaImporting" class="spin spin-sm"></span>
-            <span x-text="komgaImporting ? 'Importing…' : `Import ${komgaSelected.length} series`"></span>
+            <span x-show="komgaImporting && komgaImportProgress"
+                  x-text="`Importing… ${komgaImportProgress?.done ?? 0}/${komgaImportProgress?.total ?? 0}`"></span>
+            <span x-show="!komgaImporting || !komgaImportProgress"
+                  x-text="komgaImporting ? 'Importing…' : `Import ${komgaSelected.length} series`"></span>
           </button>
         </div>
 
@@ -1043,7 +1046,8 @@
               <template x-if="sf.poll_failure_push_enabled === 'true'">
                 <div class="settings-row mt-2">
                   <label>Notify after <em>N</em> failures</label>
-                  <input type="number" class="input input-compact" min="1" max="50"
+                  <input type="number" class="input input-compact" min="1" max="50" step="1"
+                         title="Number of consecutive failures before an alert is sent (1–50)"
                          x-model="sf.poll_failure_push_threshold" style="width:70px" />
                 </div>
               </template>
@@ -1207,7 +1211,9 @@
           </div>
           <div class="settings-row">
             <label>Idle threshold (days)</label>
-            <input class="input input-sm" type="number" min="7" max="365" x-model="sf.idle_threshold_days" />
+            <input class="input input-sm" type="number" min="7" max="365" step="1"
+                   title="Days since last detected release before a series is flagged as idle (7–365)"
+                   x-model="sf.idle_threshold_days" />
           </div>
           <div class="text-xs text-muted mt-1 leading-relaxed">
             When enabled, series with no releases detected in the specified number of days

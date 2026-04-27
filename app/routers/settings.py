@@ -235,6 +235,19 @@ def test_komga(db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=f"Komga connection failed: {e}")
 
 
+@router.get("/poll/status")
+def poll_status():
+    """Return current scheduler state: running flag, last start/finish, series count."""
+    from ..scheduler import _poll_state
+    state = _poll_state
+    return {
+        "running":        state["running"],
+        "last_started":   state["last_started"].isoformat() if state["last_started"] else None,
+        "last_finished":  state["last_finished"].isoformat() if state["last_finished"] else None,
+        "total_series":   state["total_series"],
+    }
+
+
 @router.post("/poll-now")
 def manual_poll(db: Session = Depends(get_db)):
     """Manually trigger an update poll for all tracked series."""
