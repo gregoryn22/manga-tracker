@@ -211,7 +211,8 @@ def series_from_api(data: dict) -> dict:
     import json
 
     genres  = data.get("genres") or []
-    authors = data.get("authors") or []
+    raw_authors = data.get("authors") or []
+    authors = [a.title() if a == a.upper() or a == a.lower() else a for a in raw_authors if isinstance(a, str)]
     links   = data.get("links") or []
     source  = data.get("source") or {}
 

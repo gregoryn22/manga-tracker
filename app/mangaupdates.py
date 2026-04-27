@@ -239,11 +239,32 @@ def normalize_chapter(chapter_str: str | None) -> float | None:
 
 
 def chapter_is_newer(new_ch: str | None, known_ch: str | None) -> bool:
-    """Return True if new_ch represents a chapter newer than known_ch."""
+    """
+    Return True if new_ch represents a chapter newer than known_ch.
+
+    Non-numeric chapters (Prologue, Intermission, Extra, etc.) have no
+    inherent ordering.  Rules:
+      - No new chapter            → False
+      - Any chapter vs nothing    → True
+      - Both numeric              → numeric comparison
+      - New is non-numeric, known is numeric  → False (numbered > special)
+      - New is numeric, known is non-numeric  → True
+      - Both non-numeric, different strings   → True (different special chapter)
+      - Both non-numeric, same string         → False (already seen)
+    """
+    if not new_ch:
+        return False
+    if not known_ch:
+        return True
+
     new_f = normalize_chapter(new_ch)
     known_f = normalize_chapter(known_ch)
-    if new_f is None:
-        return False
-    if known_f is None:
-        return True
-    return new_f > known_f
+
+    if new_f is not None and known_f is not None:
+        return new_f > known_f
+    if new_f is None and known_f is not None:
+        return False   # numbered chapter already surpasses this special chapter
+    if new_f is not None and known_f is None:
+        return True    # numeric chapter is ahead of a non-numeric one
+    # Both non-numeric: treat as new only if the string is different
+    return new_ch.strip().lower() != known_ch.strip().lower()

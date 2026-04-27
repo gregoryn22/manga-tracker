@@ -30,6 +30,7 @@ EXPOSED_KEYS = [
     "komga_api_key",
     "idle_detection_enabled",
     "idle_threshold_days",
+    "idle_auto_archive",
     "updates_reading_only",
     "poll_failure_push_enabled",
     "poll_failure_push_threshold",
@@ -75,6 +76,7 @@ class UpdateSettingsRequest(BaseModel):
     komga_api_key: str | None = None
     idle_detection_enabled: str | None = None
     idle_threshold_days: str | None = None
+    idle_auto_archive: str | None = None
     updates_reading_only: str | None = None
     poll_failure_push_enabled: str | None = None
     poll_failure_push_threshold: str | None = None
@@ -246,6 +248,14 @@ def poll_status():
         "last_finished":  state["last_finished"].isoformat() if state["last_finished"] else None,
         "total_series":   state["total_series"],
     }
+
+
+@router.post("/kmanga/clear-session")
+def clear_kmanga_session(db: Session = Depends(get_db)):
+    """Clear stored K Manga session cookies, forcing a fresh login on next poll."""
+    set_setting(db, "kmanga_cookies", "")
+    logger.info("K Manga session cookies cleared manually")
+    return {"success": True, "message": "K Manga session cleared. Next poll will re-authenticate."}
 
 
 @router.post("/poll-now")

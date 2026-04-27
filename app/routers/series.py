@@ -28,6 +28,17 @@ from ..mangaupdates import (
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/series", tags=["series"])
 
+
+def _normalize_author(name: str) -> str:
+    """Normalize author name to title case. Handles all-caps and all-lowercase."""
+    if not name:
+        return name
+    # Skip names that already look mixed-case (at least one lowercase letter after first)
+    stripped = name.strip()
+    if stripped != stripped.upper() and stripped != stripped.lower():
+        return stripped  # already mixed-case, don't touch
+    return stripped.title()
+
 # MangaDex UUIDs look like: a1b2c3d4-e5f6-7890-abcd-ef1234567890
 _UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE)
 
@@ -164,6 +175,37 @@ def search_series_endpoint(q: str, page: int = 1, db: Session = Depends(get_db))
         item["is_tracked"] = item["id"] in tracked_ids
 
     return {"data": items, "pagination": result.get("pagination", {})}
+
+
+# ── Duplicate / similar series check ─────────────────────────────────────────
+
+@router.get("/similar")
+def find_similar(title: str, db: Session = Depends(get_db)):
+    """
+    Return tracked series whose title is ≥75% similar to the given title.
+    Used to warn before adding a potential duplicate.
+    """
+    from difflib import SequenceMatcher
+
+    needle = title.strip().lower()
+    if not needle:
+        return {"similar": []}
+
+    tracked = db.query(TrackedSeries.id, TrackedSeries.title, TrackedSeries.cover_url,
+                       TrackedSeries.reading_status).all()
+    similar = []
+    for row in tracked:
+        ratio = SequenceMatcher(None, needle, row.title.lower()).ratio()
+        if ratio >= 0.75:
+            similar.append({
+                "id": row.id,
+                "title": row.title,
+                "cover_url": row.cover_url,
+                "reading_status": row.reading_status,
+                "similarity": round(ratio, 2),
+            })
+    similar.sort(key=lambda x: x["similarity"], reverse=True)
+    return {"similar": similar[:5]}
 
 
 # ── List tracked series ───────────────────────────────────────────────────────
@@ -306,7 +348,7 @@ def _bg_enrich_with_mu(series_id: int, title: str, known_mu_id: int | None = Non
 
             # Authors — flat list (backwards compat) + role-aware list
             raw_authors = detail.get("authors", [])
-            flat_authors = [a.get("author_name", "") for a in raw_authors if a.get("author_name")]
+            flat_authors = [_normalize_author(a.get("author_name", "")) for a in raw_authors if a.get("author_name")]
             if not series.authors or series.authors == "[]":
                 if flat_authors:
                     series.authors = json.dumps(flat_authors)
@@ -314,7 +356,7 @@ def _bg_enrich_with_mu(series_id: int, title: str, known_mu_id: int | None = Non
             if raw_authors:
                 roles = []
                 for a in raw_authors:
-                    name = a.get("author_name", "").strip()
+                    name = _normalize_author(a.get("author_name", "").strip())
                     role = (a.get("type") or "Author").strip().title()
                     if name:
                         roles.append({"name": name, "role": role})
@@ -396,15 +438,18 @@ def bulk_status(req: BulkStatusRequest, db: Session = Depends(get_db)):
 def export_library(db: Session = Depends(get_db)):
     """Export entire library as JSON (for backup / migration)."""
     series = db.query(TrackedSeries).order_by(TrackedSeries.added_at.desc()).all()
+    activity = db.query(ReadingLog).order_by(ReadingLog.created_at.asc()).all()
     return JSONResponse(content={
-        "version": 1,
+        "version": 2,
         "exported_at": datetime.utcnow().isoformat(),
         "series": [s.to_dict() for s in series],
+        "activity_log": [e.to_dict() for e in activity],
     })
 
 
 class ImportRequest(BaseModel):
     series: list
+    activity_log: list = []
 
 
 @router.post("/import/json")
@@ -475,7 +520,31 @@ def import_library(req: ImportRequest, db: Session = Depends(get_db)):
         db.add(s)
         imported += 1
     db.commit()
-    return {"success": True, "imported": imported, "skipped": skipped}
+
+    # Restore activity log entries (v2 backups only; skip if series wasn't imported)
+    imported_ids = {item.get("id") for item in req.series if item.get("id")}
+    activity_restored = 0
+    for entry in req.activity_log:
+        sid = entry.get("series_id")
+        if sid not in imported_ids:
+            continue
+        try:
+            db.add(ReadingLog(
+                series_id=sid,
+                series_title=entry.get("series_title"),
+                action=entry.get("action", "chapter_update"),
+                old_chapter=entry.get("old_chapter"),
+                new_chapter=entry.get("new_chapter"),
+                detail=entry.get("detail"),
+                created_at=datetime.fromisoformat(entry["created_at"]) if entry.get("created_at") else datetime.utcnow(),
+            ))
+            activity_restored += 1
+        except Exception:
+            pass
+    if activity_restored:
+        db.commit()
+
+    return {"success": True, "imported": imported, "skipped": skipped, "activity_restored": activity_restored}
 
 
 # ── Reading activity log ─────────────────────────────────────────────

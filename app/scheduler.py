@@ -271,6 +271,9 @@ def poll_updates():
         if simulpub_series:
             _poll_via_simulpub(db, simulpub_series)
 
+        # ── Auto-archive idle series ────────────────────────────────────────
+        _auto_archive_idle(db)
+
         logger.info("✓ Poll complete.")
     except Exception as e:
         logger.error(f"Poll failed: {e}", exc_info=True)
@@ -785,7 +788,8 @@ def _poll_kmanga(db: Session, series_list: list[TrackedSeries]):
     cookies_raw = get_setting(db, "kmanga_cookies", "")
     try:
         cookies = _json.loads(cookies_raw) if cookies_raw else {}
-    except Exception:
+    except Exception as _e:
+        logger.warning(f"K Manga: failed to parse stored cookies (session reset): {_e}")
         cookies = {}
 
     # reCAPTCHA v3 token (optional — manually provided via Settings when re-login is needed).
@@ -1220,3 +1224,50 @@ def _poll_komga(db: Session, series_list: list[TrackedSeries]):
             logger.error(f"Komga unexpected error for '{series.title}': {e}")
             _mark_poll_failure(series, str(e), db)
             db.commit()
+
+
+def _auto_archive_idle(db: Session):
+    """
+    If idle_auto_archive=true, move 'reading' series with no release in
+    idle_threshold_days days to 'dropped' status.  Runs at end of each poll cycle.
+    """
+    from datetime import timedelta
+    from .database import ReadingLog as _RL
+
+    if get_setting(db, "idle_auto_archive", "false") != "true":
+        return
+    if get_setting(db, "idle_detection_enabled", "false") != "true":
+        return
+
+    try:
+        threshold_days = int(get_setting(db, "idle_threshold_days", "90") or 90)
+    except ValueError:
+        threshold_days = 90
+
+    cutoff = datetime.utcnow() - timedelta(days=threshold_days)
+    cutoff_str = cutoff.strftime("%Y-%m-%d")
+
+    candidates = db.query(TrackedSeries).filter(
+        TrackedSeries.reading_status == "reading",
+        TrackedSeries.simulpub_source.is_(None) | (TrackedSeries.simulpub_source == ""),
+    ).all()
+
+    archived = 0
+    for series in candidates:
+        last_release = series.latest_release_date or ""
+        if last_release and last_release >= cutoff_str:
+            continue
+        series.reading_status = "dropped"
+        db.add(_RL(
+            series_id=series.id,
+            series_title=series.title,
+            old_chapter=None, new_chapter=None,
+            action="status_change",
+            detail=f"Auto-archived: no release detected in {threshold_days}+ days",
+            created_at=datetime.utcnow(),
+        ))
+        archived += 1
+
+    if archived:
+        db.commit()
+        logger.info(f"Auto-archived {archived} idle series → dropped")

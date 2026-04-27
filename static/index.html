@@ -1170,6 +1170,8 @@
           </div>
           <div class="flex gap-2 mt-2">
             <button class="btn btn-primary btn-sm" @click="saveSettings()">💾 Save</button>
+            <button class="btn btn-secondary btn-sm" @click="clearKMangaSession()"
+                    title="Clear stored session cookies so next poll re-authenticates">🔄 Clear Session</button>
           </div>
           <div class="text-xs text-muted mt-2">
             Used to poll official Kodansha simulpub releases via the K Manga API.
@@ -1215,9 +1217,18 @@
                    title="Days since last detected release before a series is flagged as idle (7–365)"
                    x-model="sf.idle_threshold_days" />
           </div>
+          <div class="settings-row mt-2">
+            <label>Auto-archive idle series</label>
+            <select class="input input-toggle" x-model="sf.idle_auto_archive">
+              <option value="false">Disabled</option>
+              <option value="true">Move to Dropped</option>
+            </select>
+          </div>
           <div class="text-xs text-muted mt-1 leading-relaxed">
             When enabled, series with no releases detected in the specified number of days
             will be flagged with a 💤 chip. Useful for spotting series that may have gone on hiatus or been dropped by scanlators.
+            If "Move to Dropped" is selected, they will be automatically set to Dropped status at the end of each poll cycle.
+            Only applies to non-simulpub series.
           </div>
           <div class="flex gap-2 mt-2">
             <button class="btn btn-primary btn-sm" @click="saveSettings()">💾 Save</button>
