@@ -13,7 +13,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from ..database import ReadingLog, TrackedSeries, get_db, get_setting
+from ..database import ReadingLog, Release, TrackedSeries, get_db, get_setting
 from ..mangabaka import MangaBakaClient, series_from_api
 from ..mangaupdates import (
     chapter_is_newer,
@@ -27,6 +27,17 @@ from ..mangaupdates import (
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/series", tags=["series"])
+
+
+def _normalize_author(name: str) -> str:
+    """Normalize author name to title case. Handles all-caps and all-lowercase."""
+    if not name:
+        return name
+    # Skip names that already look mixed-case (at least one lowercase letter after first)
+    stripped = name.strip()
+    if stripped != stripped.upper() and stripped != stripped.lower():
+        return stripped  # already mixed-case, don't touch
+    return stripped.title()
 
 # MangaDex UUIDs look like: a1b2c3d4-e5f6-7890-abcd-ef1234567890
 _UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE)
@@ -166,6 +177,37 @@ def search_series_endpoint(q: str, page: int = 1, db: Session = Depends(get_db))
     return {"data": items, "pagination": result.get("pagination", {})}
 
 
+# ── Duplicate / similar series check ─────────────────────────────────────────
+
+@router.get("/similar")
+def find_similar(title: str, db: Session = Depends(get_db)):
+    """
+    Return tracked series whose title is ≥75% similar to the given title.
+    Used to warn before adding a potential duplicate.
+    """
+    from difflib import SequenceMatcher
+
+    needle = title.strip().lower()
+    if not needle:
+        return {"similar": []}
+
+    tracked = db.query(TrackedSeries.id, TrackedSeries.title, TrackedSeries.cover_url,
+                       TrackedSeries.reading_status).all()
+    similar = []
+    for row in tracked:
+        ratio = SequenceMatcher(None, needle, row.title.lower()).ratio()
+        if ratio >= 0.75:
+            similar.append({
+                "id": row.id,
+                "title": row.title,
+                "cover_url": row.cover_url,
+                "reading_status": row.reading_status,
+                "similarity": round(ratio, 2),
+            })
+    similar.sort(key=lambda x: x["similarity"], reverse=True)
+    return {"similar": similar[:5]}
+
+
 # ── List tracked series ───────────────────────────────────────────────────────
 
 @router.get("")
@@ -299,14 +341,15 @@ def _bg_enrich_with_mu(series_id: int, title: str, known_mu_id: int | None = Non
             series.mu_rating = detail.get("bayesian_rating")
             series.mu_rating_votes = detail.get("rating_votes")
 
-            # Latest chapter
-            latest_ch = str(detail.get("latest_chapter") or "")
-            if latest_ch:
-                series.mu_latest_chapter = latest_ch
+            # Latest chapter — only seed if releases haven't established a more accurate baseline
+            if not series.mu_latest_chapter:
+                latest_ch = str(detail.get("latest_chapter") or "")
+                if latest_ch:
+                    series.mu_latest_chapter = latest_ch
 
             # Authors — flat list (backwards compat) + role-aware list
             raw_authors = detail.get("authors", [])
-            flat_authors = [a.get("author_name", "") for a in raw_authors if a.get("author_name")]
+            flat_authors = [_normalize_author(a.get("author_name", "")) for a in raw_authors if a.get("author_name")]
             if not series.authors or series.authors == "[]":
                 if flat_authors:
                     series.authors = json.dumps(flat_authors)
@@ -314,7 +357,7 @@ def _bg_enrich_with_mu(series_id: int, title: str, known_mu_id: int | None = Non
             if raw_authors:
                 roles = []
                 for a in raw_authors:
-                    name = a.get("author_name", "").strip()
+                    name = _normalize_author(a.get("author_name", "").strip())
                     role = (a.get("type") or "Author").strip().title()
                     if name:
                         roles.append({"name": name, "role": role})
@@ -396,15 +439,18 @@ def bulk_status(req: BulkStatusRequest, db: Session = Depends(get_db)):
 def export_library(db: Session = Depends(get_db)):
     """Export entire library as JSON (for backup / migration)."""
     series = db.query(TrackedSeries).order_by(TrackedSeries.added_at.desc()).all()
+    activity = db.query(ReadingLog).order_by(ReadingLog.created_at.asc()).all()
     return JSONResponse(content={
-        "version": 1,
+        "version": 2,
         "exported_at": datetime.utcnow().isoformat(),
         "series": [s.to_dict() for s in series],
+        "activity_log": [e.to_dict() for e in activity],
     })
 
 
 class ImportRequest(BaseModel):
     series: list
+    activity_log: list = []
 
 
 @router.post("/import/json")
@@ -475,7 +521,31 @@ def import_library(req: ImportRequest, db: Session = Depends(get_db)):
         db.add(s)
         imported += 1
     db.commit()
-    return {"success": True, "imported": imported, "skipped": skipped}
+
+    # Restore activity log entries (v2 backups only; skip if series wasn't imported)
+    imported_ids = {item.get("id") for item in req.series if item.get("id")}
+    activity_restored = 0
+    for entry in req.activity_log:
+        sid = entry.get("series_id")
+        if sid not in imported_ids:
+            continue
+        try:
+            db.add(ReadingLog(
+                series_id=sid,
+                series_title=entry.get("series_title"),
+                action=entry.get("action", "chapter_update"),
+                old_chapter=entry.get("old_chapter"),
+                new_chapter=entry.get("new_chapter"),
+                detail=entry.get("detail"),
+                created_at=datetime.fromisoformat(entry["created_at"]) if entry.get("created_at") else datetime.utcnow(),
+            ))
+            activity_restored += 1
+        except Exception:
+            pass
+    if activity_restored:
+        db.commit()
+
+    return {"success": True, "imported": imported, "skipped": skipped, "activity_restored": activity_restored}
 
 
 # ── Reading activity log ─────────────────────────────────────────────
@@ -546,14 +616,14 @@ def get_stats(db: Session = Depends(get_db)):
     by_genre = [{"genre": g, "count": c} for g, c in by_genre]
 
     # Total chapters read
-    total_chapters_read = sum(
-        float(s.current_chapter or 0) for s in series_list
-        if s.current_chapter and s.current_chapter != "0"
-    )
-    try:
-        total_chapters_read = int(total_chapters_read)
-    except Exception:
-        total_chapters_read = 0
+    total_chapters_read = 0.0
+    for s in series_list:
+        if s.current_chapter and s.current_chapter != "0":
+            try:
+                total_chapters_read += float(s.current_chapter)
+            except (TypeError, ValueError):
+                pass
+    total_chapters_read = int(total_chapters_read)
 
     # Average rating (only series with mu_rating)
     rated_series = [s for s in series_list if s.mu_rating]
@@ -773,6 +843,8 @@ def refresh_series(series_id: int, background_tasks: BackgroundTasks, db: Sessio
                     old_chapters=series.total_chapters,
                     new_chapters=new_total,
                     mangabaka_url=series.mangabaka_url,
+                    reading_status=series.reading_status,
+                    notification_muted=bool(getattr(series, "notification_muted", False)),
                 )
             series.total_chapters  = flat["total_chapters"]
             series.status          = flat["status"]
@@ -790,15 +862,11 @@ def refresh_series(series_id: int, background_tasks: BackgroundTasks, db: Sessio
     # Check MU for recent releases
     if series.mu_series_id:
         try:
+            from ..scheduler import _process_release
             mu_resp = search_releases(series_id=series.mu_series_id, per_page=5)
             for r in mu_resp.get("results", [])[:3]:
                 rec = r.get("record", {})
-                ch = rec.get("chapter")
-                if chapter_is_newer(ch, series.mu_latest_chapter):
-                    series.mu_latest_chapter    = ch
-                    series.latest_release_date  = rec.get("release_date")
-                    groups = rec.get("groups", [])
-                    series.latest_release_group = groups[0].get("name") if groups else None
+                _process_release(db, series, rec, send_push=False)
         except Exception as e:
             logger.warning(f"MU refresh failed for series {series_id}: {e}")
     else:

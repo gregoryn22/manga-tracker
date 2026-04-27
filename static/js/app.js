@@ -31,7 +31,7 @@ function app() {
     activityFilter: '',
 
     // Settings form
-    sf: { pushover_user_key:'', pushover_app_token:'', pushover_enabled:'false', push_chapter_updates:'true', push_news:'false', push_reading_only:'false', updates_reading_only:'false', poll_interval_hours:'6', mangabaka_token:'', mu_enabled:'true', kmanga_email:'', kmanga_password:'', kmanga_recaptcha_token:'', komga_url:'', komga_api_key:'', idle_detection_enabled:'false', idle_threshold_days:'90', webhook_enabled:'false', webhook_url:'', default_page:'library', grid_density:'normal',
+    sf: { pushover_user_key:'', pushover_app_token:'', pushover_enabled:'false', push_chapter_updates:'true', push_news:'false', push_reading_only:'false', updates_reading_only:'false', poll_interval_hours:'6', mangabaka_token:'', mu_enabled:'true', kmanga_email:'', kmanga_password:'', kmanga_recaptcha_token:'', komga_url:'', komga_api_key:'', idle_detection_enabled:'false', idle_threshold_days:'90', idle_auto_archive:'false', webhook_enabled:'false', webhook_url:'', default_page:'library', grid_density:'normal',
       // ── Display preferences ────────────────────────────────────────────
       show_source_badges:    'true',   // platform banner (MangaPlus, K Manga, etc.) on cards
       show_ratings_on_cards: 'true',   // ★ score overlay on cover image
@@ -481,7 +481,7 @@ function app() {
         const data = JSON.parse(text);
         const series = data.series || [];
         if (!series.length) { this.toast('No series found in file', 'error'); return; }
-        const resp = await this.api('/api/series/import/json', 'POST', { series });
+        const resp = await this.api('/api/series/import/json', 'POST', { series, activity_log: data.activity_log || [] });
         this.toast(`Imported ${resp.imported}, skipped ${resp.skipped} duplicates`, 'success');
         await this.loadLibrary();
       } catch(e) { this.toast('Import failed: invalid file', 'error'); }
@@ -497,6 +497,13 @@ function app() {
     async testKomga() {
       try { const d = await this.api('/api/settings/test-komga', 'POST'); this.toast(d.message||'Connected!', 'success'); }
       catch(e) { this.toast(e.detail||'Komga connection failed', 'error'); }
+    },
+
+    async clearKMangaSession() {
+      try {
+        const d = await this.api('/api/settings/kmanga/clear-session', 'POST');
+        this.toast(d.message || 'Session cleared', 'success');
+      } catch(e) { this.toast(e.detail || 'Failed to clear session', 'error'); }
     },
 
     // ── Komga Browser ─────────────────────────────────────
@@ -638,6 +645,13 @@ function app() {
     async confirmAdd() {
       this.adding = true;
       try {
+        // Check for similar series already tracked before committing
+        const { similar } = await this.api(`/api/series/similar?title=${encodeURIComponent(this.addTarget.title)}`);
+        if (similar && similar.length > 0) {
+          const names = similar.map(s => `• ${s.title} (${(s.similarity*100).toFixed(0)}% match)`).join('\n');
+          const proceed = confirm(`Similar series already in your library:\n${names}\n\nAdd anyway?`);
+          if (!proceed) { this.adding = false; return; }
+        }
         await this.api('/api/series','POST',{
           series_id: this.addTarget.id,
           current_chapter: this.addForm.current_chapter,
