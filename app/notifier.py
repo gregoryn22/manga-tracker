@@ -207,6 +207,7 @@ def notify_chapter_update(
     new_chapters: str,
     mangabaka_url: str | None = None,
     reading_status: str | None = None,
+    notification_muted: bool = False,
 ):
     """MB-fallback: chapter count changed notification."""
     old_str = old_chapters or "?"
@@ -220,6 +221,7 @@ def notify_chapter_update(
         meta={"old_chapters": old_chapters, "new_chapters": new_chapters, "url": mangabaka_url},
         send_push=True,
         reading_status=reading_status,
+        notification_muted=notification_muted,
     )
 
 

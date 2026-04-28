@@ -481,7 +481,7 @@ function app() {
         const data = JSON.parse(text);
         const series = data.series || [];
         if (!series.length) { this.toast('No series found in file', 'error'); return; }
-        const resp = await this.api('/api/series/import/json', 'POST', { series });
+        const resp = await this.api('/api/series/import/json', 'POST', { series, activity_log: data.activity_log || [] });
         this.toast(`Imported ${resp.imported}, skipped ${resp.skipped} duplicates`, 'success');
         await this.loadLibrary();
       } catch(e) { this.toast('Import failed: invalid file', 'error'); }

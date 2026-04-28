@@ -843,6 +843,8 @@ def refresh_series(series_id: int, background_tasks: BackgroundTasks, db: Sessio
                     old_chapters=series.total_chapters,
                     new_chapters=new_total,
                     mangabaka_url=series.mangabaka_url,
+                    reading_status=series.reading_status,
+                    notification_muted=bool(getattr(series, "notification_muted", False)),
                 )
             series.total_chapters  = flat["total_chapters"]
             series.status          = flat["status"]

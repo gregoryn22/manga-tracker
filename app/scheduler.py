@@ -625,6 +625,12 @@ def _poll_via_mangabaka_fallback(db: Session, series_list: list[TrackedSeries]):
                         f"{series.title} — chapter count updated to {new_total}"
                         f" (was {old or '?'}) · via MangaBaka (approximate)"
                     )
+                    # Guard against double-notification: if MU later seeds
+                    # mu_latest_chapter from a stale summary value (< new_total),
+                    # the next poll would see chapter_is_newer(stale, None) = True
+                    # and fire again. Setting it now prevents that window.
+                    if not series.mu_latest_chapter:
+                        series.mu_latest_chapter = new_total
                     _send_chapter_notification(
                         db=db,
                         series=series,
