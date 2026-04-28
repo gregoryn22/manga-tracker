@@ -524,6 +524,7 @@ def _process_release(db: Session, series: TrackedSeries, rec: dict, send_push: b
         mu_url=series.mu_url,
     )
     db.add(rel)
+    db.flush()  # make visible to subsequent dedup queries in same transaction (autoflush=False)
 
     # Update series latest chapter
     if chapter_is_newer(chapter, series.mu_latest_chapter):
@@ -1257,11 +1258,16 @@ def _auto_archive_idle(db: Session):
 
     candidates = db.query(TrackedSeries).filter(
         TrackedSeries.reading_status == "reading",
-        TrackedSeries.simulpub_source.is_(None) | (TrackedSeries.simulpub_source == ""),
+        TrackedSeries.simulpub_source.is_(None)
+        | (TrackedSeries.simulpub_source == "")
+        | (TrackedSeries.simulpub_source == "custom"),
     ).all()
 
     archived = 0
     for series in candidates:
+        # Skip series recently added — they may not have a release yet
+        if series.added_at and series.added_at >= cutoff:
+            continue
         last_release = series.latest_release_date or ""
         if last_release and last_release >= cutoff_str:
             continue

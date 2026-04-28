@@ -231,11 +231,14 @@ def normalize_chapter(chapter_str: str | None) -> float | None:
     if numbers:
         return max(float(n) for n in numbers)
 
-    # 4. Last resort: all numbers from the original (covers bare "123" cases)
-    numbers = re.findall(r"\d+(?:\.\d+)?", s)
-    if not numbers:
-        return None
-    return max(float(n) for n in numbers)
+    # 4. Last resort: all numbers from the original, but only if the original
+    #    string has no volume prefix — avoids returning a vol number as a chapter.
+    if not re.search(r"(?i)\b(?:v(?:ol(?:ume)?)?\.?\s*)\d+", s):
+        numbers = re.findall(r"\d+(?:\.\d+)?", s)
+        if numbers:
+            return max(float(n) for n in numbers)
+
+    return None
 
 
 def chapter_is_newer(new_ch: str | None, known_ch: str | None) -> bool:

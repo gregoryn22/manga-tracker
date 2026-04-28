@@ -616,14 +616,14 @@ def get_stats(db: Session = Depends(get_db)):
     by_genre = [{"genre": g, "count": c} for g, c in by_genre]
 
     # Total chapters read
-    total_chapters_read = sum(
-        float(s.current_chapter or 0) for s in series_list
-        if s.current_chapter and s.current_chapter != "0"
-    )
-    try:
-        total_chapters_read = int(total_chapters_read)
-    except Exception:
-        total_chapters_read = 0
+    total_chapters_read = 0.0
+    for s in series_list:
+        if s.current_chapter and s.current_chapter != "0":
+            try:
+                total_chapters_read += float(s.current_chapter)
+            except (TypeError, ValueError):
+                pass
+    total_chapters_read = int(total_chapters_read)
 
     # Average rating (only series with mu_rating)
     rated_series = [s for s in series_list if s.mu_rating]

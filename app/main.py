@@ -422,7 +422,7 @@ def _schedule_mu_lookup(background_tasks: BackgroundTasks, series_id: int, title
             series.mu_rating_votes = mu_data.get("rating_votes")
 
             # Use MU cover if Komga cover is just the thumbnail URL
-            mu_cover = extract_mu_cover(mu_data)
+            mu_cover = extract_mu_cover(mu_data.get("image"))
             if mu_cover and not series.cover_url:
                 series.cover_url = mu_cover
 
