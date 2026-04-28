@@ -407,7 +407,7 @@ def _schedule_mu_lookup(background_tasks: BackgroundTasks, series_id: int, title
             best = find_best_match(title, results)
             if not best:
                 return
-            mu_id = best.get("record", {}).get("series_id")
+            mu_id = best.get("series_id")
             if not mu_id:
                 return
 
@@ -419,7 +419,7 @@ def _schedule_mu_lookup(background_tasks: BackgroundTasks, series_id: int, title
             series.mu_series_id = mu_id
             series.mu_url = mu_data.get("url", "")
             series.mu_rating = mu_data.get("bayesian_rating")
-            series.mu_rating_votes = mu_data.get("rating", {}).get("votes")
+            series.mu_rating_votes = mu_data.get("rating_votes")
 
             # Use MU cover if Komga cover is just the thumbnail URL
             mu_cover = extract_mu_cover(mu_data)

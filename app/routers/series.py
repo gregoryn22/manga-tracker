@@ -13,7 +13,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from ..database import ReadingLog, TrackedSeries, get_db, get_setting
+from ..database import ReadingLog, Release, TrackedSeries, get_db, get_setting
 from ..mangabaka import MangaBakaClient, series_from_api
 from ..mangaupdates import (
     chapter_is_newer,
@@ -859,15 +859,11 @@ def refresh_series(series_id: int, background_tasks: BackgroundTasks, db: Sessio
     # Check MU for recent releases
     if series.mu_series_id:
         try:
+            from ..scheduler import _process_release
             mu_resp = search_releases(series_id=series.mu_series_id, per_page=5)
             for r in mu_resp.get("results", [])[:3]:
                 rec = r.get("record", {})
-                ch = rec.get("chapter")
-                if chapter_is_newer(ch, series.mu_latest_chapter):
-                    series.mu_latest_chapter    = ch
-                    series.latest_release_date  = rec.get("release_date")
-                    groups = rec.get("groups", [])
-                    series.latest_release_group = groups[0].get("name") if groups else None
+                _process_release(db, series, rec)
         except Exception as e:
             logger.warning(f"MU refresh failed for series {series_id}: {e}")
     else:
