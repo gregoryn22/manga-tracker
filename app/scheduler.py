@@ -328,6 +328,7 @@ def _poll_via_mangaupdates(db: Session, series_list: list[TrackedSeries]):
             _check_mu_series(db, series, feed_by_mu_id)
         except Exception as e:
             logger.error(f"MU check failed for '{series.title}': {e}")
+            db.rollback()
 
     # Step 5: MB fallback for still-unlinked series
     still_unlinked = [s for s in series_list if not s.mu_series_id]
@@ -914,15 +915,20 @@ def _poll_kmanga(db: Session, series_list: list[TrackedSeries]):
             series.last_checked = datetime.utcnow()
             db.commit()
 
-        except KMangaAuthError:
+        except KMangaAuthError as e:
             # Session expired mid-run — try to re-login once and continue
             logger.warning("K Manga session expired during poll, re-logging in…")
+            _mark_poll_failure(series, str(e), db)
+            db.commit()
             try:
-                updated = client.login()
+                updated = client.login(recaptcha_token=recaptcha_token)
                 set_setting(db, "kmanga_cookies", _json.dumps(updated))
+                if recaptcha_token:
+                    set_setting(db, "kmanga_recaptcha_token", "")
+                    recaptcha_token = None
                 logged_in = True
-            except Exception as e:
-                logger.error(f"K Manga re-login failed: {e}")
+            except Exception as re_e:
+                logger.error(f"K Manga re-login failed: {re_e}")
                 break
         except KMangaRegionError as e:
             logger.error(f"K Manga region block: {e} — aborting K Manga poll")
