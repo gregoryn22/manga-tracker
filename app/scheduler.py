@@ -478,7 +478,7 @@ def _check_mu_series(
     db.commit()
 
 
-def _process_release(db: Session, series: TrackedSeries, rec: dict):
+def _process_release(db: Session, series: TrackedSeries, rec: dict, send_push: bool = True):
     """
     Given a MU release record, decide if it's new and notify if so.
     Deduplicates by mu_release_id, then by (series_id, chapter, coalesced group_name).
@@ -547,6 +547,7 @@ def _process_release(db: Session, series: TrackedSeries, rec: dict):
             group_name=group_name,
             release_date=release_date,
             old_chapter=old_chapter,
+            send_push=send_push,
         )
 
         logger.info(f"✓ New chapter: {message}")
@@ -561,6 +562,7 @@ def _send_chapter_notification(
     group_name: str | None,
     release_date: str | None,
     old_chapter: str | None,
+    send_push: bool = True,
 ):
     create_notification(
         db=db,
@@ -577,7 +579,7 @@ def _send_chapter_notification(
             "url": series.mu_url or series.mangabaka_url,
             "cover_url": series.best_cover(),
         },
-        send_push=True,
+        send_push=send_push,
         reading_status=series.reading_status,
         notification_muted=bool(getattr(series, "notification_muted", False)),
     )

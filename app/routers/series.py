@@ -341,10 +341,11 @@ def _bg_enrich_with_mu(series_id: int, title: str, known_mu_id: int | None = Non
             series.mu_rating = detail.get("bayesian_rating")
             series.mu_rating_votes = detail.get("rating_votes")
 
-            # Latest chapter
-            latest_ch = str(detail.get("latest_chapter") or "")
-            if latest_ch:
-                series.mu_latest_chapter = latest_ch
+            # Latest chapter — only seed if releases haven't established a more accurate baseline
+            if not series.mu_latest_chapter:
+                latest_ch = str(detail.get("latest_chapter") or "")
+                if latest_ch:
+                    series.mu_latest_chapter = latest_ch
 
             # Authors — flat list (backwards compat) + role-aware list
             raw_authors = detail.get("authors", [])
@@ -863,7 +864,7 @@ def refresh_series(series_id: int, background_tasks: BackgroundTasks, db: Sessio
             mu_resp = search_releases(series_id=series.mu_series_id, per_page=5)
             for r in mu_resp.get("results", [])[:3]:
                 rec = r.get("record", {})
-                _process_release(db, series, rec)
+                _process_release(db, series, rec, send_push=False)
         except Exception as e:
             logger.warning(f"MU refresh failed for series {series_id}: {e}")
     else:
