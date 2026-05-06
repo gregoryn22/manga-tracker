@@ -182,6 +182,7 @@ def _maybe_push(
 
     title = f"📚 {series_title}" if series_title else "Manga Tracker"
     url = meta.get("url")
+    cover_url = meta.get("cover_url")
 
     # Pushover
     user_key, app_token, pushover_enabled = get_pushover_creds(db)
@@ -195,7 +196,7 @@ def _maybe_push(
         )
 
     # Discord / Slack webhook
-    _maybe_webhook(db, title, message, url)
+    _maybe_webhook(db, title, message, url, cover_url)
 
 
 # ── Convenience wrappers (used by MB fallback in scheduler) ──────────────────
@@ -267,7 +268,7 @@ def _validate_webhook_url(url: str) -> None:
                 )
 
 
-def send_webhook_raw(webhook_url: str, title: str, message: str, url: str | None = None):
+def send_webhook_raw(webhook_url: str, title: str, message: str, url: str | None = None, cover_url: str | None = None):
     """
     Send a formatted message to a Discord or Slack webhook.
 
@@ -277,13 +278,14 @@ def send_webhook_raw(webhook_url: str, title: str, message: str, url: str | None
     _validate_webhook_url(webhook_url)
 
     if "discord.com/api/webhooks" in webhook_url or "discordapp.com/api/webhooks" in webhook_url:
-        payload = {
-            "embeds": [{
-                "title": title,
-                "description": message + (f"\n[View]({url})" if url else ""),
-                "color": 5814783,  # purple
-            }]
+        embed: dict = {
+            "title": title,
+            "description": message + (f"\n[View]({url})" if url else ""),
+            "color": 5814783,  # purple
         }
+        if cover_url:
+            embed["thumbnail"] = {"url": cover_url}
+        payload = {"embeds": [embed]}
     else:
         text = f"*{title}*\n{message}" + (f"\n<{url}|View>" if url else "")
         payload = {"text": text}
@@ -293,7 +295,7 @@ def send_webhook_raw(webhook_url: str, title: str, message: str, url: str | None
         resp.raise_for_status()
 
 
-def _maybe_webhook(db: Session, title: str, message: str, url: str | None = None):
+def _maybe_webhook(db: Session, title: str, message: str, url: str | None = None, cover_url: str | None = None):
     """Send a Discord/Slack webhook if configured and enabled."""
     rows = _load_settings(db)
     enabled = rows.get("webhook_enabled", "false").lower() == "true"
@@ -302,7 +304,7 @@ def _maybe_webhook(db: Session, title: str, message: str, url: str | None = None
         return
 
     try:
-        send_webhook_raw(webhook_url, title, message, url)
+        send_webhook_raw(webhook_url, title, message, url, cover_url)
         logger.info(f"Webhook → {title}")
     except Exception as e:
         logger.error(f"Webhook failed: {e}")
