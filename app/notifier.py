@@ -12,6 +12,7 @@ Push behaviour is governed by three settings (all toggled in the UI):
 import ipaddress
 import json
 import logging
+import socket
 import threading
 from datetime import datetime
 from urllib.parse import urlparse
@@ -239,16 +240,31 @@ def _validate_webhook_url(url: str) -> None:
     if not hostname:
         raise ValueError("Webhook URL missing hostname")
 
-    # Block literal private/loopback/reserved IPs — domain names pass through
-    # (full DNS rebinding prevention would require an egress proxy)
+    def _is_blocked(ip_str: str) -> bool:
+        try:
+            ip = ipaddress.ip_address(ip_str)
+            return ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast
+        except ValueError:
+            return False
+
     try:
-        ip = ipaddress.ip_address(hostname)
-    except ValueError:
-        # hostname is a domain name, not a literal IP — allow it
-        pass
-    else:
-        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast:
+        # Literal IP address — check directly
+        ipaddress.ip_address(hostname)
+        if _is_blocked(hostname):
             raise ValueError("Webhook URL cannot target private or internal addresses")
+    except ValueError as e:
+        if "cannot target" in str(e):
+            raise
+        # Domain name — resolve all IPs and check each one
+        try:
+            resolved = socket.getaddrinfo(hostname, None)
+        except OSError:
+            raise ValueError(f"Cannot resolve webhook hostname: {hostname}")
+        for *_, sockaddr in resolved:
+            if _is_blocked(sockaddr[0]):
+                raise ValueError(
+                    f"Webhook URL resolves to internal address ({sockaddr[0]})"
+                )
 
 
 def send_webhook_raw(webhook_url: str, title: str, message: str, url: str | None = None):

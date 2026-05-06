@@ -67,11 +67,21 @@ _komga_import_lock = threading.Lock()
 # Tracks live progress of an ongoing Komga import for the frontend to poll
 _komga_import_progress: dict = {"running": False, "total": 0, "done": 0, "imported": 0, "skipped": 0}
 
+_ALLOWED_ORIGINS = [
+    o.strip()
+    for o in os.getenv(
+        "ALLOWED_ORIGINS",
+        "http://localhost,http://localhost:8000,http://127.0.0.1,http://127.0.0.1:8000",
+    ).split(",")
+    if o.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=_ALLOWED_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization"],
 )
 
 # API routers
