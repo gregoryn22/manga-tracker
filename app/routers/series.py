@@ -311,12 +311,13 @@ def _bg_enrich_with_mu(series_id: int, title: str, known_mu_id: int | None = Non
             return
 
         mu_id = known_mu_id or series.mu_series_id
+        link_confident = known_mu_id is not None  # MB-provided ID = confident
 
         if not mu_id:
             # MB didn't have a MU link — fall back to fuzzy title search
             resp    = search_series(title, per_page=5)
             results = resp.get("results", [])
-            best    = find_best_match(title, results)
+            best, link_confident = find_best_match(title, results)
             if not best:
                 logger.info(f"No MU match found for '{title}'")
                 return
@@ -333,9 +334,11 @@ def _bg_enrich_with_mu(series_id: int, title: str, known_mu_id: int | None = Non
         try:
             detail = get_series(mu_id)
 
-            # Cover fallback
-            if not series.cover_url:
-                series.mu_cover_url = extract_mu_cover(detail.get("image"))
+            # Always store MU cover in its dedicated field — best_cover() picks the
+            # best absolute URL, so this works even when cover_url is a relative Komga path.
+            mu_cover = extract_mu_cover(detail.get("image"))
+            if mu_cover:
+                series.mu_cover_url = mu_cover
 
             # Ratings
             series.mu_rating = detail.get("bayesian_rating")
@@ -397,8 +400,12 @@ def _bg_enrich_with_mu(series_id: int, title: str, known_mu_id: int | None = Non
         except Exception as e:
             logger.debug(f"MU related series fetch skipped for '{title}': {e}")
 
+        # Only set status if not already manually confirmed
+        if series.mu_link_status != "manual":
+            series.mu_link_status = "auto" if link_confident else "uncertain"
+
         db.commit()
-        logger.info(f"Enriched '{title}' with MU ID {mu_id}")
+        logger.info(f"Enriched '{title}' with MU ID {mu_id} (confident={link_confident})")
     except Exception as e:
         logger.error(f"MU enrichment failed for '{title}': {e}")
         db.rollback()
@@ -431,6 +438,55 @@ def bulk_status(req: BulkStatusRequest, db: Session = Depends(get_db)):
             updated += 1
     db.commit()
     return {"success": True, "updated": updated}
+
+
+# ── Bulk fill missing MB covers ──────────────────────────────────────
+
+_KOMGA_ID_FLOOR = 2_000_000_000  # IDs at or above this are Komga-synthetic, not real MB IDs
+
+
+@router.post("/fill-missing-covers")
+def fill_missing_covers(background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    """
+    Queue a background pass that fetches MB metadata for every real MB series
+    (id < KOMGA_ID_FLOOR) whose cover_url is missing or a relative/internal path.
+    Returns immediately with the count of series queued.
+    """
+    needs_cover = db.query(TrackedSeries).filter(
+        TrackedSeries.id < _KOMGA_ID_FLOOR,
+        TrackedSeries.cover_url.is_(None)
+        | TrackedSeries.cover_url.like("/%"),
+    ).all()
+
+    ids = [s.id for s in needs_cover]
+    if ids:
+        background_tasks.add_task(_bg_fill_covers, ids)
+    return {"queued": len(ids)}
+
+
+def _bg_fill_covers(series_ids: list[int]):
+    """Fetch fresh MB metadata for each series and update cover_url."""
+    from ..database import SessionLocal
+    db = SessionLocal()
+    try:
+        client = get_mb_client(db)
+        updated = 0
+        for sid in series_ids:
+            try:
+                resp = client.get_series(sid)
+                if resp.get("status") == 200 and resp.get("data"):
+                    flat = series_from_api(resp["data"])
+                    if flat.get("cover_url"):
+                        series = db.query(TrackedSeries).filter(TrackedSeries.id == sid).first()
+                        if series:
+                            series.cover_url = flat["cover_url"]
+                            updated += 1
+            except Exception as e:
+                logger.warning(f"fill_covers: MB fetch failed for series {sid}: {e}")
+        db.commit()
+        logger.info(f"fill_missing_covers: updated {updated}/{len(series_ids)} series")
+    finally:
+        db.close()
 
 
 # ── Export / Import library ──────────────────────────────────────────
@@ -665,6 +721,84 @@ def get_stats(db: Session = Depends(get_db)):
         },
         "completion_rate": round(completion_rate, 1),
     }
+
+
+# ── MU link review ───────────────────────────────────────────────────────────
+
+@router.get("/needs-mu-review")
+def needs_mu_review(db: Session = Depends(get_db)):
+    """Return all series flagged as needing MU link review."""
+    rows = db.query(TrackedSeries).filter(
+        TrackedSeries.mu_link_status == "uncertain"
+    ).order_by(TrackedSeries.title).all()
+    return [{"id": s.id, "title": s.title, "mu_series_id": s.mu_series_id,
+             "mu_url": s.mu_url, "cover_url": s.best_cover()} for s in rows]
+
+
+@router.get("/{series_id}/mu-candidates")
+def mu_candidates(series_id: int, q: str | None = None, db: Session = Depends(get_db)):
+    """Search MU for alternative link candidates. Defaults to series title search."""
+    series = db.query(TrackedSeries).filter(TrackedSeries.id == series_id).first()
+    if not series:
+        raise HTTPException(status_code=404, detail="Series not tracked")
+    query = (q or series.title).strip()
+    if not query:
+        raise HTTPException(status_code=400, detail="No search query")
+    from ..mangaupdates import search_series as mu_search
+    try:
+        resp = mu_search(query, per_page=10)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"MangaUpdates error: {e}")
+    candidates = []
+    for r in resp.get("results", []):
+        rec = r.get("record", {})
+        img = rec.get("image") or {}
+        url_obj = img.get("url") or {}
+        candidates.append({
+            "series_id": rec.get("series_id"),
+            "title":     rec.get("title"),
+            "year":      rec.get("year"),
+            "type":      rec.get("type"),
+            "url":       rec.get("url"),
+            "cover_url": url_obj.get("thumb") or url_obj.get("original"),
+            "description": (rec.get("description") or "")[:200],
+            "rating":    rec.get("bayesian_rating"),
+        })
+    return candidates
+
+
+class ConfirmMuLinkRequest(BaseModel):
+    mu_series_id: int
+    mu_url: str | None = None
+
+
+@router.post("/{series_id}/confirm-mu-link")
+def confirm_mu_link(series_id: int, req: ConfirmMuLinkRequest, db: Session = Depends(get_db)):
+    """User confirms or overrides the MU link for a series."""
+    series = db.query(TrackedSeries).filter(TrackedSeries.id == series_id).first()
+    if not series:
+        raise HTTPException(status_code=404, detail="Series not tracked")
+
+    series.mu_series_id  = req.mu_series_id
+    series.mu_url        = req.mu_url or series.mu_url
+    series.mu_link_status = "manual"
+
+    # Re-fetch MU metadata for the confirmed ID
+    from ..mangaupdates import get_series as get_mu, extract_mu_cover
+    try:
+        mu_data = get_mu(req.mu_series_id)
+        series.mu_url        = mu_data.get("url") or req.mu_url or series.mu_url
+        series.mu_rating     = mu_data.get("bayesian_rating")
+        series.mu_rating_votes = mu_data.get("rating_votes")
+        mu_cover = extract_mu_cover(mu_data.get("image"))
+        if mu_cover:
+            series.mu_cover_url = mu_cover
+    except Exception as e:
+        logger.warning(f"MU detail fetch failed after manual confirm for series {series_id}: {e}")
+
+    db.commit()
+    db.refresh(series)
+    return series.to_dict()
 
 
 # ── Get single series ─────────────────────────────────────────────────────────

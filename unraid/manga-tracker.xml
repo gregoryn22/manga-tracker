@@ -114,6 +114,19 @@
     Required="false"
     Mask="false">6</Config>
 
+  <!-- ── Network / CORS ───────────────────────────────────────────────── -->
+
+  <Config
+    Name="Allowed Origins"
+    Target="ALLOWED_ORIGINS"
+    Default=""
+    Mode=""
+    Description="Comma-separated list of origins allowed to reach the API. Must include the URL you use to open the web UI, e.g. http://192.168.1.100:8765. If left blank, only localhost is allowed and the web UI will not load."
+    Type="Variable"
+    Display="always"
+    Required="true"
+    Mask="false"/>
+
   <!-- ── Advanced ───────────────────────────────────────────────────── -->
 
   <Config
