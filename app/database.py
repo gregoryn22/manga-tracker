@@ -111,13 +111,23 @@ class TrackedSeries(Base):
     last_poll_error = Column(Text, nullable=True)         # last error message
     last_poll_success = Column(DateTime, nullable=True)   # last successful poll time
 
+    # ── MU link confidence ─────────────────────────────────────────────
+    # NULL  = pre-existing / legacy (no review needed)
+    # 'auto'      = exact title match or MB-provided MU ID (confident)
+    # 'uncertain' = first-result fallback (needs user review)
+    # 'manual'    = user confirmed or manually set
+    mu_link_status = Column(String, nullable=True)
+
     # ── Housekeeping ──────────────────────────────────────────────────
     mangabaka_url = Column(String, nullable=True)
     last_checked = Column(DateTime, nullable=True)
     added_at = Column(DateTime, default=datetime.utcnow)
 
     def best_cover(self) -> str | None:
-        return self.cover_url or self.mu_cover_url
+        for url in (self.cover_url, self.mu_cover_url):
+            if url and url.startswith("http"):
+                return url
+        return None
 
     def display_chapter(self) -> str | None:
         """Best known latest chapter: prefer MU's exact release data."""
@@ -178,6 +188,7 @@ class TrackedSeries(Base):
             "tags": self._safe_json(self.tags, default=[]),
             "notification_muted": bool(self.notification_muted),
             "mangabaka_url": self.mangabaka_url,
+            "mu_link_status": self.mu_link_status,
             "poll_failures": self.poll_failures or 0,
             "last_poll_error": self.last_poll_error,
             "last_poll_success": self.last_poll_success.isoformat() if self.last_poll_success else None,
@@ -343,6 +354,7 @@ def _migrate_db():
         ("tracked_series", "associated_titles",  "TEXT"),
         ("tracked_series", "related_series",     "TEXT"),
         ("tracked_series", "author_roles",       "TEXT"),
+        ("tracked_series", "mu_link_status",     "VARCHAR"),
     ]
 
     # Indexes to ensure on hot query columns (idempotent — CREATE IF NOT EXISTS)

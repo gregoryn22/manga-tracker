@@ -162,22 +162,24 @@ def get_releases_days(include_metadata: bool = True) -> dict[str, Any]:
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def find_best_match(title: str, results: list[dict]) -> dict | None:
+def find_best_match(title: str, results: list[dict]) -> tuple[dict | None, bool]:
     """
-    Given a list of MU series search results, return the best match for `title`.
-    Prefers exact case-insensitive title match, then falls back to first result.
+    Given a list of MU series search results, return (best_record, confident).
+
+    confident=True  — exact case-insensitive title or associated title match.
+    confident=False — fell back to first result; caller should flag for review.
     """
     title_lower = title.lower().strip()
     for r in results:
         rec = r.get("record", {})
         if rec.get("title", "").lower().strip() == title_lower:
-            return rec
-        # Also check associated titles
+            return rec, True
         for assoc in rec.get("associated", []):
             if assoc.get("title", "").lower().strip() == title_lower:
-                return rec
-    # Fallback: first result
-    return results[0].get("record") if results else None
+                return rec, True
+    if results:
+        return results[0].get("record"), False
+    return None, False
 
 
 def extract_mu_cover(image_data: dict | None) -> str | None:

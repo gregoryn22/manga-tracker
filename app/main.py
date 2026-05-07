@@ -413,8 +413,7 @@ def _schedule_mu_lookup(background_tasks: BackgroundTasks, series_id: int, title
             if not results:
                 return
 
-            # Use scored best match rather than blind first result
-            best = find_best_match(title, results)
+            best, link_confident = find_best_match(title, results)
             if not best:
                 return
             mu_id = best.get("series_id")
@@ -431,10 +430,9 @@ def _schedule_mu_lookup(background_tasks: BackgroundTasks, series_id: int, title
             series.mu_rating = mu_data.get("bayesian_rating")
             series.mu_rating_votes = mu_data.get("rating_votes")
 
-            # Use MU cover if Komga cover is just the thumbnail URL
             mu_cover = extract_mu_cover(mu_data.get("image"))
-            if mu_cover and not series.cover_url:
-                series.cover_url = mu_cover
+            if mu_cover:
+                series.mu_cover_url = mu_cover
 
             # Enrich genres from MU if we don't have them
             mu_genres = [g.get("genre") for g in mu_data.get("genres", []) if g.get("genre")]
@@ -448,8 +446,11 @@ def _schedule_mu_lookup(background_tasks: BackgroundTasks, series_id: int, title
             if mu_authors and not series.authors:
                 series.authors = json.dumps(mu_authors)
 
+            if series.mu_link_status != "manual":
+                series.mu_link_status = "auto" if link_confident else "uncertain"
+
             db.commit()
-            logger.info(f"Komga import: auto-linked '{title}' → MU#{mu_id}")
+            logger.info(f"Komga import: auto-linked '{title}' → MU#{mu_id} (confident={link_confident})")
         except Exception as e:
             logger.warning(f"Komga import: MU lookup failed for '{title}': {e}")
             db.rollback()

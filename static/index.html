@@ -328,6 +328,10 @@
                   <div class="source-badge" :class="'src-' + s.simulpub_source"
                        x-text="{'mangaplus':'MangaPlus','kmanga':'K Manga','mangaup':'MangaUp!','mangadex':'MangaDex','komga':'Komga'}[s.simulpub_source] || s.simulpub_source"></div>
                 </template>
+                <!-- MU link uncertain badge -->
+                <template x-if="s.mu_link_status === 'uncertain'">
+                  <div class="source-badge src-uncertain" title="MU link needs review">⚠ MU</div>
+                </template>
               </div>
 
               <div class="card-body">
@@ -1273,6 +1277,17 @@
           </div>
         </div>
 
+        <!-- Metadata Maintenance -->
+        <div class="card card-padded">
+          <div class="settings-block-title">🔧 Metadata Maintenance</div>
+          <div class="flex gap-2">
+            <button class="btn btn-ghost btn-sm" @click="fillMissingCovers()">🖼 Fetch Missing Covers</button>
+          </div>
+          <div class="text-xs text-muted mt-2 leading-relaxed">
+            Fetches cover art from MangaBaka for any series missing a cover image. Runs in the background — refresh the library after a moment to see results.
+          </div>
+        </div>
+
         <!-- UI Customization -->
         <div class="card card-padded">
           <div class="settings-block-title">🎨 UI Customization</div>
@@ -1871,6 +1886,67 @@
             </div>
           </template>
         </div>
+
+        <!-- MU Link Review -->
+        <template x-if="ds.mu_link_status === 'uncertain' || muReviewOpen">
+          <div class="mu-review-section">
+            <hr class="divider" />
+            <div class="mu-review-header">
+              <span class="mu-review-title">⚠ MangaUpdates Link — Low Confidence</span>
+              <button class="btn btn-ghost btn-xs" @click="muReviewOpen = !muReviewOpen"
+                      x-text="muReviewOpen ? 'Close' : 'Review'"></button>
+            </div>
+            <template x-if="ds.mu_series_id">
+              <div class="text-xs text-muted mb-2">
+                Currently linked: <a :href="ds.mu_url || '#'" target="_blank" rel="noopener" class="link-text" x-text="ds.mu_url || ('MU#' + ds.mu_series_id)"></a>
+              </div>
+            </template>
+            <template x-if="muReviewOpen">
+              <div>
+                <div class="flex gap-2 mb-2">
+                  <input class="input flex-1" x-model="muSearchQ" :placeholder="ds.title"
+                         @keydown.enter="searchMuCandidates(ds.id)" />
+                  <button class="btn btn-ghost btn-sm" @click="searchMuCandidates(ds.id)"
+                          :disabled="muSearching">
+                    <span x-show="muSearching" class="spin spin-sm"></span>
+                    <span x-show="!muSearching">Search</span>
+                  </button>
+                </div>
+                <template x-if="muCandidates.length > 0">
+                  <div class="mu-candidates">
+                    <template x-for="c in muCandidates" :key="c.series_id">
+                      <div class="mu-candidate" :class="{'mu-candidate--current': c.series_id === ds.mu_series_id}">
+                        <template x-if="c.cover_url">
+                          <img class="mu-cand-cover" :src="c.cover_url" loading="lazy" @error="$el.style.display='none'" />
+                        </template>
+                        <template x-if="!c.cover_url">
+                          <div class="mu-cand-cover mu-cand-cover--ph">📖</div>
+                        </template>
+                        <div class="mu-cand-info">
+                          <div class="mu-cand-title" x-text="c.title"></div>
+                          <div class="text-xs text-muted" x-text="[c.type, c.year].filter(Boolean).join(' · ')"></div>
+                          <div class="text-xs text-muted" x-show="c.rating" x-text="'★ ' + (c.rating ? c.rating.toFixed(1) : '')"></div>
+                          <div class="text-2xs text-muted mt-1 line-clamp-2" x-text="c.description"></div>
+                        </div>
+                        <div class="mu-cand-actions">
+                          <template x-if="c.series_id === ds.mu_series_id">
+                            <button class="btn btn-primary btn-xs" @click="confirmMuLink(ds.id, c)">✓ Confirm</button>
+                          </template>
+                          <template x-if="c.series_id !== ds.mu_series_id">
+                            <button class="btn btn-ghost btn-xs" @click="confirmMuLink(ds.id, c)">Link</button>
+                          </template>
+                        </div>
+                      </div>
+                    </template>
+                  </div>
+                </template>
+                <template x-if="muSearched && muCandidates.length === 0">
+                  <div class="text-xs text-muted">No results found.</div>
+                </template>
+              </div>
+            </template>
+          </div>
+        </template>
 
         <div class="modal-footer">
           <button class="btn btn-danger btn-sm" @click="removeSeries(ds.id)">🗑 Remove</button>

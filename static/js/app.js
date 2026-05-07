@@ -47,6 +47,7 @@ function app() {
 
     // Detail modal
     detailOpen: false, ds: null, ef: {}, detailReleases: [],
+    muReviewOpen: false, muSearchQ: '', muCandidates: [], muSearching: false, muSearched: false,
 
     // Add modal
     addOpen: false, addTarget: null, addForm: { current_chapter:'0', reading_status:'reading' }, adding: false,
@@ -488,6 +489,17 @@ function app() {
       event.target.value = '';
     },
 
+    async fillMissingCovers() {
+      try {
+        const resp = await this.api('/api/series/fill-missing-covers', 'POST');
+        if (resp.queued === 0) {
+          this.toast('All series already have covers', 'success');
+        } else {
+          this.toast(`Fetching covers for ${resp.queued} series in background…`, 'success');
+        }
+      } catch(e) { this.toast('Failed to queue cover fetch', 'error'); }
+    },
+
     // ── Webhook test ─────────────────────────────────
     async testWebhook() {
       try { const d = await this.api('/api/settings/test-webhook', 'POST'); this.toast(d.message||'Test sent!', 'success'); }
@@ -684,6 +696,10 @@ function app() {
       };
       this.detailOpen = true;
       this.detailReleases = [];
+      this.muReviewOpen = false;
+      this.muSearchQ = '';
+      this.muCandidates = [];
+      this.muSearched = false;
       // Load release history in background
       this._loadDetailReleases(series.id, series.mu_series_id);
     },
@@ -752,6 +768,37 @@ function app() {
         this.detailOpen = false;
         this.toast('Series removed','success');
       } catch(e) { this.toast('Failed to remove','error'); }
+    },
+
+    async searchMuCandidates(seriesId) {
+      this.muSearching = true;
+      this.muSearched = false;
+      try {
+        const q = this.muSearchQ.trim();
+        const url = `/api/series/${seriesId}/mu-candidates` + (q ? `?q=${encodeURIComponent(q)}` : '');
+        this.muCandidates = await this.api(url);
+        this.muSearched = true;
+      } catch(e) {
+        this.toast(e.detail || 'MU search failed', 'error');
+      }
+      this.muSearching = false;
+    },
+
+    async confirmMuLink(seriesId, candidate) {
+      try {
+        const updated = await this.api(`/api/series/${seriesId}/confirm-mu-link`, 'POST', {
+          mu_series_id: candidate.series_id,
+          mu_url: candidate.url,
+        });
+        const idx = this.library.findIndex(s => s.id === seriesId);
+        if (idx !== -1) this.library[idx] = updated;
+        this.ds = updated;
+        this.muReviewOpen = false;
+        this.muCandidates = [];
+        this.toast('MU link confirmed', 'success');
+      } catch(e) {
+        this.toast(e.detail || 'Failed to confirm link', 'error');
+      }
     },
 
     async refreshSeries(id) {
