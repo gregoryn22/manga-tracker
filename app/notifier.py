@@ -283,7 +283,7 @@ def send_webhook_raw(webhook_url: str, title: str, message: str, url: str | None
             "description": message + (f"\n[View]({url})" if url else ""),
             "color": 5814783,  # purple
         }
-        if cover_url:
+        if cover_url and cover_url.startswith("http"):
             embed["thumbnail"] = {"url": cover_url}
         payload = {"embeds": [embed]}
     else:
