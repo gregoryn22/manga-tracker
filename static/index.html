@@ -2000,7 +2000,7 @@
         <div class="modal-body modal-body--compact">
           <div class="form-group">
             <div class="form-label">Reading Status</div>
-            <select class="input" x-model="addForm.reading_status">
+            <select class="input" x-model="addForm.reading_status" @change="if (addForm.reading_status === 'completed' && addTarget.total_chapters) addForm.current_chapter = String(addTarget.total_chapters)">
               <option value="reading">📖 Reading</option>
               <option value="considering">🤔 Considering</option>
               <option value="plan_to_read">📋 Plan to Read</option>
@@ -2010,7 +2010,10 @@
           </div>
           <div class="form-group">
             <div class="form-label">Current Chapter</div>
-            <input class="input input-sm" type="number" min="0" step="1" x-model="addForm.current_chapter" />
+            <div style="display:flex;align-items:center;gap:0.5rem;">
+              <input class="input input-sm" type="number" min="0" step="1" x-model="addForm.current_chapter" style="width:6rem;" />
+              <span class="text-xs text-muted" x-show="addTarget.total_chapters" x-text="`of ${addTarget.total_chapters}`"></span>
+            </div>
           </div>
         </div>
         <div class="modal-footer modal-footer--compact">
