@@ -1833,7 +1833,7 @@
               <hr class="divider" />
               <div class="form-label mb-2">Release History (MangaUpdates)</div>
               <div class="release-timeline">
-                <template x-for="r in detailReleases.slice(0,10)" :key="r.id || r.chapter">
+                <template x-for="r in detailReleases" :key="r.id || r.chapter">
                   <div class="tl-item">
                     <div class="tl-dot"></div>
                     <div>
