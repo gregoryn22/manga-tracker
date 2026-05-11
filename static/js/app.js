@@ -474,6 +474,22 @@ function app() {
       } catch(e) { this.toast('Export failed', 'error'); }
     },
 
+    async exportMangabaka() {
+      try {
+        const resp = await fetch('/api/export/mangabaka');
+        if (!resp.ok) throw new Error(await resp.text());
+        const data = await resp.json();
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `mangabaka-library-export-${new Date().toISOString().slice(0,19).replace(/:/g,'-')}Z.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+        this.toast('MangaBaka export ready!', 'success');
+      } catch(e) { this.toast('Export failed', 'error'); }
+    },
+
     async importLibrary(event) {
       const file = event.target.files[0];
       if (!file) return;

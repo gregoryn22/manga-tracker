@@ -18,7 +18,7 @@ from pydantic import BaseModel
 from sqlalchemy import func
 
 from .database import ReadingLog, TrackedSeries, init_db, get_db, get_setting, SessionLocal
-from .routers import notifications, releases, series, settings
+from .routers import export, notifications, releases, series, settings
 from .scheduler import start_scheduler
 
 logging.basicConfig(
@@ -89,6 +89,7 @@ app.include_router(series.router)
 app.include_router(releases.router)
 app.include_router(notifications.router)
 app.include_router(settings.router)
+app.include_router(export.router)
 
 # Komga library search proxy (lightweight — no separate router needed)
 @app.get("/api/komga/search")
