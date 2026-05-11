@@ -1561,6 +1561,15 @@
             </div>
           </div>
 
+          <div class="flex gap-2 items-center mb-4 pb-4" style="border-bottom: 1px solid var(--border);">
+            <button class="btn btn-danger btn-sm" @click="removeSeries(ds.id)">🗑 Remove</button>
+            <button class="btn btn-ghost btn-sm" @click="refreshSeries(ds.id)">🔄 Refresh</button>
+            <div class="ml-auto flex gap-2">
+              <button class="btn btn-ghost" @click="detailOpen=false">Cancel</button>
+              <button class="btn btn-primary" @click="saveDetail()">💾 Save</button>
+            </div>
+          </div>
+
           <div class="form-group">
             <div class="form-label">Notes</div>
             <textarea class="input w-full" rows="2" placeholder="Your notes…" x-model="ef.notes"></textarea>
@@ -1961,14 +1970,6 @@
           </div>
         </template>
 
-        <div class="modal-footer">
-          <button class="btn btn-danger btn-sm" @click="removeSeries(ds.id)">🗑 Remove</button>
-          <button class="btn btn-ghost btn-sm" @click="refreshSeries(ds.id)">🔄 Refresh</button>
-          <div class="ml-auto flex gap-2">
-            <button class="btn btn-ghost" @click="detailOpen=false">Cancel</button>
-            <button class="btn btn-primary" @click="saveDetail()">💾 Save</button>
-          </div>
-        </div>
       </div>
     </template>
   </div>

@@ -216,8 +216,7 @@ textarea.input { resize: vertical; }
 .modal {
   background: var(--surface); border: 1px solid var(--border);
   border-radius: var(--radius-xl); width: 100%; max-width: 700px;
-  max-height: 90vh; overflow: hidden; box-shadow: var(--shadow);
-  display: flex; flex-direction: column;
+  max-height: 90vh; overflow-y: auto; box-shadow: var(--shadow);
 }
 .modal--sm { max-width: 440px; }
 .modal-head {
@@ -235,7 +234,7 @@ textarea.input { resize: vertical; }
 .modal-native { font-size: var(--fs-base); color: var(--text-muted); margin-bottom: var(--sp-2-5); }
 .modal-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: var(--sp-2-5); }
 
-.modal-body { padding: var(--sp-5) 22px; flex: 1; overflow-y: auto; }
+.modal-body { padding: var(--sp-5) 22px; }
 .modal-body--compact { padding: var(--sp-3-5) 18px; }
 .modal-desc {
   font-size: var(--fs-base); color: var(--text-muted); line-height: 1.7;
