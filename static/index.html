@@ -330,7 +330,11 @@
                 </template>
                 <!-- MU link uncertain badge -->
                 <template x-if="s.mu_link_status === 'uncertain'">
-                  <div class="source-badge src-uncertain" title="MU link needs review">⚠ MU</div>
+                  <div class="source-badge src-uncertain" title="MU link needs review — open series to review">⚠ MU</div>
+                </template>
+                <!-- No MangaBaka URL badge -->
+                <template x-if="!s.mangabaka_url">
+                  <div class="source-badge src-no-mb" title="Not linked to MangaBaka — open series and refresh to fix">⚠ MB</div>
                 </template>
               </div>
 
@@ -430,6 +434,12 @@
                           x-text="{'mangaplus':'MangaPlus','kmanga':'K Manga','mangaup':'MangaUp!','mangadex':'MangaDex','komga':'Komga'}[s.simulpub_source] || s.simulpub_source"></span>
                   </template>
                   <span class="chip-idle list-status-chip" x-show="isIdle(s) && sf.idle_detection_enabled==='true'">💤 idle</span>
+                  <template x-if="!s.mangabaka_url">
+                    <span class="text-2xs fw-600" style="color:#f87171" title="Not linked to MangaBaka — open series and refresh to fix">⚠ MB</span>
+                  </template>
+                  <template x-if="s.mu_link_status === 'uncertain'">
+                    <span class="text-2xs fw-600" style="color:#fbbf24" title="MU link needs review — open series to review">⚠ MU</span>
+                  </template>
                 </div>
               </div>
 
@@ -1506,6 +1516,29 @@
         </div>
 
         <div class="modal-body">
+
+          <!-- ── Link alert banners ──────────────────────────────── -->
+          <template x-if="!ds.mangabaka_url">
+            <div class="alert-banner alert-banner-critical">
+              <span class="alert-icon">⚠</span>
+              <div class="alert-content">
+                <span class="alert-title">Not linked to MangaBaka</span>
+                <span class="alert-sub">MangaBaka links enable automatic MU, cover, and metadata enrichment</span>
+              </div>
+              <button class="btn btn-xs btn-ghost" @click="refreshSeries(ds.id)">Refresh</button>
+            </div>
+          </template>
+          <template x-if="ds.mu_link_status === 'uncertain'">
+            <div class="alert-banner alert-banner-warning">
+              <span class="alert-icon">⚠</span>
+              <div class="alert-content">
+                <span class="alert-title">MU link unconfirmed</span>
+                <span class="alert-sub">Auto-matched but not verified — confirm or replace below</span>
+              </div>
+              <button class="btn btn-xs btn-ghost" @click="muReviewOpen = true">Review</button>
+            </div>
+          </template>
+
           <div class="modal-desc" x-text="stripHtml(ds.description || 'No description available.')"></div>
 
           <!-- Latest release info -->
@@ -1558,6 +1591,15 @@
                  x-text="`${chapterProgress({...ds, current_chapter: ef.current_chapter}).toFixed(0)}% complete`"></div>
             <div class="text-xs text-muted mt-2" x-show="ds.last_read_at">
               Last read: <strong x-text="relativeTime(ds.last_read_at)"></strong>
+            </div>
+          </div>
+
+          <div class="flex gap-2 items-center mb-4 pb-4" style="border-bottom: 1px solid var(--border);">
+            <button class="btn btn-danger btn-sm" @click="removeSeries(ds.id)">🗑 Remove</button>
+            <button class="btn btn-ghost btn-sm" @click="refreshSeries(ds.id)">🔄 Refresh</button>
+            <div class="ml-auto flex gap-2">
+              <button class="btn btn-ghost" @click="detailOpen=false">Cancel</button>
+              <button class="btn btn-primary" @click="saveDetail()">💾 Save</button>
             </div>
           </div>
 
@@ -1833,7 +1875,7 @@
               <hr class="divider" />
               <div class="form-label mb-2">Release History (MangaUpdates)</div>
               <div class="release-timeline">
-                <template x-for="r in detailReleases.slice(0,10)" :key="r.id || r.chapter">
+                <template x-for="r in detailReleases" :key="r.id || r.chapter">
                   <div class="tl-item">
                     <div class="tl-dot"></div>
                     <div>
@@ -1961,14 +2003,6 @@
           </div>
         </template>
 
-        <div class="modal-footer">
-          <button class="btn btn-danger btn-sm" @click="removeSeries(ds.id)">🗑 Remove</button>
-          <button class="btn btn-ghost btn-sm" @click="refreshSeries(ds.id)">🔄 Refresh</button>
-          <div class="ml-auto flex gap-2">
-            <button class="btn btn-ghost" @click="detailOpen=false">Cancel</button>
-            <button class="btn btn-primary" @click="saveDetail()">💾 Save</button>
-          </div>
-        </div>
       </div>
     </template>
   </div>
@@ -2000,7 +2034,7 @@
         <div class="modal-body modal-body--compact">
           <div class="form-group">
             <div class="form-label">Reading Status</div>
-            <select class="input" x-model="addForm.reading_status">
+            <select class="input" x-model="addForm.reading_status" @change="if (addForm.reading_status === 'completed' && addTarget.total_chapters) addForm.current_chapter = String(addTarget.total_chapters)">
               <option value="reading">📖 Reading</option>
               <option value="considering">🤔 Considering</option>
               <option value="plan_to_read">📋 Plan to Read</option>
@@ -2010,7 +2044,10 @@
           </div>
           <div class="form-group">
             <div class="form-label">Current Chapter</div>
-            <input class="input input-sm" type="number" min="0" step="1" x-model="addForm.current_chapter" />
+            <div style="display:flex;align-items:center;gap:0.5rem;">
+              <input class="input input-sm" type="number" min="0" step="1" x-model="addForm.current_chapter" style="width:6rem;" />
+              <span class="text-xs text-muted" x-show="addTarget.total_chapters" x-text="`of ${addTarget.total_chapters}`"></span>
+            </div>
           </div>
         </div>
         <div class="modal-footer modal-footer--compact">
