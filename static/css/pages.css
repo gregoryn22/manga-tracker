@@ -175,7 +175,7 @@
 .release-date { font-size: var(--fs-xs); color: var(--text-dim); flex-shrink: 0; text-align: right; }
 
 /* ── Release timeline in modal ────────────────────────────────────── */
-.release-timeline { display: flex; flex-direction: column; gap: 0; }
+.release-timeline { display: flex; flex-direction: column; gap: 0; max-height: 260px; overflow-y: auto; }
 .tl-item {
   display: flex; gap: var(--sp-3); align-items: flex-start;
   padding: var(--sp-2) 0; border-bottom: 1px solid var(--border);
