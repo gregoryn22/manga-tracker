@@ -474,6 +474,10 @@ function app() {
       } catch(e) { this.toast('Export failed', 'error'); }
     },
 
+    exportMangabaka() {
+      window.location.href = '/api/export/mangabaka';
+    },
+
     async importLibrary(event) {
       const file = event.target.files[0];
       if (!file) return;
