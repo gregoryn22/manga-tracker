@@ -330,7 +330,11 @@
                 </template>
                 <!-- MU link uncertain badge -->
                 <template x-if="s.mu_link_status === 'uncertain'">
-                  <div class="source-badge src-uncertain" title="MU link needs review">⚠ MU</div>
+                  <div class="source-badge src-uncertain" title="MU link needs review — open series to review">⚠ MU</div>
+                </template>
+                <!-- No MangaBaka URL badge -->
+                <template x-if="!s.mangabaka_url">
+                  <div class="source-badge src-no-mb" title="Not linked to MangaBaka — open series and refresh to fix">⚠ MB</div>
                 </template>
               </div>
 
@@ -430,6 +434,12 @@
                           x-text="{'mangaplus':'MangaPlus','kmanga':'K Manga','mangaup':'MangaUp!','mangadex':'MangaDex','komga':'Komga'}[s.simulpub_source] || s.simulpub_source"></span>
                   </template>
                   <span class="chip-idle list-status-chip" x-show="isIdle(s) && sf.idle_detection_enabled==='true'">💤 idle</span>
+                  <template x-if="!s.mangabaka_url">
+                    <span class="text-2xs fw-600" style="color:#f87171" title="Not linked to MangaBaka — open series and refresh to fix">⚠ MB</span>
+                  </template>
+                  <template x-if="s.mu_link_status === 'uncertain'">
+                    <span class="text-2xs fw-600" style="color:#fbbf24" title="MU link needs review — open series to review">⚠ MU</span>
+                  </template>
                 </div>
               </div>
 
@@ -1506,6 +1516,29 @@
         </div>
 
         <div class="modal-body">
+
+          <!-- ── Link alert banners ──────────────────────────────── -->
+          <template x-if="!ds.mangabaka_url">
+            <div class="alert-banner alert-banner-critical">
+              <span class="alert-icon">⚠</span>
+              <div class="alert-content">
+                <span class="alert-title">Not linked to MangaBaka</span>
+                <span class="alert-sub">MangaBaka links enable automatic MU, cover, and metadata enrichment</span>
+              </div>
+              <button class="btn btn-xs btn-ghost" @click="refreshSeries(ds.id)">Refresh</button>
+            </div>
+          </template>
+          <template x-if="ds.mu_link_status === 'uncertain'">
+            <div class="alert-banner alert-banner-warning">
+              <span class="alert-icon">⚠</span>
+              <div class="alert-content">
+                <span class="alert-title">MU link unconfirmed</span>
+                <span class="alert-sub">Auto-matched but not verified — confirm or replace below</span>
+              </div>
+              <button class="btn btn-xs btn-ghost" @click="muReviewOpen = true">Review</button>
+            </div>
+          </template>
+
           <div class="modal-desc" x-text="stripHtml(ds.description || 'No description available.')"></div>
 
           <!-- Latest release info -->

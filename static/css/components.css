@@ -289,6 +289,34 @@ textarea.input { resize: vertical; }
 .source-badge.src-komga      { background: var(--komga-bg); color: #fff; }
 .source-badge.src-custom     { background: rgba(120,120,120,0.7); color: #fff; }
 .source-badge.src-uncertain  { background: rgba(220,160,0,0.85); color: #fff; }
+.source-badge.src-no-mb {
+  bottom: auto; top: 0;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  background: rgba(239,68,68,0.88); color: #fff;
+}
+
+/* ── Alert banners (detail modal) ─────────────────────────────────── */
+.alert-banner {
+  display: flex; align-items: center; gap: var(--sp-3);
+  padding: var(--sp-2-5) var(--sp-3-5);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--sp-3);
+  font-size: var(--fs-sm);
+}
+.alert-banner-critical {
+  background: var(--red-dim);
+  border: 1px solid rgba(239,68,68,0.35);
+  color: #f87171;
+}
+.alert-banner-warning {
+  background: var(--yellow-dim);
+  border: 1px solid rgba(245,158,11,0.35);
+  color: #fbbf24;
+}
+.alert-icon { font-size: var(--fs-lg); flex-shrink: 0; line-height: 1; }
+.alert-content { flex: 1; min-width: 0; }
+.alert-title { font-weight: 700; display: block; }
+.alert-sub { font-size: var(--fs-xs); opacity: 0.8; }
 
 /* ── External links ───────────────────────────────────────────────── */
 .ext-links-section { margin-top: var(--sp-3-5); }
