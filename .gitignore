@@ -29,3 +29,4 @@ docker-compose.override.yml
 Thumbs.db
 
 claude.md
+./claude/
