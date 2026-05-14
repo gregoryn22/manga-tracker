@@ -1871,10 +1871,13 @@
 
           <!-- Release history -->
           <template x-if="detailReleases.length > 0">
-            <div>
+            <div x-data="{ releaseHistoryOpen: false }">
               <hr class="divider" />
-              <div class="form-label mb-2">Release History (MangaUpdates)</div>
-              <div class="release-timeline">
+              <button class="release-history-toggle" @click="releaseHistoryOpen = !releaseHistoryOpen" type="button">
+                <span class="form-label mb-0">Release History (MangaUpdates)</span>
+                <svg class="release-history-chevron" :class="{ 'rotated': releaseHistoryOpen }" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+              </button>
+              <div class="release-timeline" x-show="releaseHistoryOpen">
                 <template x-for="r in detailReleases" :key="r.id || r.chapter">
                   <div class="tl-item">
                     <div class="tl-dot"></div>
