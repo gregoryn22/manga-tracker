@@ -180,7 +180,12 @@
   width: 100%; background: none; border: none; padding: 0; cursor: pointer;
   color: inherit; margin-bottom: var(--sp-2);
 }
-.release-history-toggle:hover .form-label { color: var(--accent); }
+.release-history-label {
+  font-size: var(--fs-sm); font-weight: 600; color: var(--text-muted);
+  text-transform: uppercase; letter-spacing: 0.05em;
+  transition: color 0.15s;
+}
+.release-history-toggle:hover .release-history-label { color: var(--accent); }
 .release-history-chevron { color: var(--text-muted); flex-shrink: 0; transition: transform 0.2s ease; }
 .release-history-chevron.rotated { transform: rotate(180deg); }
 .release-timeline { display: flex; flex-direction: column; gap: 0; }
