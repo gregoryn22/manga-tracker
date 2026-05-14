@@ -46,7 +46,7 @@ def _series_to_mb_entry(s: TrackedSeries) -> dict:
         "entry": {
             "note": s.notes or None,
             "read_link": None,
-            "rating": None,
+            "rating": s.user_rating,
             "state": _STATUS_MAP.get(s.reading_status or "reading", "reading"),
             "priority": 20,
             "is_private": False,
