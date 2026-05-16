@@ -762,7 +762,7 @@
             <div class="stat-card" x-show="statsData.avg_rating > 0">
               <div class="stat-label">Avg Rating</div>
               <div class="stat-value yellow" x-text="statsData.avg_rating.toFixed(2)"></div>
-              <div class="stat-sub">★ (MangaUpdates)</div>
+              <div class="stat-sub">★ (<span x-text="statsData.avg_rating_source || 'MangaUpdates'"></span>)</div>
             </div>
           </div>
 
@@ -1283,7 +1283,8 @@
                    @change="importLibrary($event)" />
           </div>
           <div class="text-xs text-muted mt-2 leading-relaxed">
-            Export your entire library as a JSON file for backup or migration. Import will skip series that are already tracked.
+            Export your entire library as a JSON file for backup or to restore into this app. Import will skip series that are already tracked.
+            <span class="text-warning">⚠️ This format is for this app only — to sync to MangaBaka, use the export below.</span>
           </div>
         </div>
 
@@ -1606,6 +1607,22 @@
           <div class="form-group">
             <div class="form-label">Notes</div>
             <textarea class="input w-full" rows="2" placeholder="Your notes…" x-model="ef.notes"></textarea>
+          </div>
+
+          <!-- User Rating -->
+          <div class="form-group" x-data="{ starHover: null }">
+            <div class="form-label">Your Rating <span class="text-muted fw-400 text-xs">· syncs to MangaBaka export</span></div>
+            <div class="star-rating">
+              <template x-for="n in [1,2,3,4,5,6,7,8,9,10]" :key="n">
+                <button type="button" class="star-btn"
+                  :class="{'active': (starHover ?? ef.user_rating) >= n}"
+                  @mouseenter="starHover = n"
+                  @mouseleave="starHover = null"
+                  @click="ef.user_rating = (ef.user_rating === n) ? null : n">★</button>
+              </template>
+              <span class="star-label" x-show="ef.user_rating !== null" x-text="(ef.user_rating ?? '') + ' / 10'"></span>
+              <button type="button" class="btn btn-ghost btn-xs" style="margin-left:0.5rem" x-show="ef.user_rating !== null" @click="ef.user_rating = null">Clear</button>
+            </div>
           </div>
 
           <div class="form-group">

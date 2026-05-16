@@ -55,6 +55,7 @@ class TrackedSeries(Base):
     rating = Column(String, nullable=True)           # MangaBaka aggregated
     mu_rating = Column(Float, nullable=True)         # MangaUpdates bayesian rating (0-10)
     mu_rating_votes = Column(Integer, nullable=True)
+    user_rating = Column(Float, nullable=True)       # User's personal rating (0-10, 0.5 increments)
 
     # ── Chapter / release tracking ────────────────────────────────────
     total_chapters = Column(String, nullable=True)       # MB chapter count — unreliable per dev; last-resort fallback only
@@ -172,6 +173,7 @@ class TrackedSeries(Base):
             "rating": self.rating,
             "mu_rating": self.mu_rating,
             "mu_rating_votes": self.mu_rating_votes,
+            "user_rating": self.user_rating,
             "total_chapters": self.total_chapters,
             "mu_latest_chapter": self.mu_latest_chapter,
             "latest_chapter": self.display_chapter(),
@@ -355,6 +357,7 @@ def _migrate_db():
         ("tracked_series", "related_series",     "TEXT"),
         ("tracked_series", "author_roles",       "TEXT"),
         ("tracked_series", "mu_link_status",     "VARCHAR"),
+        ("tracked_series", "user_rating",        "REAL"),
     ]
 
     # Indexes to ensure on hot query columns (idempotent — CREATE IF NOT EXISTS)

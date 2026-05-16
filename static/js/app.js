@@ -697,6 +697,7 @@ function app() {
         mu_latest_chapter_manual: series.mu_latest_chapter||'',
         komgaSearch: '', komgaResults: [], komgaSearching: false, komgaSearched: false,
         komga_track_mode: series.komga_track_mode || 'chapter',
+        user_rating: series.user_rating ?? null,
       };
       this.detailOpen = true;
       this.detailReleases = [];
@@ -750,6 +751,8 @@ function app() {
           simulpub_source: this.ef.simulpub_source,
           simulpub_id: this.ef.simulpub_id,
           komga_track_mode: this.ef.simulpub_source === 'komga' ? this.ef.komga_track_mode : undefined,
+          user_rating: this.ef.user_rating,
+          clear_user_rating: this.ef.user_rating === null && this.ds.user_rating !== null,
         };
         if (this.ef.simulpub_source === 'custom') {
           body.mu_latest_chapter = this.ef.mu_latest_chapter_manual;

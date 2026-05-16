@@ -681,12 +681,18 @@ def get_stats(db: Session = Depends(get_db)):
                 pass
     total_chapters_read = int(total_chapters_read)
 
-    # Average rating (only series with mu_rating)
-    rated_series = [s for s in series_list if s.mu_rating]
-    avg_rating = (
-        sum(s.mu_rating for s in rated_series) / len(rated_series)
-        if rated_series else 0.0
-    )
+    # Average rating — prefer user_rating, fall back to mu_rating
+    user_rated = [s for s in series_list if s.user_rating is not None]
+    mu_rated   = [s for s in series_list if s.mu_rating and not s.user_rating]
+    if user_rated:
+        avg_rating = sum(s.user_rating for s in user_rated) / len(user_rated)
+        avg_rating_source = "your ratings"
+    elif mu_rated:
+        avg_rating = sum(s.mu_rating for s in mu_rated) / len(mu_rated)
+        avg_rating_source = "MangaUpdates"
+    else:
+        avg_rating = 0.0
+        avg_rating_source = ""
 
     # Reading pace: chapters updated in last 7/30/90 days
     now = datetime.utcnow()
@@ -714,6 +720,7 @@ def get_stats(db: Session = Depends(get_db)):
         "by_genre": by_genre,
         "total_chapters_read": total_chapters_read,
         "avg_rating": round(avg_rating, 2),
+        "avg_rating_source": avg_rating_source,
         "reading_pace": {
             "last_7_days": logs_7,
             "last_30_days": logs_30,
@@ -831,6 +838,9 @@ class UpdateSeriesRequest(BaseModel):
     mu_latest_chapter: str | None = None
     # Tags for filtering
     tags: list[str] | None = None
+    # Personal rating (0–10, half-point increments; null clears)
+    user_rating: float | None = None
+    clear_user_rating: bool = False
 
 
 @router.patch("/{series_id}")
@@ -866,6 +876,12 @@ def update_series(series_id: int, req: UpdateSeriesRequest, db: Session = Depend
         series.tags = json.dumps(req.tags) if req.tags else None
     if req.notification_muted is not None:
         series.notification_muted = req.notification_muted
+    if req.clear_user_rating:
+        series.user_rating = None
+    elif req.user_rating is not None:
+        if not (0.0 <= req.user_rating <= 10.0):
+            raise HTTPException(status_code=422, detail="user_rating must be between 0 and 10")
+        series.user_rating = round(req.user_rating * 2) / 2  # snap to nearest 0.5
     # ── Simulpub source change — reset stale polling state ──────────────────
     old_source = series.simulpub_source
     old_sim_id = series.simulpub_id
