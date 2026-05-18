@@ -8,7 +8,7 @@ function app() {
 
     // Library toolbar
     librarySearch: '',
-    sortBy: 'added_desc',
+    sortBy: localStorage.getItem('library_sort') || 'added_desc',
     genreFilter: '',
     authorFilter: '',
     tagFilter: '',
@@ -31,7 +31,7 @@ function app() {
     activityFilter: '',
 
     // Settings form
-    sf: { pushover_user_key:'', pushover_app_token:'', pushover_enabled:'false', push_chapter_updates:'true', push_news:'false', push_reading_only:'false', updates_reading_only:'false', poll_interval_hours:'6', mangabaka_token:'', mu_enabled:'true', kmanga_email:'', kmanga_password:'', kmanga_recaptcha_token:'', komga_url:'', komga_api_key:'', idle_detection_enabled:'false', idle_threshold_days:'90', idle_auto_archive:'false', webhook_enabled:'false', webhook_url:'', default_page:'library', grid_density:'normal',
+    sf: { pushover_user_key:'', pushover_app_token:'', pushover_enabled:'false', push_chapter_updates:'true', push_news:'false', push_reading_only:'false', updates_reading_only:'false', poll_interval_hours:'6', mangabaka_token:'', mangabaka_pat:'', mb_sync_enabled:'false', mu_enabled:'true', kmanga_email:'', kmanga_password:'', kmanga_recaptcha_token:'', komga_url:'', komga_api_key:'', komga_sync_read_progress:'false', idle_detection_enabled:'false', idle_threshold_days:'90', idle_auto_archive:'false', webhook_enabled:'false', webhook_url:'', default_page:'library', grid_density:'normal',
       // ── Display preferences ────────────────────────────────────────────
       show_source_badges:    'true',   // platform banner (MangaPlus, K Manga, etc.) on cards
       show_ratings_on_cards: 'true',   // ★ score overlay on cover image
@@ -45,6 +45,8 @@ function app() {
       default_feed_grouped:  'false',  // persisted feed grouping: 'true' or 'false'
       // Rating input mode
       rating_input_mode:               'stars',
+      // Rating source for display
+      rating_source:                   'mangaupdates',
       // Reading dates display
       show_reading_dates:              'true',
       // Notes indicator on cards
@@ -55,10 +57,15 @@ function app() {
       card_radius:      'md',
       sidebar_width:    '220',
       dim_finished_covers: 'true',
+      show_recent_drops: 'true',
+      // Scheduled metadata refresh
+      metadata_refresh_enabled: 'false',
+      metadata_refresh_interval_days: '7',
     },
 
     // Detail modal
     detailOpen: false, ds: null, ef: {}, detailReleases: [],
+    mbRelinkOpen: false, mbRelinkQuery: '', mbRelinkResults: [], mbRelinkSearching: false, mbRelinkSearched: false,
     muReviewOpen: false, muSearchQ: '', muCandidates: [], muSearching: false, muSearched: false,
 
     // Add modal
@@ -79,6 +86,9 @@ function app() {
 
     // Polling
     polling: false,
+    metadataRefreshing: false,
+    mbPushingAll: false,
+    komgaSyncing: false,
 
     // System warnings
     systemWarnings: [],
@@ -95,7 +105,7 @@ function app() {
     get stats() {
       const readingOnly = this.sf.updates_reading_only === 'true';
       return {
-        updates: this.library.filter(s => s.has_update && (!readingOnly || s.reading_status === 'reading')).length,
+        updates: this.library.filter(s => s.has_update && !s.updates_hidden && (!readingOnly || s.reading_status === 'reading')).length,
         reading: this.library.filter(s=>s.reading_status==='reading').length,
         mu_linked: this.library.filter(s=>s.mu_series_id).length,
       };
@@ -171,8 +181,10 @@ function app() {
         else if (defaultPage === 'komga') { this.loadKomgaBrowse().catch(()=>{}); }
         else if (defaultPage === 'settings') { this.loadSettings().catch(()=>{}); }
       } else {
-        // Silently prefetch feed in background
-        this.loadReleaseFeed().catch(()=>{});
+        // Silently prefetch feed in background (skip if section is hidden)
+        if (this.sf.show_recent_drops !== 'false') {
+          this.loadReleaseFeed().catch(()=>{});
+        }
       }
       setInterval(() => this.pollUnreadCount(), 30000);
     },
@@ -204,6 +216,10 @@ function app() {
 
     // ── Metadata helpers ────────────────────────────────
 
+    _esc(s) {
+      return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    },
+
     /**
      * Format authors line: use role-aware display when author_roles is available.
      * Returns an HTML string like "Story: Oda Eiichiro · Art: Oda Eiichiro"
@@ -223,12 +239,12 @@ function app() {
         }
         const parts = Object.entries(groups)
           .filter(([, names]) => names.length > 0)
-          .map(([role, names]) => `<span>${role}:</span> <strong>${names.join(', ')}</strong>`);
+          .map(([role, names]) => `<span>${this._esc(role)}:</span> <strong>${names.map(n => this._esc(n)).join(', ')}</strong>`);
         if (parts.length > 0) return parts.join(' &nbsp;·&nbsp; ');
       }
       const authors = s.authors || [];
       if (authors.length > 0) {
-        return `By <strong>${authors.join(', ')}</strong>`;
+        return `By <strong>${authors.map(a => this._esc(a)).join(', ')}</strong>`;
       }
       return '';
     },
@@ -274,7 +290,7 @@ function app() {
       if (!this.filters.includes('all')) {
         list = list.filter(s => {
           for (const f of this.filters) {
-            if (f === 'updates' && s.has_update && (this.sf.updates_reading_only !== 'true' || s.reading_status === 'reading')) return true;
+            if (f === 'updates' && s.has_update && !s.updates_hidden && (this.sf.updates_reading_only !== 'true' || s.reading_status === 'reading')) return true;
             if (f === 'idle' && this.isIdle(s)) return true;
             if (s.reading_status === f) return true;
           }
@@ -315,9 +331,20 @@ function app() {
         let va, vb;
         switch(field) {
           case 'title': return mul * (a.title||'').localeCompare(b.title||'');
-          case 'rating':
-            va = a.mu_rating || 0; vb = b.mu_rating || 0;
+          case 'rating': {
+            const ratingOf = s => {
+              if (this.sf.rating_source === 'mangabaka') {
+                const v = parseFloat(s.rating);
+                return isNaN(v) ? null : v;
+              }
+              return s.mu_rating ?? null;
+            };
+            va = ratingOf(a); vb = ratingOf(b);
+            if (va === null && vb === null) return 0;
+            if (va === null) return 1;
+            if (vb === null) return -1;
             return mul * (va - vb);
+          }
           case 'added':
             va = a.added_at || ''; vb = b.added_at || '';
             return mul * va.localeCompare(vb);
@@ -362,12 +389,43 @@ function app() {
     },
 
     sortLibrary() {
-      // No-op — filteredLibrary() already sorts reactively via sortBy binding
+      // Persist chosen sort so it survives page reloads
+      localStorage.setItem('library_sort', this.sortBy);
+    },
+
+    isKomgaVolume(s) {
+      // True for any series tracked by volume: native Komga (simulpub_source='komga')
+      // OR soft-linked series — as long as komga_track_mode is 'volume'.
+      return s && (s.komga_track_mode || 'chapter') === 'volume'
+        && (s.simulpub_source === 'komga' || !!s.komga_series_id);
+    },
+
+    // Return the user's read progress for display (chapter or volume depending on series type)
+    readProgress(s) {
+      return this.isKomgaVolume(s)
+        ? (s.current_volume || s.current_chapter || '0')
+        : (s.current_chapter || '0');
+    },
+
+    // Return the correct total/denominator for volume display.
+    // Native Komga volume series: latest_chapter holds the Komga-polled volume count.
+    // Soft-linked volume series: latest_chapter is from a chapter source (wrong unit) —
+    //   use MB total_volumes instead, or null if unknown.
+    volumeTotal(s) {
+      if (!s || !this.isKomgaVolume(s)) return null;
+      if (s.simulpub_source === 'komga') return s.latest_chapter || null;
+      return s.total_volumes || null;
     },
 
     chapterProgress(s) {
-      const latest = parseFloat(s.mu_latest_chapter || s.latest_chapter || s.total_chapters);
-      const current = parseFloat(s.current_chapter);
+      // Volume series: use volumeTotal (Komga-polled or MB total_volumes) not latest_chapter
+      const latest = this.isKomgaVolume(s)
+        ? parseFloat(this.volumeTotal(s))
+        : parseFloat(s.mu_latest_chapter || s.latest_chapter || s.total_chapters);
+      // For Komga-volume series use current_volume (fallback to current_chapter during transition)
+      const current = this.isKomgaVolume(s)
+        ? parseFloat(s.current_volume || s.current_chapter)
+        : parseFloat(s.current_chapter);
       if (!latest || isNaN(latest) || isNaN(current)) return 0;
       return Math.min(100, (current / latest) * 100);
     },
@@ -375,30 +433,34 @@ function app() {
     unreadChapters(s) {
       try {
         const latest = parseFloat(s.latest_chapter);
-        const current = parseFloat(s.current_chapter || 0);
+        const current = this.isKomgaVolume(s)
+          ? parseFloat(s.current_volume || s.current_chapter || 0)
+          : parseFloat(s.current_chapter || 0);
         if (!isNaN(latest) && !isNaN(current)) return Math.max(0, Math.floor(latest - current));
       } catch {}
       return '?';
     },
 
-    // ── Inline chapter controls ──────────────────────────
+    // ── Inline chapter/volume controls ──────────────────────────
     async quickSetChapter(s, value) {
       const val = String(value).trim();
-      if (val === (s.current_chapter || '0')) return; // no change
-      if (val === '' || isNaN(parseFloat(val)) || parseFloat(val) < 0) return; // invalid
+      const isVolSeries = this.isKomgaVolume(s);
+      const field = isVolSeries ? 'current_volume' : 'current_chapter';
+      const current = isVolSeries ? (s.current_volume || '0') : (s.current_chapter || '0');
+      if (val === current) return;
+      if (val === '' || isNaN(parseFloat(val)) || parseFloat(val) < 0) return;
       try {
-        await this.api(`/api/series/${s.id}`, 'PATCH', { current_chapter: val });
-        // Update local state so the card re-renders immediately
+        await this.api(`/api/series/${s.id}`, 'PATCH', { [field]: val });
         const idx = this.library.findIndex(x => x.id === s.id);
         if (idx !== -1) {
-          this.library[idx].current_chapter = val;
+          this.library[idx][field] = val;
           const latest = parseFloat(this.library[idx].latest_chapter || 0);
-          const current = parseFloat(val);
-          this.library[idx].has_update = latest > 0 && current < latest;
+          const readVal = parseFloat(val);
+          this.library[idx].has_update = latest > 0 && readVal < latest;
         }
         this.toast(`${s.title} → ${this.unitLabel(s)} ${val} read`, 'success');
       } catch(e) {
-        this.toast('Failed to update chapter', 'error');
+        this.toast('Failed to update progress', 'error');
       }
     },
 
@@ -580,6 +642,72 @@ function app() {
       catch(e) { this.toast(e.detail||'Komga connection failed', 'error'); }
     },
 
+    async komgaSyncNow() {
+      if (this.komgaSyncing) return;
+      this.komgaSyncing = true;
+      try {
+        await this.api('/api/settings/komga-sync-now', 'POST');
+        this.toast('Komga sync started — runs in the background.', 'success');
+        const poll = setInterval(async () => {
+          try {
+            const s = await this.api('/api/settings/komga-sync/status', 'GET');
+            if (!s.running) {
+              clearInterval(poll);
+              this.komgaSyncing = false;
+              this.toast(`Komga sync done — ${s.synced} series processed.`, 'success');
+              await this.loadLibrary();
+            }
+          } catch { clearInterval(poll); this.komgaSyncing = false; }
+        }, 2000);
+        setTimeout(() => { this.komgaSyncing = false; }, 120000);
+      } catch(e) {
+        this.toast(e.detail || 'Komga sync failed', 'error');
+        this.komgaSyncing = false;
+      }
+    },
+
+    async testMbSync() {
+      try {
+        const d = await this.api('/api/settings/test-mb-sync', 'POST');
+        this.toast(`Connected as ${d.username}`, 'success');
+      } catch(e) { this.toast(e.detail || 'PAT invalid or connection failed', 'error'); }
+    },
+
+    async mbPull() {
+      try {
+        const d = await this.api('/api/settings/mb-pull', 'POST');
+        this.toast(`MB pull: ${d.updated} updated, ${d.unchanged} unchanged, ${d.skipped} not tracked`, 'success');
+        if (d.updated > 0) await this.loadLibrary();
+      } catch(e) { this.toast(e.detail || 'MB pull failed', 'error'); }
+    },
+
+    async mbPushAll() {
+      if (this.mbPushingAll) return;
+      this.mbPushingAll = true;
+      try {
+        await this.api('/api/settings/mb-push-all', 'POST');
+        this.toast('Push to MB started — runs in the background.', 'success');
+        // Poll for completion so we can show final counts
+        const poll = setInterval(async () => {
+          try {
+            const s = await this.api('/api/settings/mb-push-all/status', 'GET');
+            if (!s.running) {
+              clearInterval(poll);
+              this.mbPushingAll = false;
+              const parts = [`${s.pushed} pushed`, `${s.skipped} not in MB`];
+              if (s.failed > 0) parts.push(`${s.failed} failed (rate limited)`);
+              this.toast(`MB push done — ${parts.join(', ')}`, s.failed > 0 ? 'warning' : 'success');
+            }
+          } catch { clearInterval(poll); this.mbPushingAll = false; }
+        }, 3000);
+        // Safety fallback — clear flag after 5 min even if poll dies
+        setTimeout(() => { this.mbPushingAll = false; }, 300000);
+      } catch(e) {
+        this.toast(e.detail || 'MB push failed', 'error');
+        this.mbPushingAll = false;
+      }
+    },
+
     async clearKMangaSession() {
       try {
         const d = await this.api('/api/settings/kmanga/clear-session', 'POST');
@@ -661,6 +789,21 @@ function app() {
         this.ef.komgaResults = [];
       }
       this.ef.komgaSearching = false;
+    },
+
+    async searchKomgaLink() {
+      const q = (this.ef.komgaLinkSearch || '').trim();
+      if (!q) { this.ef.komgaLinkResults = []; this.ef.komgaLinkSearched = false; return; }
+      this.ef.komgaLinkSearching = true;
+      try {
+        const data = await this.api(`/api/komga/search?q=${encodeURIComponent(q)}`);
+        this.ef.komgaLinkResults = data.content || [];
+        this.ef.komgaLinkSearched = true;
+      } catch(e) {
+        this.toast(e.detail || 'Komga search failed', 'error');
+        this.ef.komgaLinkResults = [];
+      }
+      this.ef.komgaLinkSearching = false;
     },
 
     formatVotes(n) {
@@ -750,18 +893,26 @@ function app() {
     // ── Detail modal ─────────────────────────────────────
     async openDetail(series) {
       this.ds = series;
+      this.mbRelinkOpen = false; this.mbRelinkQuery = series.title || ''; this.mbRelinkResults = []; this.mbRelinkSearched = false;
       this.ef = {
         current_chapter: series.current_chapter||'0',
+        current_volume: series.current_volume||'',
         reading_status: series.reading_status||'reading',
         notes: series.notes||'',
         tags: [...(series.tags||[])],
         newTag: '',
         notification_muted: !!series.notification_muted,
+        updates_hidden: !!series.updates_hidden,
         simulpub_source: series.simulpub_source||'',
         simulpub_id: series.simulpub_id||'',
         mu_latest_chapter_manual: series.mu_latest_chapter||'',
         komgaSearch: '', komgaResults: [], komgaSearching: false, komgaSearched: false,
+        // Soft-link search (separate state so it doesn't conflict with native Komga search)
+        komgaLinkSearch: '', komgaLinkResults: [], komgaLinkSearching: false, komgaLinkSearched: false,
         komga_track_mode: series.komga_track_mode || 'chapter',
+        komga_series_id: series.komga_series_id || '',
+        komga_detect_releases: !!series.komga_detect_releases,
+        komga_sync_progress: !!series.komga_sync_progress,
         user_rating: series.user_rating ?? null,
         date_started: series.date_started || '',
         date_completed: series.date_completed || '',
@@ -817,14 +968,20 @@ function app() {
       try {
         const body = {
           current_chapter: this.ef.current_chapter,
+          current_volume: this.ef.current_volume || null,
           reading_status: this.ef.reading_status,
           notes: this.ef.notes,
           tags: this.ef.tags,
           notification_muted: this.ef.notification_muted,
+          updates_hidden: this.ef.updates_hidden,
           simulpub_source: this.ef.simulpub_source,
           simulpub_id: this.ef.simulpub_id,
-          komga_track_mode: this.ef.simulpub_source === 'komga' ? this.ef.komga_track_mode : undefined,
-          user_rating: this.ef.user_rating,
+          // komga_track_mode is used for both native Komga series and soft-linked series
+          komga_track_mode: (this.ef.simulpub_source === 'komga' || this.ef.komga_series_id)
+            ? this.ef.komga_track_mode : undefined,
+          komga_series_id: this.ef.komga_series_id,
+          komga_sync_progress: this.ef.komga_series_id ? this.ef.komga_sync_progress : undefined,
+          user_rating: this.ef.user_rating !== this.ds.user_rating ? this.ef.user_rating : undefined,
           clear_user_rating: this.ef.user_rating === null && this.ds.user_rating !== null,
           date_started: this.ef.date_started_overriding ? (this.ef.date_started || undefined) : undefined,
           date_completed: this.ef.date_completed_overriding ? (this.ef.date_completed || undefined) : undefined,
@@ -895,6 +1052,45 @@ function app() {
         this.ds = updated;
         this.toast('Refreshed from API','success');
       } catch(e) { this.toast('Refresh failed','error'); }
+    },
+
+    // ── MB relink (Komga series) ─────────────────────────
+    async searchMbRelink() {
+      if (!this.mbRelinkQuery.trim()) return;
+      this.mbRelinkSearching = true; this.mbRelinkSearched = false;
+      try {
+        const data = await this.api(`/api/series/search?q=${encodeURIComponent(this.mbRelinkQuery)}&page=1`);
+        this.mbRelinkResults = (data.data || []).slice(0, 6).map(r => ({
+          id: r.id,
+          title: r.title,
+          type: r.type,
+          year: r.year,
+          cover: this.getCoverUrl(r),
+        }));
+        this.mbRelinkSearched = true;
+      } catch(e) { this.toast('MB search failed', 'error'); }
+      finally { this.mbRelinkSearching = false; }
+    },
+
+    async confirmMbLink(seriesId, mbId) {
+      try {
+        const updated = await this.api(`/api/series/${seriesId}/link-mb`, 'POST', { mb_id: mbId });
+        const idx = this.library.findIndex(s => s.id === seriesId);
+        if (idx !== -1) this.library[idx] = updated;
+        this.ds = updated;
+        this.mbRelinkOpen = false; this.mbRelinkResults = [];
+        this.toast('Linked to MangaBaka', 'success');
+      } catch(e) { this.toast('Link failed', 'error'); }
+    },
+
+    async unlinkMb(seriesId) {
+      try {
+        await this.api(`/api/series/${seriesId}/link-mb`, 'DELETE');
+        const idx = this.library.findIndex(s => s.id === seriesId);
+        if (idx !== -1) { this.library[idx].mb_linked_id = null; this.library[idx].mangabaka_url = null; }
+        if (this.ds && this.ds.id === seriesId) { this.ds = { ...this.ds, mb_linked_id: null, mangabaka_url: null }; }
+        this.toast('MB link removed', 'success');
+      } catch(e) { this.toast('Unlink failed', 'error'); }
     },
 
     // ── Notifications ─────────────────────────────────────
@@ -981,6 +1177,19 @@ function app() {
         setTimeout(async () => { await this.loadLibrary(); await this.loadReleaseFeed(); this.pollUnreadCount(); }, 6000);
         setTimeout(() => { this.polling = false; }, 10000);
       } catch(e) { this.toast('Poll failed','error'); this.polling=false; }
+    },
+
+    async refreshMetadataNow() {
+      if (this.metadataRefreshing) return;
+      this.metadataRefreshing = true;
+      try {
+        await this.api('/api/settings/refresh-metadata-now','POST');
+        this.toast('Metadata refresh started — runs in the background.','success');
+        setTimeout(() => { this.metadataRefreshing = false; }, 15000);
+      } catch(e) {
+        this.toast(e.detail || 'Metadata refresh failed','error');
+        this.metadataRefreshing = false;
+      }
     },
 
     // ── Utilities ─────────────────────────────────────────

@@ -21,10 +21,26 @@ from .database import ReadingLog, TrackedSeries, init_db, get_db, get_setting, S
 from .routers import export, notifications, releases, series, settings
 from .scheduler import start_scheduler
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s  %(levelname)-8s  %(name)s — %(message)s",
-)
+_LOG_FORMAT = "%(asctime)s  %(levelname)-8s  %(name)s — %(message)s"
+_LOG_DIR = Path(os.getenv("DATA_DIR", "/data"))
+
+logging.basicConfig(level=logging.INFO, format=_LOG_FORMAT)
+
+# Persistent rotating log — survives container restarts
+try:
+    _LOG_DIR.mkdir(parents=True, exist_ok=True)
+    from logging.handlers import RotatingFileHandler
+    _fh = RotatingFileHandler(
+        _LOG_DIR / "app.log",
+        maxBytes=5 * 1024 * 1024,   # 5 MB per file
+        backupCount=3,               # keep app.log + app.log.1 + .2 + .3
+        encoding="utf-8",
+    )
+    _fh.setFormatter(logging.Formatter(_LOG_FORMAT))
+    logging.getLogger().addHandler(_fh)
+except Exception as _e:
+    logging.warning(f"Could not set up file logging to {_LOG_DIR}/app.log: {_e}")
+
 logger = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).parent.parent / "static"
@@ -39,11 +55,16 @@ async def lifespan(app: FastAPI):
     db = SessionLocal()
     try:
         interval = float(get_setting(db, "poll_interval_hours", "6") or "6")
+        meta_enabled = get_setting(db, "metadata_refresh_enabled", "false") == "true"
+        try:
+            meta_days = float(get_setting(db, "metadata_refresh_interval_days", "7") or "7")
+        except ValueError:
+            meta_days = 7.0
     finally:
         db.close()
 
     logger.info(f"Starting background scheduler (every {interval}h)...")
-    start_scheduler(interval)
+    start_scheduler(interval, metadata_refresh_days=meta_days if meta_enabled else 0.0)
 
     yield
 
@@ -315,22 +336,30 @@ def komga_import(req: KomgaImportRequest, background_tasks: BackgroundTasks):
                 metadata = kg_series.get("metadata", {})
                 title = metadata.get("title") or kg_series.get("name", "Unknown")
 
-                # Determine current chapter from read progress
+                # Determine read progress from Komga's booksReadCount
+                is_volume = item.track_mode == "volume"
+                group_name = "Komga (volume)" if is_volume else "Komga"
+
                 current_chapter = "0"
+                current_volume = None
                 if item.sync_progress:
                     books_read = kg_series.get("booksReadCount", 0)
                     if books_read > 0:
-                        current_chapter = str(books_read)
+                        if is_volume:
+                            current_volume = str(books_read)
+                        else:
+                            current_chapter = str(books_read)
 
-                # Get latest chapter number
+                # Get latest chapter number — used as baseline so the first
+                # poll doesn't fire a spurious "new chapter" for existing content.
+                # Fall back to booksCount if the API call fails.
                 latest_ch = None
                 try:
-                    latest_ch = client.get_latest_chapter(sid)
+                    latest_ch, _ = client.get_latest_chapter(sid)
                 except Exception:
                     pass
-
-                is_volume = item.track_mode == "volume"
-                group_name = "Komga (volume)" if is_volume else "Komga"
+                if latest_ch is None and kg_series.get("booksCount"):
+                    latest_ch = str(kg_series["booksCount"])
 
                 series_obj = TrackedSeries(
                     id=next_id,
@@ -345,6 +374,7 @@ def komga_import(req: KomgaImportRequest, background_tasks: BackgroundTasks):
                     simulpub_id=sid,
                     komga_track_mode=item.track_mode,
                     current_chapter=current_chapter,
+                    current_volume=current_volume,
                     reading_status="reading",
                     total_chapters=str(kg_series.get("booksCount")) if kg_series.get("booksCount") is not None else None,
                     mu_latest_chapter=latest_ch,
@@ -355,14 +385,15 @@ def komga_import(req: KomgaImportRequest, background_tasks: BackgroundTasks):
                 db.add(series_obj)
 
                 # Log the initial add as activity
-                if current_chapter != "0":
+                logged_progress = current_volume if is_volume else current_chapter
+                if logged_progress and logged_progress != "0":
                     db.add(ReadingLog(
                         series_id=series_obj.id,
                         series_title=title,
                         action="chapter_update",
                         old_chapter="0",
-                        new_chapter=current_chapter,
-                        detail=f"Imported from Komga with {current_chapter} books read",
+                        new_chapter=logged_progress,
+                        detail=f"Imported from Komga with {logged_progress} {'volumes' if is_volume else 'chapters'} read",
                     ))
                     series_obj.last_read_at = datetime.utcnow()
 
@@ -370,7 +401,11 @@ def komga_import(req: KomgaImportRequest, background_tasks: BackgroundTasks):
                 _komga_import_progress["imported"] += 1
                 _komga_import_progress["done"] += 1
 
-                # Queue MU auto-link in background
+                # Queue MB auto-link (fetches metadata + cover + MU ID)
+                from .routers.series import _bg_link_mb
+                background_tasks.add_task(_bg_link_mb, series_obj.id, title)
+                # MU lookup is handled inside _bg_link_mb once MB data is known;
+                # also queue a standalone fallback so MU still links even if MB fails
                 _schedule_mu_lookup(background_tasks, series_obj.id, title)
 
             db.commit()
@@ -396,7 +431,8 @@ def komga_import(req: KomgaImportRequest, background_tasks: BackgroundTasks):
 @app.get("/api/komga/import/progress")
 def komga_import_progress():
     """Poll this endpoint during a Komga import to show live progress."""
-    return dict(_komga_import_progress)
+    with _komga_import_lock:
+        return dict(_komga_import_progress)
 
 
 def _schedule_mu_lookup(background_tasks: BackgroundTasks, series_id: int, title: str):
@@ -410,7 +446,8 @@ def _schedule_mu_lookup(background_tasks: BackgroundTasks, series_id: int, title
             if not series or series.mu_series_id:
                 return  # already linked or deleted
 
-            results = search_series(title) or []
+            resp = search_series(title)
+            results = resp.get("results", [])
             if not results:
                 return
 

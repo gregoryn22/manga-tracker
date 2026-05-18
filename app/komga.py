@@ -128,18 +128,16 @@ class KomgaClient:
 
     # ── Chapter tracking ──────────────────────────────────────────────────
 
-    def get_latest_chapter(self, series_id: str) -> str | None:
+    def get_latest_chapter(self, series_id: str) -> tuple[str | None, str | None]:
         """
-        Return the highest chapter number for a Komga series as a string,
-        or None if the series has no books.
+        Return (chapter, date_added) for the highest-numbered book in a Komga series.
 
-        Uses GET /api/v1/series/{seriesId}/books with sort=metadata.numberSort,desc
-        and picks the first book's metadata.number field.
+        chapter    — display number string ("68", "12.5") or None if no books.
+        date_added — ISO-8601 date string ("YYYY-MM-DD") from the book's `created`
+                     field (when Komga first scanned the file), or None.
 
-        Returns:
-          "68"   — standard chapter
-          "12.5" — decimal numbering
-          None   — no books in series
+        Uses GET /api/v1/series/{seriesId}/books?sort=metadata.numberSort,desc&size=1.
+        Both values come from the same single API response — no extra cost.
         """
         data = self._get(
             f"/series/{series_id}/books",
@@ -152,19 +150,22 @@ class KomgaClient:
         content = data.get("content", [])
         if not content:
             logger.debug("Komga: series %s has no books", series_id)
-            return None
+            return None, None
 
         book = content[0]
         metadata = book.get("metadata", {})
 
+        # Extract scan date — "created" is when Komga first imported the file.
+        # Trim to YYYY-MM-DD; Komga returns ISO-8601 with milliseconds and Z suffix.
+        raw_created = book.get("created") or book.get("fileLastModified")
+        date_added = raw_created[:10] if raw_created else None
+
         # metadata.number is the display number (e.g. "68", "12.5")
         number = metadata.get("number")
         if number:
-            # Komga sometimes stores numbers as "1" but numberSort as 1.0
-            # Use the display number for consistency with other providers
             chapter = str(number).strip()
             logger.debug("Komga: series %s latest chapter = %s", series_id, chapter)
-            return chapter
+            return chapter, date_added
 
         # Fallback: use numberSort if number is empty
         number_sort = metadata.get("numberSort")
@@ -175,7 +176,7 @@ class KomgaClient:
                 "Komga: series %s latest chapter (from numberSort) = %s",
                 series_id, chapter,
             )
-            return chapter
+            return chapter, date_added
 
         # Last resort: use the book's name
         name = metadata.get("title") or book.get("name", "")
@@ -187,10 +188,10 @@ class KomgaClient:
                     "Komga: series %s latest chapter (parsed from %r) = %s",
                     series_id, name, chapter,
                 )
-                return chapter
+                return chapter, date_added
 
         logger.warning("Komga: series %s has books but no chapter number metadata", series_id)
-        return None
+        return None, date_added
 
     def get_series_info(self, series_id: str) -> dict:
         """
@@ -211,7 +212,7 @@ class KomgaClient:
             "series_id":      series_id,
             "title":          metadata.get("title") or series.get("name", ""),
             "books_count":    series.get("booksCount", 0),
-            "latest_chapter": self.get_latest_chapter(series_id),
+            "latest_chapter": self.get_latest_chapter(series_id)[0],
             "status":         metadata.get("status"),
             "url":            f"{self.base_url}/series/{series_id}",
         }
@@ -269,6 +270,46 @@ class KomgaClient:
             "books_unread":      series.get("booksUnreadCount", 0),
             "books_in_progress": series.get("booksInProgressCount", 0),
         }
+
+    def get_last_read_progress(self, series_id: str) -> str | None:
+        """
+        Return the chapter/volume number string of the furthest-read book in a series.
+
+        Queries books filtered to READ and IN_PROGRESS status, sorted by
+        metadata.numberSort descending, and returns the first result's
+        metadata.number (the display number, e.g. "3", "42", "12.5").
+
+        This is more accurate than booksReadCount for progress tracking because
+        it returns the actual chapter/volume number rather than a file count,
+        which diverges when chapters have decimal numbers or gaps.
+
+        Returns None if no books have been read or are in progress.
+        """
+        data = self._get(
+            f"/series/{series_id}/books",
+            params={
+                "read_status": "READ,IN_PROGRESS",
+                "sort":        "metadata.numberSort,desc",
+                "size":        1,
+            },
+        )
+        content = data.get("content", [])
+        if not content:
+            return None
+
+        book = content[0]
+        metadata = book.get("metadata", {})
+        number = metadata.get("number")
+        if number is not None:
+            return str(number).strip() or None
+
+        # Fallback to numberSort if number field is missing
+        number_sort = metadata.get("numberSort")
+        if number_sort is not None:
+            val = float(number_sort)
+            return str(int(val)) if val == int(val) else str(val)
+
+        return None
 
     def thumbnail_url(self, series_id: str) -> str:
         """Return the URL for the series thumbnail image."""

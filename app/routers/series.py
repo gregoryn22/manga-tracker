@@ -51,6 +51,18 @@ _SIMULPUB_ID_VALIDATORS: dict[str, tuple[str, callable]] = {
 }
 
 
+def _safe_progress(val, default):
+    """Return val if it parses as a non-negative float, else default."""
+    if not val:
+        return default
+    try:
+        if float(val) >= 0:
+            return str(val)
+    except (ValueError, TypeError):
+        pass
+    return default
+
+
 def _validate_simulpub_id(source: str | None, sid: str | None):
     """Raise HTTPException if simulpub_id format is wrong for the source."""
     if not source or not sid or source in ("custom", ""):
@@ -118,7 +130,7 @@ def _refresh_simulpub(series: TrackedSeries, db: Session) -> str | None:
             if komga_url and komga_key:
                 is_volume = (getattr(series, "komga_track_mode", None) or "chapter") == "volume"
                 client = KomgaClient(komga_url, komga_key)
-                chapter = client.get_latest_chapter(sim_id)
+                chapter, _ = client.get_latest_chapter(sim_id)
                 group_name = "Komga (volume)" if is_volume else "Komga"
             else:
                 logger.warning("Komga: URL or API key not configured — skipping refresh")
@@ -281,6 +293,7 @@ def add_series(req: AddSeriesRequest, background_tasks: BackgroundTasks, db: Ses
         mb_provider_ids=flat.get("mb_provider_ids"),
         external_links=flat.get("external_links"),
         mb_tags=flat.get("mb_tags"),
+        publishers=flat.get("publishers"),
         # Seed MU series ID immediately if MB already has it
         mu_series_id=mu_id_from_mb,
         current_chapter=req.current_chapter,
@@ -299,6 +312,15 @@ def add_series(req: AddSeriesRequest, background_tasks: BackgroundTasks, db: Ses
     else:
         # Fall back to MU title search (for series MB hasn't linked yet)
         background_tasks.add_task(_bg_enrich_with_mu, series.id, series.title, None)
+
+    # Push initial state to MB if sync is enabled and there's something non-default to sync
+    if req.current_chapter != "0" or req.reading_status != "reading":
+        background_tasks.add_task(
+            _bg_sync_to_mb,
+            series.id, series.reading_status, series.current_chapter,
+            series.current_volume, series.date_started, series.date_completed,
+            series.user_rating,
+        )
 
     return series.to_dict()
 
@@ -430,7 +452,7 @@ class BulkStatusRequest(BaseModel):
 
 
 @router.post("/bulk/status")
-def bulk_status(req: BulkStatusRequest, db: Session = Depends(get_db)):
+def bulk_status(req: BulkStatusRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     """Change reading_status for multiple series at once."""
     if req.reading_status not in _VALID_READING_STATUSES:
         raise HTTPException(status_code=422, detail=f"Invalid reading_status: {req.reading_status!r}")
@@ -452,6 +474,18 @@ def bulk_status(req: BulkStatusRequest, db: Session = Depends(get_db)):
             series.reading_status = req.reading_status
             updated += 1
     db.commit()
+
+    # Push status change to MB for each updated series
+    for sid in req.series_ids:
+        s = db.query(TrackedSeries).filter(TrackedSeries.id == sid).first()
+        if s:
+            background_tasks.add_task(
+                _bg_sync_to_mb,
+                s.id, s.reading_status, s.current_chapter,
+                s.current_volume, s.date_started, s.date_completed,
+                s.user_rating,
+            )
+
     return {"success": True, "updated": updated}
 
 
@@ -481,10 +515,14 @@ def fill_missing_covers(background_tasks: BackgroundTasks, db: Session = Depends
 
 def _bg_fill_covers(series_ids: list[int]):
     """Fetch fresh MB metadata for each series and update cover_url."""
-    from ..database import SessionLocal
+    from ..database import SessionLocal, get_setting
     db = SessionLocal()
     try:
-        client = get_mb_client(db)
+        token = get_setting(db, "mangabaka_token", "")
+        if not token:
+            logger.warning("fill_covers: MangaBaka token not configured — skipping")
+            return
+        client = MangaBakaClient(token)
         updated = 0
         for sid in series_ids:
             try:
@@ -525,10 +563,11 @@ class ImportRequest(BaseModel):
 
 
 @router.post("/import/json")
-def import_library(req: ImportRequest, db: Session = Depends(get_db)):
+def import_library(req: ImportRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     """Import series from a previously exported JSON. Skips duplicates."""
     imported = 0
     skipped = 0
+    imported_series_ids: list[int] = []
     for item in req.series:
         sid = item.get("id")
         if not sid:
@@ -578,7 +617,8 @@ def import_library(req: ImportRequest, db: Session = Depends(get_db)):
             associated_titles=json.dumps(item["associated_titles"]) if item.get("associated_titles") else None,
             related_series=json.dumps(item["related_series"]) if item.get("related_series") else None,
             author_roles=json.dumps(item["author_roles"]) if item.get("author_roles") else None,
-            current_chapter=item.get("current_chapter", "0"),
+            current_chapter=_safe_progress(item.get("current_chapter"), "0"),
+            current_volume=_safe_progress(item.get("current_volume"), None),
             reading_status=item.get("reading_status", "reading"),
             notes=item.get("notes"),
             tags=json.dumps(item.get("tags", [])) if item.get("tags") else None,
@@ -590,11 +630,12 @@ def import_library(req: ImportRequest, db: Session = Depends(get_db)):
             added_at=datetime.utcnow(),
         )
         db.add(s)
+        imported_series_ids.append(sid)
         imported += 1
     db.commit()
 
     # Restore activity log entries (v2 backups only; skip if series wasn't imported)
-    imported_ids = {item.get("id") for item in req.series if item.get("id")}
+    imported_ids = set(imported_series_ids)
     activity_restored = 0
     for entry in req.activity_log:
         sid = entry.get("series_id")
@@ -614,9 +655,41 @@ def import_library(req: ImportRequest, db: Session = Depends(get_db)):
         except Exception:
             pass
     if activity_restored:
-        db.commit()
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
+            activity_restored = 0
+
+    # Push imported series to MB in one background task (avoids N individual tasks)
+    if imported_series_ids:
+        background_tasks.add_task(_bg_sync_import_to_mb, imported_series_ids)
 
     return {"success": True, "imported": imported, "skipped": skipped, "activity_restored": activity_restored}
+
+
+def _bg_sync_import_to_mb(series_ids: list[int]):
+    """Push all imported series to MB if sync is enabled. Runs once after import."""
+    from ..database import SessionLocal, get_setting
+    from ..mangabaka_sync import push_entry
+    db = SessionLocal()
+    try:
+        if get_setting(db, "mb_sync_enabled", "false") != "true":
+            return
+        pat = get_setting(db, "mangabaka_pat", "")
+        if not pat:
+            return
+        for sid in series_ids:
+            series = db.query(TrackedSeries).filter(TrackedSeries.id == sid).first()
+            if series:
+                effective_id = series.mb_linked_id if series.mb_linked_id else series.id
+                push_entry(
+                    effective_id, series.reading_status, series.current_chapter,
+                    series.current_volume, series.date_started, series.date_completed,
+                    pat, user_rating=series.user_rating,
+                )
+    finally:
+        db.close()
 
 
 # ── Reading activity log ─────────────────────────────────────────────
@@ -844,13 +917,23 @@ class UpdateSeriesRequest(BaseModel):
     reading_status: str | None = None
     notes: str | None = None
     notification_muted: bool | None = None
+    updates_hidden: bool | None = None
     # Simulpub source configuration
     simulpub_source: str | None = None   # 'mangaplus' | 'custom' | '' (clear)
     simulpub_id: str | None = None       # Platform-specific ID (e.g. MangaPlus title_id)
     # Komga-specific: 'chapter' or 'volume'
     komga_track_mode: str | None = None
+    # Soft Komga link for non-Komga series — enables read progress sync without
+    # changing the chapter detection source. Pass "" to clear.
+    komga_series_id: str | None = None
+    # If true, also use the soft Komga link for new chapter/volume detection + notifications.
+    komga_detect_releases: bool | None = None
+    # If true, sync Komga read progress into current_chapter/current_volume for this series.
+    komga_sync_progress: bool | None = None
     # Editable for 'custom' source — lets the user manually record the latest chapter
     mu_latest_chapter: str | None = None
+    # Volume progress (independent of chapter — for series tracked both ways)
+    current_volume: str | None = None
     # Tags for filtering
     tags: list[str] | None = None
     # Personal rating (0–10, half-point increments; null clears)
@@ -866,8 +949,32 @@ class UpdateSeriesRequest(BaseModel):
     reset_date_completed: bool = False
 
 
+def _bg_sync_to_mb(series_id: int, reading_status: str, current_chapter: str | None,
+                   current_volume: str | None, date_started, date_completed,
+                   user_rating: float | None = None):
+    """Background task: push updated progress to MB if sync is enabled."""
+    from ..database import SessionLocal, get_setting, TrackedSeries as _TS
+    from ..mangabaka_sync import push_entry
+    db = SessionLocal()
+    try:
+        if get_setting(db, "mb_sync_enabled", "false") != "true":
+            return
+        pat = get_setting(db, "mangabaka_pat", "")
+        if not pat:
+            return
+        # Komga-imported series have synthetic IDs (>= 2_000_000_000).
+        # Use mb_linked_id if the user has linked this series to a real MB entry.
+        series = db.query(_TS).filter(_TS.id == series_id).first()
+        effective_id = (series.mb_linked_id if series and series.mb_linked_id else series_id)
+        push_entry(effective_id, reading_status, current_chapter, current_volume,
+                   date_started, date_completed, pat, user_rating=user_rating)
+    finally:
+        db.close()
+
+
 @router.patch("/{series_id}")
-def update_series(series_id: int, req: UpdateSeriesRequest, db: Session = Depends(get_db)):
+def update_series(series_id: int, req: UpdateSeriesRequest,
+                  background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     series = db.query(TrackedSeries).filter(TrackedSeries.id == series_id).first()
     if not series:
         raise HTTPException(status_code=404, detail="Series not tracked")
@@ -875,6 +982,18 @@ def update_series(series_id: int, req: UpdateSeriesRequest, db: Session = Depend
         raise HTTPException(status_code=422, detail=f"Invalid reading_status: {req.reading_status!r}. Must be one of: {', '.join(sorted(_VALID_READING_STATUSES))}")
     if req.komga_track_mode is not None and req.komga_track_mode not in _VALID_TRACK_MODES:
         raise HTTPException(status_code=422, detail=f"Invalid komga_track_mode: {req.komga_track_mode!r}. Must be 'chapter' or 'volume'")
+    if req.current_chapter is not None and req.current_chapter != "":
+        try:
+            if float(req.current_chapter) < 0:
+                raise HTTPException(status_code=422, detail="current_chapter must be non-negative")
+        except ValueError:
+            raise HTTPException(status_code=422, detail=f"current_chapter must be a valid number, got: {req.current_chapter!r}")
+    if req.current_volume is not None and req.current_volume != "":
+        try:
+            if float(req.current_volume) < 0:
+                raise HTTPException(status_code=422, detail="current_volume must be non-negative")
+        except ValueError:
+            raise HTTPException(status_code=422, detail=f"current_volume must be a valid number, got: {req.current_volume!r}")
     if req.current_chapter is not None:
         old_ch = series.current_chapter
         if req.current_chapter != old_ch:
@@ -945,6 +1064,8 @@ def update_series(series_id: int, req: UpdateSeriesRequest, db: Session = Depend
         series.tags = json.dumps(req.tags) if req.tags else None
     if req.notification_muted is not None:
         series.notification_muted = req.notification_muted
+    if req.updates_hidden is not None:
+        series.updates_hidden = req.updates_hidden
     if req.clear_user_rating:
         series.user_rating = None
     elif req.user_rating is not None:
@@ -965,6 +1086,12 @@ def update_series(series_id: int, req: UpdateSeriesRequest, db: Session = Depend
         series.simulpub_id = clean_id or None
     if req.komga_track_mode is not None:
         series.komga_track_mode = req.komga_track_mode
+    if req.komga_series_id is not None:
+        series.komga_series_id = req.komga_series_id.strip() or None
+    if req.komga_detect_releases is not None:
+        series.komga_detect_releases = req.komga_detect_releases
+    if req.komga_sync_progress is not None:
+        series.komga_sync_progress = req.komga_sync_progress
 
     track_mode_changed = (
         req.komga_track_mode is not None and req.komga_track_mode != old_track_mode
@@ -995,6 +1122,9 @@ def update_series(series_id: int, req: UpdateSeriesRequest, db: Session = Depend
             action="source_change", detail=detail, created_at=datetime.utcnow(),
         ))
 
+    if req.current_volume is not None:
+        series.current_volume = req.current_volume or None  # empty string clears it
+
     # Only allow direct mu_latest_chapter edits for custom-source series to avoid
     # accidentally overwriting data from an automated source.
     if req.mu_latest_chapter is not None:
@@ -1014,6 +1144,18 @@ def update_series(series_id: int, req: UpdateSeriesRequest, db: Session = Depend
 
     db.commit()
     db.refresh(series)
+
+    # Push to MB if sync is enabled (fires when chapter, volume, status, or rating changed)
+    if (req.current_chapter is not None or req.current_volume is not None
+            or req.reading_status is not None or req.user_rating is not None
+            or req.clear_user_rating):
+        background_tasks.add_task(
+            _bg_sync_to_mb,
+            series.id, series.reading_status, series.current_chapter,
+            series.current_volume, series.date_started, series.date_completed,
+            series.user_rating,
+        )
+
     return series.to_dict()
 
 
@@ -1045,10 +1187,11 @@ def refresh_series(series_id: int, background_tasks: BackgroundTasks, db: Sessio
     if not series:
         raise HTTPException(status_code=404, detail="Series not tracked")
 
-    # Refresh MB metadata
+    # Refresh MB metadata — use mb_linked_id for Komga-synthetic series
     client = get_mb_client(db)
+    mb_fetch_id = series.mb_linked_id if (series.id >= _KOMGA_ID_FLOOR and series.mb_linked_id) else series.id
     try:
-        resp = client.get_series(series_id)
+        resp = client.get_series(mb_fetch_id)
         if resp.get("status") == 200 and resp.get("data"):
             api_data = resp["data"]
             flat = series_from_api(api_data)
@@ -1092,6 +1235,9 @@ def refresh_series(series_id: int, background_tasks: BackgroundTasks, db: Sessio
             # Refresh tags (MB taxonomy evolves)
             if flat.get("mb_tags") is not None:
                 series.mb_tags = flat["mb_tags"]
+            # Seed publishers from MB if not already set by MU enrichment
+            if flat.get("publishers") and not series.publishers:
+                series.publishers = flat["publishers"]
     except Exception as e:
         logger.warning(f"MB refresh failed for series {series_id}: {e}")
 
@@ -1171,3 +1317,151 @@ def get_series_releases_endpoint(series_id: int, db: Session = Depends(get_db)):
         "stored": [r.to_dict() for r in releases],
         "live": live_releases,
     }
+
+
+# ── MangaBaka linking for Komga-sourced series ───────────────────────────────
+
+class LinkMbRequest(BaseModel):
+    mb_id: int
+
+
+@router.post("/{series_id}/link-mb")
+def link_mb(series_id: int, req: LinkMbRequest, db: Session = Depends(get_db)):
+    """
+    Link a Komga-sourced series to a MangaBaka series by ID.
+    Fetches full MB metadata and applies it to the tracked series.
+    Also used for correcting a wrong auto-link.
+    """
+    series = db.query(TrackedSeries).filter(TrackedSeries.id == series_id).first()
+    if not series:
+        raise HTTPException(status_code=404, detail="Series not tracked")
+
+    client = get_mb_client(db)
+    try:
+        resp = client.get_series(req.mb_id)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"MangaBaka API error: {e}")
+
+    if resp.get("status") != 200 or not resp.get("data"):
+        raise HTTPException(status_code=404, detail=f"MB series {req.mb_id} not found")
+
+    flat = series_from_api(resp["data"])
+    _apply_mb_metadata(series, flat)
+    series.mb_linked_id = req.mb_id
+    db.commit()
+    db.refresh(series)
+    return series.to_dict()
+
+
+@router.delete("/{series_id}/link-mb")
+def unlink_mb(series_id: int, db: Session = Depends(get_db)):
+    """Remove the MB link from a Komga-sourced series."""
+    series = db.query(TrackedSeries).filter(TrackedSeries.id == series_id).first()
+    if not series:
+        raise HTTPException(status_code=404, detail="Series not tracked")
+    series.mb_linked_id = None
+    series.mangabaka_url = None
+    series.mb_provider_ids = None
+    db.commit()
+    return {"ok": True}
+
+
+def _apply_mb_metadata(series: TrackedSeries, flat: dict):
+    """Write MB API data onto an existing TrackedSeries (used for link + refresh)."""
+    if flat.get("cover_url") and (not series.cover_url or series.cover_url.startswith("/api/komga")):
+        series.cover_url = flat["cover_url"]
+    if flat.get("total_chapters"):
+        series.total_chapters = flat["total_chapters"]
+    if flat.get("total_volumes"):
+        series.total_volumes = flat["total_volumes"]
+    if flat.get("status"):
+        series.status = flat["status"]
+    if flat.get("genres"):
+        series.genres = flat["genres"]
+    if flat.get("authors"):
+        series.authors = flat["authors"]
+    if flat.get("author_roles"):
+        series.author_roles = flat["author_roles"]
+    if flat.get("year"):
+        series.year = flat["year"]
+    if flat.get("start_date"):
+        series.start_date = flat["start_date"]
+    if flat.get("end_date"):
+        series.end_date = flat["end_date"]
+    if flat.get("rating"):
+        series.rating = flat["rating"]
+    if flat.get("content_rating") is not None:
+        series.content_rating = flat["content_rating"]
+    if flat.get("is_licensed") is not None:
+        series.is_licensed = flat["is_licensed"]
+    if flat.get("has_anime") is not None:
+        series.has_anime = flat["has_anime"]
+    if flat.get("mangabaka_url"):
+        series.mangabaka_url = flat["mangabaka_url"]
+    if flat.get("mb_provider_ids"):
+        series.mb_provider_ids = flat["mb_provider_ids"]
+    if flat.get("external_links"):
+        series.external_links = flat["external_links"]
+    if flat.get("mb_tags"):
+        series.mb_tags = flat["mb_tags"]
+    if flat.get("publishers") and not series.publishers:
+        series.publishers = flat["publishers"]
+    if flat.get("native_title") and not series.native_title:
+        series.native_title = flat["native_title"]
+    if flat.get("romanized_title") and not series.romanized_title:
+        series.romanized_title = flat["romanized_title"]
+
+
+def _bg_link_mb(series_id: int, title: str):
+    """
+    Background: search MB by title, apply best-match metadata to a
+    Komga-sourced series. Silently no-ops if no match found.
+    """
+    from ..database import SessionLocal
+    db = SessionLocal()
+    try:
+        series = db.query(TrackedSeries).filter(TrackedSeries.id == series_id).first()
+        if not series or series.mb_linked_id:
+            return  # already linked or removed
+
+        client = get_mb_client(db)
+        result = client.search(title, page=1)
+        items = result.get("data", [])
+        if not items:
+            logger.info(f"MB auto-link: no results for '{title}'")
+            return
+
+        best = items[0]
+        mb_id = best.get("id")
+        if not mb_id:
+            return
+
+        resp = client.get_series(mb_id)
+        if resp.get("status") != 200 or not resp.get("data"):
+            return
+
+        flat = series_from_api(resp["data"])
+        _apply_mb_metadata(series, flat)
+        series.mb_linked_id = mb_id
+
+        # Also trigger MU enrichment now that we have MB data
+        mu_id_from_mb = flat.get("mu_numeric_id")
+        if mu_id_from_mb and not series.mu_series_id:
+            series.mu_series_id = mu_id_from_mb
+
+        try:
+            db.commit()
+        except Exception as e:
+            db.rollback()
+            logger.warning(f"MB auto-link commit failed for '{title}': {e}")
+            return
+        logger.info(f"MB auto-link: '{title}' → MB #{mb_id} ({best.get('title', '?')})")
+
+        # Enrich with MU in background (separate thread would re-open session)
+        if mu_id_from_mb or not series.mu_series_id:
+            _bg_enrich_with_mu(series_id, title, mu_id_from_mb)
+
+    except Exception as e:
+        logger.warning(f"MB auto-link failed for '{title}': {e}")
+    finally:
+        db.close()

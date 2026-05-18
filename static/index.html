@@ -7,11 +7,11 @@
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📚</text></svg>">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/css/tokens.css?v=1">
-  <link rel="stylesheet" href="/static/css/base.css?v=1">
-  <link rel="stylesheet" href="/static/css/components.css?v=1">
-  <link rel="stylesheet" href="/static/css/pages.css?v=1">
-  <link rel="stylesheet" href="/static/css/utilities.css?v=1">
+  <link rel="stylesheet" href="/static/css/tokens.css?v=2">
+  <link rel="stylesheet" href="/static/css/base.css?v=2">
+  <link rel="stylesheet" href="/static/css/components.css?v=2">
+  <link rel="stylesheet" href="/static/css/pages.css?v=2">
+  <link rel="stylesheet" href="/static/css/utilities.css?v=2">
   <style>[x-cloak] { display: none !important; }</style>
   <script defer src="/static/js/app.js?v=1"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
@@ -133,7 +133,7 @@
         </div>
 
         <!-- Recent Drops (last 24h, from live feed + local DB) -->
-        <div class="drops-section" x-show="feedReleases.length > 0">
+        <div class="drops-section" x-show="feedReleases.length > 0 && sf.show_recent_drops !== 'false'">
           <div class="section-header">
             <span class="text-lg">⚡</span>
             <span class="section-title">Recent Drops</span>
@@ -216,7 +216,8 @@
             <option value="manga">Manga</option>
             <option value="manhwa">Manhwa</option>
             <option value="manhua">Manhua</option>
-            <option value="light_novel">Light Novel</option>
+            <option value="novel">Novel</option>
+            <option value="other">Other</option>
           </select>
           <div class="view-toggle">
             <button :class="{active: viewMode==='grid'}" @click="viewMode='grid'" title="Grid view">▦</button>
@@ -318,10 +319,10 @@
                   <div class="cover-placeholder">📖</div>
                 </template>
                 <!-- Rating overlay -->
-                <div class="cover-overlay" x-show="sf.show_ratings_on_cards !== 'false' && s.mu_rating">
+                <div class="cover-overlay" x-show="sf.show_ratings_on_cards !== 'false' && (sf.rating_source === 'mangabaka' ? s.rating : s.mu_rating)">
                   <div class="cover-rating">
-                    ★ <span x-text="s.mu_rating ? s.mu_rating.toFixed(1) : ''"></span>
-                    <span x-show="sf.show_rating_votes !== 'false' && s.mu_rating_votes" class="rating-votes text-2xs">(<span x-text="formatVotes(s.mu_rating_votes)"></span>)</span>
+                    ★ <span x-text="sf.rating_source === 'mangabaka' ? (parseFloat(s.rating)||0).toFixed(1) : (s.mu_rating ? s.mu_rating.toFixed(1) : '')"></span>
+                    <span x-show="sf.show_rating_votes !== 'false' && sf.rating_source !== 'mangabaka' && s.mu_rating_votes" class="rating-votes text-2xs">(<span x-text="formatVotes(s.mu_rating_votes)"></span>)</span>
                   </div>
                 </div>
                 <!-- Simulpub source badge -->
@@ -349,14 +350,14 @@
                 <div class="card-chapter" :class="{'new': s.has_update}" x-show="s.latest_chapter">
                   <span x-text="unitLabel(s)"></span> <span x-text="s.latest_chapter"></span>
                   <template x-if="s.has_update">
-                    <span class="text-2xs text-muted"> ← <span x-text="s.current_chapter || '0'"></span> read</span>
+                    <span class="text-2xs text-muted"> ← <span x-text="readProgress(s)"></span> read</span>
                   </template>
                 </div>
                 <div x-show="sf.show_release_group !== 'false' && s.latest_release_group"
                      class="text-xs text-muted mt-1" x-text="s.latest_release_group"></div>
 
                 <!-- Progress bar -->
-                <div class="progress-wrap" x-show="sf.show_progress_bars !== 'false' && s.latest_chapter && s.current_chapter">
+                <div class="progress-wrap" x-show="sf.show_progress_bars !== 'false' && s.latest_chapter && (isKomgaVolume(s) ? s.current_volume : s.current_chapter)">
                   <div class="progress-bar" :class="{'green': s.has_update}" :style="`width: ${chapterProgress(s)}%`"></div>
                 </div>
 
@@ -383,12 +384,12 @@
                   <div class="text-xs mt-1" style="color:var(--text-muted)" title="Has notes">📝</div>
                 </template>
 
-                <!-- Inline chapter controls -->
+                <!-- Inline chapter/volume controls -->
                 <div class="card-chapter-controls" @click.stop
                      x-show="sf.show_card_controls !== 'false' && s.latest_chapter">
-                  <span class="ch-label">Read:</span>
+                  <span class="ch-label" x-text="isKomgaVolume(s) ? 'Vol:' : 'Read:'"></span>
                   <input class="ch-read-input" type="number" min="0" step="1"
-                         :value="s.current_chapter || '0'"
+                         :value="isKomgaVolume(s) ? (s.current_volume || '0') : (s.current_chapter || '0')"
                          @keydown.enter="quickSetChapter(s, $event.target.value); $event.target.blur()"
                          @blur="quickSetChapter(s, $event.target.value)"
                          @focus="$event.target.select()" />
@@ -436,8 +437,8 @@
                         x-text="s.has_update ? 'NEW' : (s.reading_status||'').replace('_',' ')"></span>
                   <span x-show="sf.show_card_meta !== 'false'" class="capitalize" x-text="(s.series_type || 'manga')"></span>
                   <span x-show="sf.show_card_meta !== 'false' && s.year" x-text="s.year"></span>
-                  <span class="list-rating" x-show="sf.show_ratings_on_cards !== 'false' && s.mu_rating">★ <span x-text="s.mu_rating ? s.mu_rating.toFixed(1) : ''"></span>
-                    <span x-show="sf.show_rating_votes !== 'false' && s.mu_rating_votes" class="text-2xs opacity-70"(<span x-text="formatVotes(s.mu_rating_votes)"></span>)</span>
+                  <span class="list-rating" x-show="sf.show_ratings_on_cards !== 'false' && (sf.rating_source === 'mangabaka' ? s.rating : s.mu_rating)">★ <span x-text="sf.rating_source === 'mangabaka' ? (parseFloat(s.rating)||0).toFixed(1) : (s.mu_rating ? s.mu_rating.toFixed(1) : '')"></span>
+                    <span x-show="sf.show_rating_votes !== 'false' && sf.rating_source !== 'mangabaka' && s.mu_rating_votes" class="text-2xs opacity-70">(<span x-text="formatVotes(s.mu_rating_votes)"></span>)</span>
                   </span>
                   <span x-show="s.mu_series_id" class="text-2xs text-accent fw-600"
                         :title="pollHealthTitle(s)">
@@ -461,12 +462,13 @@
               <!-- Chapter info -->
               <div class="flex-shrink-0 text-right" style="min-width:90px">
                 <div class="list-chapter" x-show="s.latest_chapter" x-text="unitLabel(s) + ' ' + s.latest_chapter"></div>
-                <div class="text-xs text-muted" x-show="s.latest_chapter && s.current_chapter"
-                     x-text="s.current_chapter + ' / ' + s.latest_chapter + ' read'"></div>
+                <div class="text-xs text-muted"
+                     x-show="(isKomgaVolume(s) ? (s.current_volume || s.current_chapter) : s.current_chapter)"
+                     x-text="readProgress(s) + (isKomgaVolume(s) ? (volumeTotal(s) ? ' / ' + volumeTotal(s) : '') : (s.latest_chapter ? ' / ' + s.latest_chapter : '')) + ' read'"></div>
               </div>
 
               <!-- Progress -->
-              <div class="list-progress" x-show="sf.show_progress_bars !== 'false' && s.latest_chapter && s.current_chapter">
+              <div class="list-progress" x-show="sf.show_progress_bars !== 'false' && s.latest_chapter && (isKomgaVolume(s) ? (s.current_volume || s.current_chapter) : s.current_chapter)">
                 <div class="progress-wrap">
                   <div class="progress-bar" :class="{'green': s.has_update}" :style="`width: ${chapterProgress(s)}%`"></div>
                 </div>
@@ -476,7 +478,7 @@
               <div class="list-controls" @click.stop
                    x-show="sf.show_card_controls !== 'false' && s.latest_chapter">
                 <input class="ch-read-input" type="number" min="0" step="1"
-                       :value="s.current_chapter || '0'"
+                       :value="isKomgaVolume(s) ? (s.current_volume || '0') : (s.current_chapter || '0')"
                        @keydown.enter="quickSetChapter(s, $event.target.value); $event.target.blur()"
                        @blur="quickSetChapter(s, $event.target.value)"
                        @focus="$event.target.select()" />
@@ -1010,6 +1012,69 @@
           </div>
         </template>
 
+        <!-- ── MangaBaka ──────────────────────────────────────── -->
+        <div class="card card-padded">
+          <div class="settings-block-title">🔶 MangaBaka</div>
+
+          <div class="text-sm fw-600 mb-1">API Token</div>
+          <div class="settings-row">
+            <label>Token</label>
+            <input class="input flex-1" type="text" placeholder="mb-…" x-model="sf.mangabaka_token" />
+          </div>
+          <div class="text-xs text-muted mt-1 mb-3">
+            Required for series search and metadata lookups. Get yours at
+            <a href="https://mangabaka.org" target="_blank" class="text-accent">mangabaka.org</a>.
+            Rate limits: 30 searches/min, 120 lookups/min.
+          </div>
+
+          <div class="text-sm fw-600 mb-1">Library Sync</div>
+          <div class="text-xs text-muted mb-3 leading-relaxed">
+            Automatically push chapter progress and reading status to your MangaBaka account whenever you update a series here.
+            Requires a <strong>Personal Access Token (PAT)</strong> from
+            <a href="https://mangabaka.org/my/settings/api" target="_blank" class="link">mangabaka.org/my/settings/api</a>.
+            Only updates series already in your MB library — use Export to add new ones.
+          </div>
+          <div class="settings-row">
+            <label>Personal Access Token</label>
+            <div class="flex gap-2 flex-1">
+              <input class="input flex-1" type="password" placeholder="mb-…"
+                     x-model="sf.mangabaka_pat" autocomplete="new-password" />
+              <button class="btn btn-ghost btn-sm" @click="testMbSync()">Test</button>
+            </div>
+          </div>
+          <div class="settings-row">
+            <label>Live Sync</label>
+            <select class="input input-toggle" x-model="sf.mb_sync_enabled">
+              <option value="false">Off</option>
+              <option value="true">On</option>
+            </select>
+          </div>
+          <div class="text-xs text-muted mt-1 leading-relaxed" x-show="sf.mb_sync_enabled === 'true'">
+            ✅ Live sync active — changes pushed to MangaBaka automatically.
+          </div>
+
+          <div class="flex gap-2 mt-3 flex-wrap">
+            <button class="btn btn-primary btn-sm" @click="saveSettings()">💾 Save</button>
+            <button class="btn btn-ghost btn-sm" @click="exportMangabaka()"
+                    title="Export library in MangaBaka's format for import at mangabaka.org">⬇️ Export for MB</button>
+            <button class="btn btn-ghost btn-sm" @click="mbPull()"
+                    x-show="!!sf.mangabaka_pat"
+                    title="Pull reading progress from your MB library into this app">⬇️ Pull from MB</button>
+            <button class="btn btn-ghost btn-sm" @click="mbPushAll()"
+                    x-show="!!sf.mangabaka_pat"
+                    :disabled="mbPushingAll"
+                    :class="{'opacity-60 cursor-wait': mbPushingAll}"
+                    title="Push all tracked series' current progress to your MB library (failsafe re-sync)">
+              <span x-show="!mbPushingAll">⬆️ Push All to MB</span>
+              <span x-show="mbPushingAll">⏳ Pushing…</span>
+            </button>
+          </div>
+          <div class="text-xs text-muted mt-2">
+            Export imports at
+            <a href="https://mangabaka.org/my/library/import" target="_blank" class="link">mangabaka.org/my/library/import</a>.
+          </div>
+        </div>
+
         <!-- ── Notification Behaviour ───────────────────────── -->
         <div class="card card-padded">
           <div class="settings-block-title">🔔 Notification Behaviour</div>
@@ -1150,7 +1215,9 @@
         </div>
 
         <div class="card card-padded">
-          <div class="settings-block-title">🔄 Update Polling</div>
+          <div class="settings-block-title">🔄 Polling &amp; Background Jobs</div>
+
+          <div class="text-sm fw-600 mb-2">Chapter Detection</div>
           <div class="settings-row">
             <label>Check Interval</label>
             <select class="input" x-model="sf.poll_interval_hours" style="width:180px">
@@ -1161,13 +1228,40 @@
               <option value="24">Once a day</option>
             </select>
           </div>
-          <div class="flex gap-2 mt-2">
+          <div class="flex gap-2 mt-2 mb-4">
             <button class="btn btn-primary btn-sm" @click="saveSettings()">💾 Save</button>
             <button class="btn btn-ghost btn-sm" @click="pollNow()" :disabled="polling">
               <span x-show="polling" class="spin spin-sm"></span>
               <span x-show="!polling">🔄</span>
               <span x-text="polling ? 'Running…' : 'Poll Now'"></span>
             </button>
+          </div>
+
+          <div class="text-sm fw-600 mb-1">Scheduled Metadata Refresh</div>
+          <div class="text-xs text-muted mb-3 leading-relaxed">
+            Periodically re-fetch metadata (covers, descriptions, completion status, ratings, tags, authors)
+            from MangaBaka and MangaUpdates for all tracked series. Runs as a separate background job
+            and won't interfere with chapter detection polls.
+          </div>
+          <div class="settings-row">
+            <label>Enable</label>
+            <select class="input input-toggle" x-model="sf.metadata_refresh_enabled">
+              <option value="false">Off</option>
+              <option value="true">On</option>
+            </select>
+          </div>
+          <div class="settings-row" x-show="sf.metadata_refresh_enabled === 'true'">
+            <label>Interval</label>
+            <select class="input" x-model="sf.metadata_refresh_interval_days" style="width:180px">
+              <option value="1">Daily</option>
+              <option value="3">Every 3 days</option>
+              <option value="7">Weekly</option>
+              <option value="14">Every 2 weeks</option>
+              <option value="30">Monthly</option>
+            </select>
+          </div>
+          <div class="flex gap-2 mt-2">
+            <button class="btn btn-primary btn-sm" @click="saveSettings()">💾 Save</button>
           </div>
         </div>
 
@@ -1220,9 +1314,28 @@
             <input class="input flex-1" type="text" placeholder="Your Komga API key"
                    x-model="sf.komga_api_key" autocomplete="off" />
           </div>
-          <div class="flex gap-2 mt-2">
+          <div class="settings-row" x-show="sf.komga_url && sf.komga_api_key">
+            <label>Sync Read Progress <span class="text-xs fw-400 text-muted">(native series)</span></label>
+            <select class="input input-toggle" x-model="sf.komga_sync_read_progress">
+              <option value="false">Off</option>
+              <option value="true">On</option>
+            </select>
+          </div>
+          <div class="text-xs text-muted mt-1" x-show="sf.komga_url && sf.komga_api_key && sf.komga_sync_read_progress === 'true'">
+            Each poll, syncs read progress for series whose chapter source is set to Komga (simulpub_source = komga).
+            For other series linked via Komga soft-link, enable per-series from the series detail modal.
+          </div>
+          <div class="flex gap-2 mt-2 flex-wrap">
             <button class="btn btn-primary btn-sm" @click="saveSettings()">💾 Save</button>
             <button class="btn btn-ghost btn-sm" @click="testKomga()">🔌 Test Connection</button>
+            <button class="btn btn-ghost btn-sm" @click="komgaSyncNow()"
+                    x-show="sf.komga_url && sf.komga_api_key"
+                    :disabled="komgaSyncing"
+                    :class="{'opacity-60 cursor-wait': komgaSyncing}"
+                    title="Force-run Komga release detection and read-progress sync now, without waiting for the next poll">
+              <span x-show="!komgaSyncing">🔄 Sync Komga Now</span>
+              <span x-show="komgaSyncing">⏳ Syncing…</span>
+            </button>
           </div>
           <div class="text-xs text-muted mt-2">
             Connect your Komga server to track chapter updates from your self-hosted library.
@@ -1303,27 +1416,21 @@
           </div>
         </div>
 
-        <!-- ── MangaBaka Sync Export ───────────────────────── -->
-        <div class="card card-padded">
-          <div class="settings-block-title">🔄 MangaBaka Sync</div>
-          <div class="flex gap-2">
-            <button class="btn btn-primary btn-sm" @click="exportMangabaka()">⬇️ Export for MangaBaka</button>
-          </div>
-          <div class="text-xs text-muted mt-2 leading-relaxed">
-            Export your library in MangaBaka's native format. Import the file at
-            <a href="https://mangabaka.org/my/library/import" target="_blank" class="link">mangabaka.org/my/library/import</a>
-            to sync reading progress and status to your MangaBaka account.
-          </div>
-        </div>
 
         <!-- Metadata Maintenance -->
         <div class="card card-padded">
           <div class="settings-block-title">🔧 Metadata Maintenance</div>
-          <div class="flex gap-2">
+          <div class="flex gap-2 flex-wrap">
             <button class="btn btn-ghost btn-sm" @click="fillMissingCovers()">🖼 Fetch Missing Covers</button>
+            <button class="btn btn-ghost btn-sm" @click="refreshMetadataNow()" :disabled="metadataRefreshing">
+              <span x-show="metadataRefreshing">⏳</span>
+              <span x-show="!metadataRefreshing">🔄</span>
+              <span x-text="metadataRefreshing ? 'Refreshing…' : 'Refresh All Metadata'"></span>
+            </button>
           </div>
           <div class="text-xs text-muted mt-2 leading-relaxed">
-            Fetches cover art from MangaBaka for any series missing a cover image. Runs in the background — refresh the library after a moment to see results.
+            <strong>Fetch Missing Covers</strong> — fills blank cover art from MangaBaka for series missing a cover image.<br>
+            <strong>Refresh All Metadata</strong> — re-fetches covers, descriptions, status, ratings, tags, and author info from MangaBaka and MangaUpdates for every tracked series. Use this for a one-time refresh or after linking new series. Both run in the background.
           </div>
         </div>
 
@@ -1396,6 +1503,14 @@
               <span class="text-sm">Vote count next to rating</span>
             </label>
 
+            <div class="flex items-center gap-2 mt-1">
+              <span class="text-sm">Rating source</span>
+              <button class="btn btn-sm" :class="sf.rating_source !== 'mangabaka' ? 'btn-primary' : 'btn-ghost'"
+                      @click="sf.rating_source = 'mangaupdates'">MangaUpdates</button>
+              <button class="btn btn-sm" :class="sf.rating_source === 'mangabaka' ? 'btn-primary' : 'btn-ghost'"
+                      @click="sf.rating_source = 'mangabaka'">MangaBaka</button>
+            </div>
+
             <label class="checkbox-label">
               <input type="checkbox" :checked="sf.show_source_badges !== 'false'"
                      @change="sf.show_source_badges = $event.target.checked ? 'true' : 'false'" />
@@ -1448,6 +1563,12 @@
               <input type="checkbox" :checked="sf.dim_finished_covers !== 'false'"
                      @change="sf.dim_finished_covers = $event.target.checked ? 'true' : 'false'" />
               <span class="text-sm">Dim covers for completed / dropped series</span>
+            </label>
+
+            <label class="checkbox-label">
+              <input type="checkbox" :checked="sf.show_recent_drops !== 'false'"
+                     @change="sf.show_recent_drops = $event.target.checked ? 'true' : 'false'" />
+              <span class="text-sm">Recent Drops section on library page</span>
             </label>
 
           </div>
@@ -1530,20 +1651,6 @@
           <div class="text-xs text-muted mt-2">Changes apply immediately. Save to persist across sessions.</div>
         </div>
 
-        <div class="card card-padded">
-          <div class="settings-block-title">🔑 MangaBaka API</div>
-          <div class="settings-row">
-            <label>API Token</label>
-            <input class="input flex-1" type="text" placeholder="mb-…" x-model="sf.mangabaka_token" />
-          </div>
-          <div class="flex gap-2 mt-2">
-            <button class="btn btn-primary btn-sm" @click="saveSettings()">💾 Save</button>
-          </div>
-          <div class="text-xs text-muted mt-2">
-            Token from <a href="https://mangabaka.org" target="_blank" class="text-accent">mangabaka.org</a>.
-            Rate limits: 30 searches/min, 120 lookups/min.
-          </div>
-        </div>
 
       </div><!-- /settings -->
 
@@ -1594,13 +1701,13 @@
               <span x-show="ds.total_volumes" x-text="ds.total_volumes + ' volumes'"></span>
             </div>
 
-            <!-- MU Rating -->
-            <template x-if="ds.mu_rating">
+            <!-- Rating -->
+            <template x-if="sf.rating_source === 'mangabaka' ? ds.rating : ds.mu_rating">
               <div class="flex items-center gap-1 mb-3">
                 <span class="rating-star">★</span>
-                <span class="rating-val" x-text="ds.mu_rating.toFixed(2)"></span>
-                <span class="rating-votes" x-show="ds.mu_rating_votes">(<span x-text="formatVotes(ds.mu_rating_votes)"></span> votes)</span>
-                <span class="text-xs text-muted">MangaUpdates Bayesian</span>
+                <span class="rating-val" x-text="sf.rating_source === 'mangabaka' ? (parseFloat(ds.rating)||0).toFixed(2) : ds.mu_rating.toFixed(2)"></span>
+                <span class="rating-votes" x-show="sf.rating_source !== 'mangabaka' && ds.mu_rating_votes">(<span x-text="formatVotes(ds.mu_rating_votes)"></span> votes)</span>
+                <span class="text-xs text-muted" x-text="sf.rating_source === 'mangabaka' ? 'MangaBaka' : 'MangaUpdates Bayesian'"></span>
               </div>
             </template>
 
@@ -1703,19 +1810,29 @@
           <div class="form-group">
             <div class="form-label">
               Current Chapter
-              <span class="text-muted fw-400" x-show="ds.latest_chapter" x-text="`(latest: ${ds.latest_chapter})`"></span>
+              <!-- For Komga-volume series latest_chapter is a volume number — don't show it here -->
+              <span class="text-muted fw-400"
+                    x-show="ds.latest_chapter && !isKomgaVolume(ds)"
+                    x-text="`(latest: ${ds.latest_chapter})`"></span>
             </div>
             <div class="flex gap-2 items-center">
               <input class="input input-sm" type="number" min="0" step="1" x-model="ef.current_chapter" />
-              <button class="btn btn-green btn-sm" x-show="ds.latest_chapter"
+              <!-- Mark Current only makes sense for non-Komga-volume series -->
+              <button class="btn btn-green btn-sm"
+                      x-show="ds.latest_chapter && !isKomgaVolume(ds)"
                       @click="ef.current_chapter = ds.latest_chapter">Mark Current</button>
             </div>
-            <div class="progress-wrap mt-2" x-show="ds.latest_chapter">
-              <div class="progress-bar" :class="{'green': ds.has_update}"
-                   :style="`width: ${chapterProgress({...ds, current_chapter: ef.current_chapter})}%`"></div>
-            </div>
-            <div class="text-xs text-muted mt-1" x-show="ds.latest_chapter"
-                 x-text="`${chapterProgress({...ds, current_chapter: ef.current_chapter}).toFixed(0)}% complete`"></div>
+            <!-- Progress bar only meaningful for non-Komga-volume series -->
+            <template x-if="!isKomgaVolume(ds)">
+              <div>
+                <div class="progress-wrap mt-2" x-show="ds.latest_chapter">
+                  <div class="progress-bar" :class="{'green': ds.has_update}"
+                       :style="`width: ${chapterProgress({...ds, current_chapter: ef.current_chapter})}%`"></div>
+                </div>
+                <div class="text-xs text-muted mt-1" x-show="ds.latest_chapter"
+                     x-text="`${chapterProgress({...ds, current_chapter: ef.current_chapter}).toFixed(0)}% complete`"></div>
+              </div>
+            </template>
             <div class="text-xs text-muted mt-2" x-show="ds.last_read_at">
               Last read: <strong x-text="relativeTime(ds.last_read_at)"></strong>
             </div>
@@ -1725,6 +1842,42 @@
               <span x-show="ds.date_completed" x-text="'Completed ' + (ds.date_completed ? new Date(ds.date_completed).toLocaleDateString('en-US',{month:'short',year:'numeric'}) : '')"></span>
             </div>
           </div>
+
+          <!-- Volume progress — always shown for all series -->
+          <template x-if="true">
+            <div class="form-group">
+              <div class="form-label">
+                Volume Progress
+                <!-- Komga-volume: show latest from Komga; others: show total_volumes if known -->
+                <span class="text-muted fw-400"
+                      x-show="volumeTotal(ds) || ds.total_volumes"
+                      x-text="isKomgaVolume(ds) ? (volumeTotal(ds) ? `(latest: ${volumeTotal(ds)})` : '') : `(of ${ds.total_volumes})`"></span>
+              </div>
+              <div class="flex gap-2 items-center">
+                <input class="input input-sm" type="number" min="0" step="1" x-model="ef.current_volume"
+                       placeholder="—" style="width:90px" />
+                <!-- Catch up to Komga's latest, or mark complete if total_volumes known -->
+                <button class="btn btn-green btn-sm"
+                        x-show="isKomgaVolume(ds) ? !!volumeTotal(ds) : !!ds.total_volumes"
+                        x-text="isKomgaVolume(ds) ? 'Catch Up' : 'Mark Complete'"
+                        @click="ef.current_volume = isKomgaVolume(ds) ? volumeTotal(ds) : String(ds.total_volumes)"></button>
+                <button class="btn btn-ghost btn-sm" x-show="ef.current_volume" @click="ef.current_volume = ''">Clear</button>
+              </div>
+              <!-- Progress bar: Komga-volume uses latest_chapter as denominator; others use total_volumes -->
+              <template x-if="isKomgaVolume(ds) ? !!volumeTotal(ds) : !!ds.total_volumes">
+                <div>
+                  <div class="progress-wrap mt-2" x-show="ef.current_volume">
+                    <div class="progress-bar"
+                         :style="`width: ${Math.min(100, (parseFloat(ef.current_volume)||0) / parseFloat(isKomgaVolume(ds) ? volumeTotal(ds) : ds.total_volumes) * 100).toFixed(1)}%`"></div>
+                  </div>
+                  <div class="text-xs text-muted mt-1" x-show="ef.current_volume">
+                    Vol. <span x-text="ef.current_volume"></span> / <span x-text="isKomgaVolume(ds) ? volumeTotal(ds) : ds.total_volumes"></span>
+                    (<span x-text="Math.min(100,(parseFloat(ef.current_volume)||0)/parseFloat(isKomgaVolume(ds) ? volumeTotal(ds) : ds.total_volumes)*100).toFixed(0)"></span>%)
+                  </div>
+                </div>
+              </template>
+            </div>
+          </template>
 
           <div class="flex gap-2 items-center mb-4 pb-4" style="border-bottom: 1px solid var(--border);">
             <button class="btn btn-danger btn-sm" @click="removeSeries(ds.id)">🗑 Remove</button>
@@ -1811,9 +1964,9 @@
             <!-- Numeric mode -->
             <template x-if="sf.rating_input_mode === 'numeric'">
               <div class="flex items-center gap-2">
-                <input type="number" class="input input-sm" style="width:80px" min="0" max="10" step="0.5"
+                <input type="number" class="input input-sm" style="width:80px" min="0" max="10" step="1"
                   :value="ef.user_rating ?? ''"
-                  @change="const v = parseFloat($event.target.value); ef.user_rating = isNaN(v) ? null : Math.round(Math.min(10, Math.max(0, v)) * 2) / 2" />
+                  @change="const v = parseFloat($event.target.value); ef.user_rating = isNaN(v) ? null : Math.round(Math.min(10, Math.max(0, v)))" />
                 <span class="text-muted text-sm">/ 10</span>
                 <button type="button" class="btn btn-ghost btn-xs" x-show="ef.user_rating !== null" @click="ef.user_rating = null; $el.previousElementSibling.previousElementSibling.value = ''">Clear</button>
               </div>
@@ -1847,6 +2000,16 @@
 
           <div class="form-group">
             <label class="checkbox-label text-sm">
+              <input type="checkbox" x-model="ef.updates_hidden" class="accent-check" />
+              <span>🙈 Hide from Updates filter &amp; badge count</span>
+            </label>
+            <div class="text-xs text-muted" style="margin-left:26px">
+              Still tracked and polled. Progress and notifications work normally. Just excluded from the Updates view.
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="checkbox-label text-sm">
               <input type="checkbox" x-model="ef.notification_muted" class="accent-check" />
               <span>🔇 Mute push notifications for this series</span>
             </label>
@@ -1869,8 +2032,8 @@
 
           <!-- Simulpub source config -->
           <div class="form-group">
-            <div class="form-label">Chapter Source
-              <span class="text-muted fw-400 text-sm"> — override for officially licensed / simulpub titles</span>
+            <div class="form-label">Release Detection Source
+              <span class="text-muted fw-400 text-sm"> — what drives new chapter/volume notifications</span>
             </div>
             <select class="input input-wide" x-model="ef.simulpub_source"
                     @change="
@@ -2069,6 +2232,87 @@
             </template>
           </div>
 
+          <!-- Komga soft-link: read-progress sync for non-Komga series -->
+          <template x-if="ef.simulpub_source !== 'komga'">
+            <div class="mb-4">
+              <div class="form-label mb-1">Komga Read Progress
+                <span class="text-xs text-muted fw-400"> — optional</span>
+              </div>
+              <div class="text-xs text-muted mb-2">
+                Link to a Komga series to sync your reading progress. <strong>Read progress only</strong> — does not affect release notifications.
+                To get release notifications from Komga, select <em>Komga (self-hosted)</em> as the Release Detection Source above.
+              </div>
+
+              <!-- Search -->
+              <template x-if="sf.komga_url && sf.komga_api_key">
+                <div class="mb-2">
+                  <div class="flex gap-2 items-center mb-1">
+                    <input class="input" type="text" placeholder="Search Komga library…"
+                           x-model="ef.komgaLinkSearch"
+                           @input.debounce.400ms="searchKomgaLink()"
+                           style="width:280px" />
+                    <span class="text-xs text-muted" x-show="ef.komgaLinkSearching">searching…</span>
+                  </div>
+                  <template x-if="ef.komgaLinkResults && ef.komgaLinkResults.length > 0">
+                    <div class="komga-search-results">
+                      <template x-for="ks in ef.komgaLinkResults" :key="ks.id">
+                        <div class="flex items-center gap-2 komga-search-item cursor-pointer"
+                             :class="{'bg-surface2': ef.komga_series_id === ks.id}"
+                             @click="ef.komga_series_id = ks.id; ef.komgaLinkSearch = ks.metadata?.title || ks.name; ef.komgaLinkResults = []">
+                          <span class="text-sm" x-text="ks.metadata?.title || ks.name"></span>
+                          <span class="text-xs text-muted" x-text="ks.booksCount + ' books'"></span>
+                        </div>
+                      </template>
+                    </div>
+                  </template>
+                  <template x-if="ef.komgaLinkSearched && ef.komgaLinkResults && ef.komgaLinkResults.length === 0">
+                    <div class="text-xs text-muted mb-1">No results — paste the ID directly below.</div>
+                  </template>
+                </div>
+              </template>
+
+              <!-- Direct ID input + link/clear -->
+              <div class="flex gap-2 items-center">
+                <input class="input" type="text" placeholder="Komga series ID (paste from URL)"
+                       x-model="ef.komga_series_id" style="width:280px" />
+                <a x-show="ef.komga_series_id && sf.komga_url"
+                   :href="`${sf.komga_url}/series/${ef.komga_series_id}`"
+                   target="_blank" class="btn btn-ghost btn-sm">Komga ↗</a>
+                <button x-show="ef.komga_series_id"
+                        class="btn btn-ghost btn-sm text-muted"
+                        @click="ef.komga_series_id = ''; ef.komgaLinkSearch = ''; ef.komgaLinkResults = []"
+                        title="Remove Komga link">✕</button>
+              </div>
+              <template x-if="ef.komga_series_id">
+                <div>
+                  <div class="flex gap-3 items-center mt-3 komga-track-toggle">
+                    <span class="text-xs fw-600">Track by:</span>
+                    <label class="flex items-center gap-1 cursor-pointer">
+                      <input type="radio" value="chapter" x-model="ef.komga_track_mode" />
+                      <span class="text-xs">Chapters</span>
+                    </label>
+                    <label class="flex items-center gap-1 cursor-pointer">
+                      <input type="radio" value="volume" x-model="ef.komga_track_mode" />
+                      <span class="text-xs">Volumes</span>
+                    </label>
+                  </div>
+                  <div class="flex flex-col gap-2 mt-2">
+                    <label class="checkbox-label">
+                      <input type="checkbox" x-model="ef.komga_sync_progress" />
+                      <span class="text-xs">Automatically sync read progress from Komga each poll</span>
+                    </label>
+                    <div class="text-xs text-muted" x-show="!ef.komga_sync_progress">
+                      Off — progress won't be overwritten. Update manually or toggle on when Komga is your primary reading app for this series.
+                    </div>
+                  </div>
+                </div>
+              </template>
+              <div class="text-xs text-muted mt-1" x-show="(!sf.komga_url || !sf.komga_api_key) && !ef.komga_series_id">
+                ⚠️ Configure Komga URL and API key in Settings first.
+              </div>
+            </div>
+          </template>
+
           <!-- MU Categories cloud -->
           <template x-if="ds.categories && ds.categories.length > 0">
             <div class="mb-4">
@@ -2107,6 +2351,61 @@
             </div>
           </template>
 
+          <!-- MB link management — Komga series only -->
+          <template x-if="ds.simulpub_source === 'komga'">
+            <div class="form-group">
+              <div class="form-label">MangaBaka Link</div>
+              <template x-if="ds.mb_linked_id">
+                <div>
+                  <div class="flex gap-2 items-center flex-wrap">
+                    <span class="text-sm text-muted">Linked to MB #<span x-text="ds.mb_linked_id"></span></span>
+                    <a x-show="ds.mangabaka_url" :href="ds.mangabaka_url" target="_blank"
+                       class="btn btn-ghost btn-sm">View ↗</a>
+                    <button class="btn btn-ghost btn-sm" @click="mbRelinkOpen = !mbRelinkOpen">🔗 Relink</button>
+                    <button class="btn btn-ghost btn-sm" style="color:var(--red)"
+                            @click="unlinkMb(ds.id)">Unlink</button>
+                  </div>
+                </div>
+              </template>
+              <template x-if="!ds.mb_linked_id">
+                <div>
+                  <div class="text-sm text-muted mb-2">Not linked — metadata and covers won't refresh from MangaBaka.</div>
+                  <button class="btn btn-primary btn-sm" @click="mbRelinkOpen = true">🔗 Link to MangaBaka</button>
+                </div>
+              </template>
+              <!-- Search + pick UI -->
+              <div x-show="mbRelinkOpen" class="mt-2">
+                <div class="flex gap-2">
+                  <input class="input input-sm flex-1" type="text" placeholder="Search MangaBaka…"
+                         x-model="mbRelinkQuery" @keydown.enter="searchMbRelink()" />
+                  <button class="btn btn-primary btn-sm" @click="searchMbRelink()"
+                          :disabled="mbRelinkSearching">
+                    <span x-show="mbRelinkSearching" class="spin spin-sm"></span>
+                    <span x-show="!mbRelinkSearching">Search</span>
+                  </button>
+                  <button class="btn btn-ghost btn-sm" @click="mbRelinkOpen = false; mbRelinkResults = []">✕</button>
+                </div>
+                <div class="mt-2" x-show="mbRelinkResults.length > 0">
+                  <template x-for="r in mbRelinkResults" :key="r.id">
+                    <div class="flex items-center gap-2 py-1" style="border-bottom:1px solid var(--border)">
+                      <img :src="r.cover" style="width:32px;height:44px;object-fit:cover;border-radius:3px" onerror="this.style.display='none'" />
+                      <div class="flex-1 min-w-0">
+                        <div class="text-sm fw-600 truncate" x-text="r.title"></div>
+                        <div class="text-xs text-muted" x-text="(r.type||'') + (r.year ? ' · ' + r.year : '')"></div>
+                      </div>
+                      <button class="btn btn-green btn-sm flex-shrink-0"
+                              @click="confirmMbLink(ds.id, r.id)">Link</button>
+                    </div>
+                  </template>
+                </div>
+                <div class="text-xs text-muted mt-1"
+                     x-show="mbRelinkResults.length === 0 && !mbRelinkSearching && mbRelinkSearched">
+                  No results found.
+                </div>
+              </div>
+            </div>
+          </template>
+
           <!-- External links -->
           <div class="ext-links-section">
             <div class="form-label mb-1">Links</div>
@@ -2135,6 +2434,9 @@
                  :href="ds.mangabaka_url" target="_blank" class="ext-link-chip type-tracker">MangaBaka ↗</a>
               <a x-show="ds.mu_url && !externalLinkExists(ds, 'mangaupdates')"
                  :href="ds.mu_url" target="_blank" class="ext-link-chip type-tracker">MangaUpdates ↗</a>
+              <button x-show="ds.mu_series_id || true" class="ext-link-chip type-tracker"
+                      style="cursor:pointer;border:none;background:none"
+                      @click="muReviewOpen = true; muSearchQ = ds.title">✏ Edit MU Link</button>
             </div>
           </div>
 
@@ -2162,7 +2464,7 @@
           <div class="mu-review-section">
             <hr class="divider" />
             <div class="mu-review-header">
-              <span class="mu-review-title">⚠ MangaUpdates Link — Low Confidence</span>
+              <span class="mu-review-title" x-text="ds.mu_link_status === 'uncertain' ? '⚠ MangaUpdates Link — Low Confidence' : '🔗 MangaUpdates Link'"></span>
               <button class="btn btn-ghost btn-xs" @click="muReviewOpen = !muReviewOpen"
                       x-text="muReviewOpen ? 'Close' : 'Review'"></button>
             </div>
