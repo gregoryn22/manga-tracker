@@ -5,7 +5,7 @@ on:
   push:
     branches:
       - master          # publish latest on every merge to main
-      - develop       
+      - develop
     tags:
       - "v*.*.*"      # publish a versioned tag when you push e.g. v1.2.0
   pull_request:
