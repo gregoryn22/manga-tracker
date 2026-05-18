@@ -841,6 +841,11 @@ class UpdateSeriesRequest(BaseModel):
     # Personal rating (0–10, half-point increments; null clears)
     user_rating: float | None = None
     clear_user_rating: bool = False
+    # Reading dates (ISO-8601 date strings or null to clear)
+    date_started: str | None = None
+    date_completed: str | None = None
+    clear_date_started: bool = False
+    clear_date_completed: bool = False
 
 
 @router.patch("/{series_id}")
@@ -863,13 +868,35 @@ def update_series(series_id: int, req: UpdateSeriesRequest, db: Session = Depend
             series.last_read_at = datetime.utcnow()
         series.current_chapter = req.current_chapter
     if req.reading_status is not None:
-        if req.reading_status != series.reading_status:
+        old_status = series.reading_status
+        if req.reading_status != old_status:
             db.add(ReadingLog(
                 series_id=series.id, series_title=series.title,
-                old_chapter=series.reading_status, new_chapter=req.reading_status,
+                old_chapter=old_status, new_chapter=req.reading_status,
                 action="status_change", created_at=datetime.utcnow(),
             ))
+            # Auto-set date_started when transitioning TO "reading"
+            if req.reading_status == "reading" and not series.date_started:
+                series.date_started = datetime.utcnow()
+            # Auto-set date_completed when transitioning TO "completed"
+            if req.reading_status == "completed" and not series.date_completed:
+                series.date_completed = datetime.utcnow()
         series.reading_status = req.reading_status
+    # Manual date overrides
+    if req.clear_date_started:
+        series.date_started = None
+    elif req.date_started is not None:
+        try:
+            series.date_started = datetime.fromisoformat(req.date_started)
+        except ValueError:
+            raise HTTPException(status_code=422, detail="date_started must be ISO-8601 format (YYYY-MM-DD)")
+    if req.clear_date_completed:
+        series.date_completed = None
+    elif req.date_completed is not None:
+        try:
+            series.date_completed = datetime.fromisoformat(req.date_completed)
+        except ValueError:
+            raise HTTPException(status_code=422, detail="date_completed must be ISO-8601 format (YYYY-MM-DD)")
     if req.notes is not None:
         series.notes = req.notes
     if req.tags is not None:

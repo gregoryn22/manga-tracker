@@ -43,6 +43,18 @@ function app() {
       show_card_controls:    'true',   // inline "Read:" input + catch-up button on cards
       default_view_mode:     'grid',   // persisted view mode: 'grid' or 'list'
       default_feed_grouped:  'false',  // persisted feed grouping: 'true' or 'false'
+      // Rating input mode
+      rating_input_mode:               'stars',
+      // Reading dates display
+      show_reading_dates:              'true',
+      // Notes indicator on cards
+      show_notes_indicator_on_cards:   'true',
+      // Appearance
+      accent_color:     '#7c6cff',
+      font_scale:       '1',
+      card_radius:      'md',
+      sidebar_width:    '220',
+      dim_finished_covers: 'true',
     },
 
     // Detail modal
@@ -76,6 +88,8 @@ function app() {
 
     // Search debounce timer
     _searchTimer: null,
+    // Accent color debounce timer
+    _accentTimer: null,
 
     // Computed stats
     get stats() {
@@ -87,9 +101,60 @@ function app() {
       };
     },
 
+    applyThemeSettings() {
+      const r = document.documentElement;
+      // Accent color + hover variant
+      const hex = this.sf.accent_color || '#7c6cff';
+      r.style.setProperty('--accent', hex);
+      // Compute a lighter hover variant via HSL
+      const hsl = this._hexToHsl(hex);
+      if (hsl) {
+        const lighter = `hsl(${hsl.h}, ${hsl.s}%, ${Math.min(95, hsl.l + 15)}%)`;
+        r.style.setProperty('--accent-h', lighter);
+        const dim = `hsla(${hsl.h}, ${hsl.s}%, ${hsl.l}%, 0.12)`;
+        r.style.setProperty('--accent-dim', dim);
+      }
+      // Font scale
+      const scale = parseFloat(this.sf.font_scale) || 1;
+      r.style.setProperty('font-size', scale + 'rem');
+      // Card radius
+      const radiusMap = { none: '0px', sm: '4px', md: '8px', lg: '16px', xl: '24px' };
+      const radBase = radiusMap[this.sf.card_radius] || '8px';
+      const radMult = { none: 0, sm: 0.5, md: 1, lg: 2, xl: 3 }[this.sf.card_radius] ?? 1;
+      r.style.setProperty('--radius-sm', Math.round(4 * radMult) + 'px');
+      r.style.setProperty('--radius-md', Math.round(8 * radMult) + 'px');
+      r.style.setProperty('--radius-lg', Math.round(12 * radMult) + 'px');
+      r.style.setProperty('--radius-xl', Math.round(16 * radMult) + 'px');
+      // Sidebar width
+      const sw = parseInt(this.sf.sidebar_width) || 220;
+      r.style.setProperty('--sidebar-width', sw + 'px');
+    },
+
+    _hexToHsl(hex) {
+      const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+      if (!m) return null;
+      let r = parseInt(m[1], 16) / 255;
+      let g = parseInt(m[2], 16) / 255;
+      let b = parseInt(m[3], 16) / 255;
+      const max = Math.max(r, g, b), min = Math.min(r, g, b);
+      let h, s, l = (max + min) / 2;
+      if (max === min) { h = s = 0; }
+      else {
+        const d = max - min;
+        s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+        switch (max) {
+          case r: h = ((g - b) / d + (g < b ? 6 : 0)) / 6; break;
+          case g: h = ((b - r) / d + 2) / 6; break;
+          case b: h = ((r - g) / d + 4) / 6; break;
+        }
+      }
+      return { h: Math.round(h * 360), s: Math.round(s * 100), l: Math.round(l * 100) };
+    },
+
     async init() {
       // Load settings first (needed for idle detection, display prefs, etc.)
       try { const d = await this.api('/api/settings'); this.sf = {...this.sf,...d}; } catch(e) {}
+      this.applyThemeSettings();
       // Apply persisted view/feed preferences immediately after settings load
       this.viewMode    = this.sf.default_view_mode    || 'grid';
       this.feedGrouped = this.sf.default_feed_grouped === 'true';
@@ -698,6 +763,8 @@ function app() {
         komgaSearch: '', komgaResults: [], komgaSearching: false, komgaSearched: false,
         komga_track_mode: series.komga_track_mode || 'chapter',
         user_rating: series.user_rating ?? null,
+        date_started: series.date_started || '',
+        date_completed: series.date_completed || '',
       };
       this.detailOpen = true;
       this.detailReleases = [];
@@ -753,6 +820,10 @@ function app() {
           komga_track_mode: this.ef.simulpub_source === 'komga' ? this.ef.komga_track_mode : undefined,
           user_rating: this.ef.user_rating,
           clear_user_rating: this.ef.user_rating === null && this.ds.user_rating !== null,
+          date_started: this.ef.date_started || undefined,
+          date_completed: this.ef.date_completed || undefined,
+          clear_date_started: !this.ef.date_started && !!this.ds.date_started,
+          clear_date_completed: !this.ef.date_completed && !!this.ds.date_completed,
         };
         if (this.ef.simulpub_source === 'custom') {
           body.mu_latest_chapter = this.ef.mu_latest_chapter_manual;
@@ -875,8 +946,17 @@ function app() {
       catch(e) {}
     },
 
+    onAccentChange(val) {
+      clearTimeout(this._accentTimer);
+      this._accentTimer = setTimeout(() => { this.sf.accent_color = val; this.applyThemeSettings(); }, 300);
+    },
+
     async saveSettings() {
-      try { await this.api('/api/settings','PATCH',this.sf); this.toast('Settings saved!','success'); }
+      try {
+        await this.api('/api/settings','PATCH',this.sf);
+        this.applyThemeSettings();
+        this.toast('Settings saved!','success');
+      }
       catch(e) { this.toast('Failed to save settings','error'); }
     },
 

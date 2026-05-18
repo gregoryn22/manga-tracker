@@ -311,7 +311,8 @@
               <div class="cover-wrap">
                 <template x-if="s.cover_url">
                   <img class="cover-img" :src="s.cover_url" :alt="s.title" loading="lazy"
-                       @error="$el.style.display='none'" />
+                       @error="$el.style.display='none'"
+                       :style="sf.dim_finished_covers !== 'false' && (s.reading_status === 'completed' || s.reading_status === 'dropped') ? 'filter:brightness(0.55) saturate(0.6)' : ''" />
                 </template>
                 <template x-if="!s.cover_url">
                   <div class="cover-placeholder">📖</div>
@@ -366,6 +367,20 @@
                       <span class="tag text-2xs" x-text="tag"></span>
                     </template>
                   </div>
+                </template>
+
+                <!-- Reading dates -->
+                <template x-if="sf.show_reading_dates !== 'false' && (s.date_started || s.date_completed)">
+                  <div class="text-xs mt-1" style="color:var(--text-muted);font-size:var(--fs-3xs)">
+                    <span x-show="s.date_started" x-text="'Started ' + (s.date_started ? new Date(s.date_started).toLocaleDateString('en-US',{month:'short',year:'numeric'}) : '')"></span>
+                    <span x-show="s.date_started && s.date_completed"> · </span>
+                    <span x-show="s.date_completed" x-text="'Done ' + (s.date_completed ? new Date(s.date_completed).toLocaleDateString('en-US',{month:'short',year:'numeric'}) : '')"></span>
+                  </div>
+                </template>
+
+                <!-- Notes indicator -->
+                <template x-if="sf.show_notes_indicator_on_cards !== 'false' && s.notes">
+                  <div class="text-xs mt-1" style="color:var(--text-muted)" title="Has notes">📝</div>
                 </template>
 
                 <!-- Inline chapter controls -->
@@ -1417,13 +1432,102 @@
               <span class="text-sm">Inline chapter controls</span>
             </label>
 
+            <label class="checkbox-label">
+              <input type="checkbox" :checked="sf.show_reading_dates !== 'false'"
+                     @change="sf.show_reading_dates = $event.target.checked ? 'true' : 'false'" />
+              <span class="text-sm">Reading dates (started / completed)</span>
+            </label>
+
+            <label class="checkbox-label">
+              <input type="checkbox" :checked="sf.show_notes_indicator_on_cards !== 'false'"
+                     @change="sf.show_notes_indicator_on_cards = $event.target.checked ? 'true' : 'false'" />
+              <span class="text-sm">Notes indicator on cards</span>
+            </label>
+
+            <label class="checkbox-label">
+              <input type="checkbox" :checked="sf.dim_finished_covers !== 'false'"
+                     @change="sf.dim_finished_covers = $event.target.checked ? 'true' : 'false'" />
+              <span class="text-sm">Dim covers for completed / dropped series</span>
+            </label>
+
           </div>
+
+          <div class="settings-row mt-3">
+            <label>Rating Input</label>
+            <div class="flex gap-2">
+              <button class="btn btn-sm" :class="sf.rating_input_mode !== 'numeric' ? 'btn-primary' : 'btn-ghost'"
+                      @click="sf.rating_input_mode = 'stars'">★ Stars</button>
+              <button class="btn btn-sm" :class="sf.rating_input_mode === 'numeric' ? 'btn-primary' : 'btn-ghost'"
+                      @click="sf.rating_input_mode = 'numeric'">123 Numeric</button>
+            </div>
+          </div>
+
           <div class="flex gap-2 mt-4">
             <button class="btn btn-primary btn-sm" @click="saveSettings()">💾 Save</button>
           </div>
           <div class="text-xs text-muted mt-2">
             Hiding elements reduces visual noise — useful with compact grid density.
           </div>
+        </div>
+
+        <!-- Appearance -->
+        <div class="card card-padded">
+          <div class="settings-block-title">🎨 Appearance</div>
+
+          <!-- Accent color -->
+          <div class="settings-row">
+            <label>Accent Color</label>
+            <div class="flex gap-2 items-center flex-wrap">
+              <!-- Preset swatches -->
+              <template x-for="c in ['#7c6cff','#3b82f6','#14b8a6','#22c55e','#ec4899','#f97316']" :key="c">
+                <button type="button"
+                        :style="`background:${c};width:22px;height:22px;border-radius:50%;border:2px solid ${sf.accent_color===c?'#fff':'transparent'};cursor:pointer`"
+                        @click="sf.accent_color=c; applyThemeSettings()" :title="c"></button>
+              </template>
+              <input type="color" :value="sf.accent_color"
+                     @input="onAccentChange($event.target.value)"
+                     style="width:34px;height:28px;padding:0;border:none;background:none;cursor:pointer" />
+            </div>
+          </div>
+
+          <!-- Font scale -->
+          <div class="settings-row">
+            <label>Text Size</label>
+            <div class="flex gap-1">
+              <template x-for="[val, lbl] in [['0.875','Compact'],['1','Normal'],['1.125','Large'],['1.25','XL']]" :key="val">
+                <button class="btn btn-sm" :class="sf.font_scale===val?'btn-primary':'btn-ghost'"
+                        @click="sf.font_scale=val; applyThemeSettings()" x-text="lbl"></button>
+              </template>
+            </div>
+          </div>
+
+          <!-- Card corner radius -->
+          <div class="settings-row">
+            <label>Card Corners</label>
+            <div class="flex gap-1">
+              <template x-for="[val, lbl] in [['none','Sharp'],['sm','Slight'],['md','Normal'],['lg','Rounded'],['xl','Pill']]" :key="val">
+                <button class="btn btn-sm" :class="sf.card_radius===val?'btn-primary':'btn-ghost'"
+                        @click="sf.card_radius=val; applyThemeSettings()" x-text="lbl"></button>
+              </template>
+            </div>
+          </div>
+
+          <!-- Sidebar width -->
+          <div class="settings-row">
+            <label>Sidebar Width</label>
+            <div class="flex items-center gap-3" style="flex:1">
+              <input type="range" min="180" max="300" step="20"
+                     :value="sf.sidebar_width"
+                     @input="sf.sidebar_width=$event.target.value; applyThemeSettings()"
+                     style="flex:1" />
+              <span class="text-sm text-muted" x-text="sf.sidebar_width + 'px'"></span>
+            </div>
+          </div>
+
+          <div class="flex gap-2 mt-3">
+            <button class="btn btn-primary btn-sm" @click="saveSettings()">💾 Save</button>
+          </div>
+          <div class="text-xs text-muted mt-2">Changes apply immediately. Save to persist across sessions.</div>
         </div>
 
         <div class="card card-padded">
@@ -1593,6 +1697,11 @@
             <div class="text-xs text-muted mt-2" x-show="ds.last_read_at">
               Last read: <strong x-text="relativeTime(ds.last_read_at)"></strong>
             </div>
+            <div class="text-xs mt-2" style="color:var(--text-muted)" x-show="sf.show_reading_dates !== 'false' && (ds.date_started || ds.date_completed)">
+              <span x-show="ds.date_started" x-text="'Started ' + (ds.date_started ? new Date(ds.date_started).toLocaleDateString('en-US',{month:'short',year:'numeric'}) : '')"></span>
+              <span x-show="ds.date_started && ds.date_completed"> · </span>
+              <span x-show="ds.date_completed" x-text="'Completed ' + (ds.date_completed ? new Date(ds.date_completed).toLocaleDateString('en-US',{month:'short',year:'numeric'}) : '')"></span>
+            </div>
           </div>
 
           <div class="flex gap-2 items-center mb-4 pb-4" style="border-bottom: 1px solid var(--border);">
@@ -1604,25 +1713,56 @@
             </div>
           </div>
 
+          <!-- Notes -->
           <div class="form-group">
             <div class="form-label">Notes</div>
-            <textarea class="input w-full" rows="2" placeholder="Your notes…" x-model="ef.notes"></textarea>
+            <textarea class="input w-full" rows="5" style="resize:vertical" placeholder="Personal notes, thoughts, recommendations…" x-model="ef.notes"></textarea>
+          </div>
+
+          <!-- Reading Dates -->
+          <div class="form-group">
+            <div class="form-label">Reading Dates</div>
+            <div class="flex gap-4 flex-wrap">
+              <div class="flex items-center gap-2">
+                <label class="text-sm text-muted" style="min-width:60px">Started</label>
+                <input class="input input-sm" type="date" x-model="ef.date_started" />
+                <button type="button" class="btn btn-ghost btn-xs" x-show="ef.date_started" @click="ef.date_started = ''" title="Clear">×</button>
+              </div>
+              <div class="flex items-center gap-2">
+                <label class="text-sm text-muted" style="min-width:70px">Completed</label>
+                <input class="input input-sm" type="date" x-model="ef.date_completed" />
+                <button type="button" class="btn btn-ghost btn-xs" x-show="ef.date_completed" @click="ef.date_completed = ''" title="Clear">×</button>
+              </div>
+            </div>
           </div>
 
           <!-- User Rating -->
           <div class="form-group" x-data="{ starHover: null }">
             <div class="form-label">Your Rating <span class="text-muted fw-400 text-xs">· syncs to MangaBaka export</span></div>
-            <div class="star-rating">
-              <template x-for="n in [1,2,3,4,5,6,7,8,9,10]" :key="n">
-                <button type="button" class="star-btn"
-                  :class="{'active': (starHover ?? ef.user_rating) >= n}"
-                  @mouseenter="starHover = n"
-                  @mouseleave="starHover = null"
-                  @click="ef.user_rating = (ef.user_rating === n) ? null : n">★</button>
-              </template>
-              <span class="star-label" x-show="ef.user_rating !== null" x-text="(ef.user_rating ?? '') + ' / 10'"></span>
-              <button type="button" class="btn btn-ghost btn-xs" style="margin-left:0.5rem" x-show="ef.user_rating !== null" @click="ef.user_rating = null">Clear</button>
-            </div>
+            <!-- Stars mode -->
+            <template x-if="sf.rating_input_mode !== 'numeric'">
+              <div class="star-rating">
+                <template x-for="n in [1,2,3,4,5,6,7,8,9,10]" :key="n">
+                  <button type="button" class="star-btn"
+                    :class="{'active': (starHover ?? ef.user_rating) >= n}"
+                    @mouseenter="starHover = n"
+                    @mouseleave="starHover = null"
+                    @click="ef.user_rating = (ef.user_rating === n) ? null : n">★</button>
+                </template>
+                <span class="star-label" x-show="ef.user_rating !== null" x-text="(ef.user_rating ?? '') + ' / 10'"></span>
+                <button type="button" class="btn btn-ghost btn-xs" style="margin-left:0.5rem" x-show="ef.user_rating !== null" @click="ef.user_rating = null">Clear</button>
+              </div>
+            </template>
+            <!-- Numeric mode -->
+            <template x-if="sf.rating_input_mode === 'numeric'">
+              <div class="flex items-center gap-2">
+                <input type="number" class="input input-sm" style="width:80px" min="0" max="10" step="0.5"
+                  :value="ef.user_rating ?? ''"
+                  @change="const v = parseFloat($event.target.value); ef.user_rating = isNaN(v) ? null : Math.round(Math.min(10, Math.max(0, v)) * 2) / 2" />
+                <span class="text-muted text-sm">/ 10</span>
+                <button type="button" class="btn btn-ghost btn-xs" x-show="ef.user_rating !== null" @click="ef.user_rating = null; $el.previousElementSibling.previousElementSibling.value = ''">Clear</button>
+              </div>
+            </template>
           </div>
 
           <div class="form-group">
