@@ -260,18 +260,27 @@ def add_series(req: AddSeriesRequest, background_tasks: BackgroundTasks, db: Ses
         id=flat["id"],
         title=flat["title"],
         native_title=flat["native_title"],
+        romanized_title=flat.get("romanized_title"),
         cover_url=flat["cover_url"],
         description=flat["description"],
         status=flat["status"],
         series_type=flat["series_type"],
+        content_rating=flat.get("content_rating"),
+        is_licensed=flat.get("is_licensed"),
+        has_anime=flat.get("has_anime"),
         total_chapters=flat["total_chapters"],
+        total_volumes=flat.get("total_volumes"),
         genres=flat["genres"],
         authors=flat["authors"],
+        author_roles=flat.get("author_roles"),
         year=flat["year"],
+        start_date=flat.get("start_date"),
+        end_date=flat.get("end_date"),
         rating=flat["rating"],
         mangabaka_url=flat["mangabaka_url"],
         mb_provider_ids=flat.get("mb_provider_ids"),
         external_links=flat.get("external_links"),
+        mb_tags=flat.get("mb_tags"),
         # Seed MU series ID immediately if MB already has it
         mu_series_id=mu_id_from_mb,
         current_chapter=req.current_chapter,
@@ -1024,15 +1033,32 @@ def refresh_series(series_id: int, background_tasks: BackgroundTasks, db: Sessio
                     notification_muted=bool(getattr(series, "notification_muted", False)),
                 )
             series.total_chapters  = flat["total_chapters"]
+            series.total_volumes   = flat.get("total_volumes")
             series.status          = flat["status"]
             if flat["cover_url"]:
                 series.cover_url = flat["cover_url"]
+            # Core metadata that can change over time
+            if flat.get("romanized_title") is not None:
+                series.romanized_title = flat["romanized_title"]
+            if flat.get("content_rating") is not None:
+                series.content_rating = flat["content_rating"]
+            if flat.get("is_licensed") is not None:
+                series.is_licensed = flat["is_licensed"]
+            if flat.get("has_anime") is not None:
+                series.has_anime = flat["has_anime"]
+            if flat.get("start_date"):
+                series.start_date = flat["start_date"]
+            if flat.get("end_date"):
+                series.end_date = flat["end_date"]
             # Refresh provider ID map (links may have been updated since initial add)
             if flat.get("mb_provider_ids"):
                 series.mb_provider_ids = flat["mb_provider_ids"]
             # Refresh external links (MB may add/update links over time)
             if flat.get("external_links"):
                 series.external_links = flat["external_links"]
+            # Refresh tags (MB taxonomy evolves)
+            if flat.get("mb_tags") is not None:
+                series.mb_tags = flat["mb_tags"]
     except Exception as e:
         logger.warning(f"MB refresh failed for series {series_id}: {e}")
 

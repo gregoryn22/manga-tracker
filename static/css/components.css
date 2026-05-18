@@ -180,6 +180,13 @@ textarea.input { resize: vertical; }
 .tag.accent { background: var(--accent-dim); color: var(--accent); border-color: rgba(124,108,255,0.3); }
 .tag.green  { background: var(--green-dim); color: var(--green); border-color: rgba(34,197,94,0.3); }
 .tag.yellow { background: var(--yellow-dim); color: var(--yellow); border-color: rgba(245,158,11,0.3); }
+/* Licensed / anime / content-rating / MB-tag badges */
+.tag-licensed { background: rgba(34,197,94,0.12); color: var(--green); border-color: rgba(34,197,94,0.3); }
+.tag-anime    { background: rgba(99,179,237,0.12); color: #63b3ed;    border-color: rgba(99,179,237,0.3); }
+.tag-cr-suggestive { background: rgba(245,158,11,0.12); color: var(--yellow); border-color: rgba(245,158,11,0.3); }
+.tag-cr-erotica, .tag-cr-pornographic { background: rgba(239,68,68,0.12); color: #ef4444; border-color: rgba(239,68,68,0.3); }
+.tag-mb { font-size: var(--fs-2xs); padding: 2px 7px; border-radius: var(--radius-full);
+          background: var(--surface3); color: var(--text-dim); border: 1px solid var(--border); }
 
 .genre-chip {
   font-size: var(--fs-2xs); padding: var(--sp-0-5) 7px; border-radius: var(--radius-full);
@@ -231,7 +238,8 @@ textarea.input { resize: vertical; }
 .modal-info { flex: 1; min-width: 0; }
 .modal-title { font-size: var(--fs-xl); font-weight: 700; margin-bottom: 3px; line-height: 1.3; }
 .modal-title--sm { font-size: var(--fs-lg); }
-.modal-native { font-size: var(--fs-base); color: var(--text-muted); margin-bottom: var(--sp-2-5); }
+.modal-native { font-size: var(--fs-base); color: var(--text-muted); margin-bottom: 2px; }
+.modal-romanized { font-size: var(--fs-sm); color: var(--text-dim); font-style: italic; margin-bottom: var(--sp-2-5); }
 .modal-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: var(--sp-2-5); }
 
 .modal-body { padding: var(--sp-5) 22px; }

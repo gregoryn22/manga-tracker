@@ -40,14 +40,21 @@ class TrackedSeries(Base):
     # ── Core metadata (MangaBaka primary, MU supplements) ────────────
     title = Column(String, nullable=False)
     native_title = Column(String, nullable=True)
+    romanized_title = Column(String, nullable=True)  # e.g. "Kimetsu no Yaiba"
     cover_url = Column(String, nullable=True)        # MangaBaka CDN cover (preferred)
     mu_cover_url = Column(String, nullable=True)     # MangaUpdates cover (fallback)
     description = Column(Text, nullable=True)
     status = Column(String, nullable=True)           # releasing, finished, hiatus, etc.
     series_type = Column(String, nullable=True)      # manga, light_novel, manhwa, manhua
+    content_rating = Column(String, nullable=True)   # safe | suggestive | erotica | pornographic
+    is_licensed = Column(Boolean, nullable=True)     # has official English license
+    has_anime = Column(Boolean, nullable=True)       # has anime adaptation
     year = Column(Integer, nullable=True)
+    start_date = Column(String, nullable=True)       # "YYYY-MM-DD" exact first publication
+    end_date = Column(String, nullable=True)         # "YYYY-MM-DD" final publication (null if ongoing)
     genres = Column(Text, nullable=True)             # JSON list of genre strings
     categories = Column(Text, nullable=True)         # JSON list (MU community tags)
+    mb_tags = Column(Text, nullable=True)            # JSON list of tag names from MB tags_v2
     authors = Column(Text, nullable=True)            # JSON list
     publishers = Column(Text, nullable=True)         # JSON list (MU)
 
@@ -59,6 +66,7 @@ class TrackedSeries(Base):
 
     # ── Chapter / release tracking ────────────────────────────────────
     total_chapters = Column(String, nullable=True)       # MB chapter count — unreliable per dev; last-resort fallback only
+    total_volumes = Column(String, nullable=True)        # MB final_volume (volume count)
     mu_latest_chapter = Column(String, nullable=True)    # Authoritative: set by MU releases or simulpub polling
     latest_release_date = Column(String, nullable=True)  # ISO date string "2026-03-19"
     latest_release_group = Column(String, nullable=True) # Scanlation group name
@@ -163,13 +171,20 @@ class TrackedSeries(Base):
             "mu_url": self.mu_url,
             "title": self.title,
             "native_title": self.native_title,
+            "romanized_title": self.romanized_title,
             "cover_url": self.best_cover(),
             "description": self.description,
             "status": self.status,
             "series_type": self.series_type,
+            "content_rating": self.content_rating,
+            "is_licensed": bool(self.is_licensed) if self.is_licensed is not None else None,
+            "has_anime": bool(self.has_anime) if self.has_anime is not None else None,
             "year": self.year,
+            "start_date": self.start_date,
+            "end_date": self.end_date,
             "genres": self._safe_json(self.genres),
             "categories": self._safe_json(self.categories),
+            "mb_tags": self._safe_json(self.mb_tags, default=[]),
             "authors": self._safe_json(self.authors),
             "publishers": self._safe_json(self.publishers),
             "rating": self.rating,
@@ -177,6 +192,7 @@ class TrackedSeries(Base):
             "mu_rating_votes": self.mu_rating_votes,
             "user_rating": self.user_rating,
             "total_chapters": self.total_chapters,
+            "total_volumes": self.total_volumes,
             "mu_latest_chapter": self.mu_latest_chapter,
             "latest_chapter": self.display_chapter(),
             "latest_release_date": self.latest_release_date,
@@ -364,6 +380,15 @@ def _migrate_db():
         ("tracked_series", "user_rating",        "REAL"),
         ("tracked_series", "date_started",       "DATETIME"),
         ("tracked_series", "date_completed",     "DATETIME"),
+        # MangaBaka rich metadata (added in metadata expansion)
+        ("tracked_series", "romanized_title",    "VARCHAR"),
+        ("tracked_series", "content_rating",     "VARCHAR"),
+        ("tracked_series", "is_licensed",        "BOOLEAN"),
+        ("tracked_series", "has_anime",          "BOOLEAN"),
+        ("tracked_series", "start_date",         "VARCHAR"),
+        ("tracked_series", "end_date",           "VARCHAR"),
+        ("tracked_series", "total_volumes",      "VARCHAR"),
+        ("tracked_series", "mb_tags",            "TEXT"),
     ]
 
     # Indexes to ensure on hot query columns (idempotent — CREATE IF NOT EXISTS)

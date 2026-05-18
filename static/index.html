@@ -1567,7 +1567,8 @@
 
           <div class="modal-info">
             <div class="modal-title" x-text="ds.title"></div>
-            <div class="modal-native" x-text="ds.native_title"></div>
+            <div class="modal-native" x-text="ds.native_title" x-show="ds.native_title && ds.native_title !== ds.title"></div>
+            <div class="modal-romanized" x-show="ds.romanized_title" x-text="ds.romanized_title"></div>
 
             <!-- Associated / alternate titles -->
             <template x-if="ds.associated_titles && ds.associated_titles.length > 0">
@@ -1579,6 +1580,18 @@
               <span x-show="ds.status" :class="'sb sb-' + (ds.status||'').toLowerCase()" x-text="ds.status"></span>
               <span x-show="ds.series_type" class="tag" x-text="(ds.series_type||'').replace('_',' ')"></span>
               <span x-show="ds.year" class="tag" x-text="ds.year"></span>
+              <span x-show="ds.is_licensed" class="tag tag-licensed">Licensed</span>
+              <span x-show="ds.has_anime" class="tag tag-anime">Has Anime</span>
+              <span x-show="ds.content_rating && ds.content_rating !== 'safe'"
+                    :class="'tag tag-cr-' + (ds.content_rating||'')"
+                    x-text="ds.content_rating"></span>
+            </div>
+
+            <!-- Publication dates / volume count -->
+            <div class="text-xs text-muted mt-1" x-show="ds.start_date || ds.total_volumes">
+              <span x-show="ds.start_date" x-text="'Since ' + ds.start_date"></span>
+              <span x-show="ds.start_date && ds.total_volumes"> · </span>
+              <span x-show="ds.total_volumes" x-text="ds.total_volumes + ' volumes'"></span>
             </div>
 
             <!-- MU Rating -->
@@ -1597,6 +1610,15 @@
                 <span class="genre-chip" x-text="g"></span>
               </template>
             </div>
+
+            <!-- MB Tags -->
+            <template x-if="ds.mb_tags && ds.mb_tags.length > 0">
+              <div class="modal-tags mt-1">
+                <template x-for="t in (ds.mb_tags||[]).slice(0,12)" :key="t">
+                  <span class="tag tag-mb" x-text="t"></span>
+                </template>
+              </div>
+            </template>
 
             <!-- Authors / Publishers -->
             <div class="text-xs text-muted mt-1"
