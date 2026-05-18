@@ -765,6 +765,12 @@ function app() {
         user_rating: series.user_rating ?? null,
         date_started: series.date_started || '',
         date_completed: series.date_completed || '',
+        date_started_source: series.date_started_source || 'auto',
+        date_completed_source: series.date_completed_source || 'auto',
+        date_started_overriding: false,
+        date_completed_overriding: false,
+        date_started_reset: false,
+        date_completed_reset: false,
       };
       this.detailOpen = true;
       this.detailReleases = [];
@@ -820,10 +826,12 @@ function app() {
           komga_track_mode: this.ef.simulpub_source === 'komga' ? this.ef.komga_track_mode : undefined,
           user_rating: this.ef.user_rating,
           clear_user_rating: this.ef.user_rating === null && this.ds.user_rating !== null,
-          date_started: this.ef.date_started || undefined,
-          date_completed: this.ef.date_completed || undefined,
-          clear_date_started: !this.ef.date_started && !!this.ds.date_started,
-          clear_date_completed: !this.ef.date_completed && !!this.ds.date_completed,
+          date_started: this.ef.date_started_overriding ? (this.ef.date_started || undefined) : undefined,
+          date_completed: this.ef.date_completed_overriding ? (this.ef.date_completed || undefined) : undefined,
+          clear_date_started: this.ef.date_started_overriding && !this.ef.date_started && !!this.ds.date_started,
+          clear_date_completed: this.ef.date_completed_overriding && !this.ef.date_completed && !!this.ds.date_completed,
+          reset_date_started: this.ef.date_started_reset,
+          reset_date_completed: this.ef.date_completed_reset,
         };
         if (this.ef.simulpub_source === 'custom') {
           body.mu_latest_chapter = this.ef.mu_latest_chapter_manual;
