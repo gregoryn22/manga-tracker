@@ -9,7 +9,8 @@ on:
       - "v*.*.*"      # publish a versioned tag when you push e.g. v1.2.0
   pull_request:
     branches:
-      - master          # build-only (no push) on PRs to catch broken Dockerfiles early
+      - master
+      - develop       # build-only (no push) on PRs to catch broken Dockerfiles early
   workflow_dispatch:  # allow one-click manual runs from the Actions tab
 
 # ── Permissions ───────────────────────────────────────────────────────────────
