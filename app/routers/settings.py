@@ -38,6 +38,14 @@ EXPOSED_KEYS = [
     "webhook_url",
     "default_page",
     "grid_density",
+    "rating_input_mode",
+    "show_reading_dates",
+    "show_notes_indicator_on_cards",
+    "accent_color",
+    "font_scale",
+    "card_radius",
+    "sidebar_width",
+    "dim_finished_covers",
 ]
 
 
@@ -84,6 +92,14 @@ class UpdateSettingsRequest(BaseModel):
     webhook_url: str | None = None
     default_page: str | None = None
     grid_density: str | None = None
+    rating_input_mode: str | None = None
+    show_reading_dates: str | None = None
+    show_notes_indicator_on_cards: str | None = None
+    accent_color: str | None = None
+    font_scale: str | None = None
+    card_radius: str | None = None
+    sidebar_width: str | None = None
+    dim_finished_covers: str | None = None
 
 
 # Sensitive keys that are masked in GET responses.  If a PATCH request sends
