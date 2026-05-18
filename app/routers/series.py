@@ -260,18 +260,27 @@ def add_series(req: AddSeriesRequest, background_tasks: BackgroundTasks, db: Ses
         id=flat["id"],
         title=flat["title"],
         native_title=flat["native_title"],
+        romanized_title=flat.get("romanized_title"),
         cover_url=flat["cover_url"],
         description=flat["description"],
         status=flat["status"],
         series_type=flat["series_type"],
+        content_rating=flat.get("content_rating"),
+        is_licensed=flat.get("is_licensed"),
+        has_anime=flat.get("has_anime"),
         total_chapters=flat["total_chapters"],
+        total_volumes=flat.get("total_volumes"),
         genres=flat["genres"],
         authors=flat["authors"],
+        author_roles=flat.get("author_roles"),
         year=flat["year"],
+        start_date=flat.get("start_date"),
+        end_date=flat.get("end_date"),
         rating=flat["rating"],
         mangabaka_url=flat["mangabaka_url"],
         mb_provider_ids=flat.get("mb_provider_ids"),
         external_links=flat.get("external_links"),
+        mb_tags=flat.get("mb_tags"),
         # Seed MU series ID immediately if MB already has it
         mu_series_id=mu_id_from_mb,
         current_chapter=req.current_chapter,
@@ -434,6 +443,12 @@ def bulk_status(req: BulkStatusRequest, db: Session = Depends(get_db)):
                 old_chapter=series.reading_status, new_chapter=req.reading_status,
                 action="status_change", created_at=datetime.utcnow(),
             ))
+            if req.reading_status == "reading" and not series.date_started:
+                series.date_started = datetime.utcnow()
+                series.date_started_source = "auto"
+            if req.reading_status == "completed" and not series.date_completed:
+                series.date_completed = datetime.utcnow()
+                series.date_completed_source = "auto"
             series.reading_status = req.reading_status
             updated += 1
     db.commit()
@@ -846,6 +861,9 @@ class UpdateSeriesRequest(BaseModel):
     date_completed: str | None = None
     clear_date_started: bool = False
     clear_date_completed: bool = False
+    # Reset a manually-overridden date back to auto-tracking
+    reset_date_started: bool = False
+    reset_date_completed: bool = False
 
 
 @router.patch("/{series_id}")
@@ -878,23 +896,47 @@ def update_series(series_id: int, req: UpdateSeriesRequest, db: Session = Depend
             # Auto-set date_started when transitioning TO "reading"
             if req.reading_status == "reading" and not series.date_started:
                 series.date_started = datetime.utcnow()
+                series.date_started_source = "auto"
             # Auto-set date_completed when transitioning TO "completed"
             if req.reading_status == "completed" and not series.date_completed:
                 series.date_completed = datetime.utcnow()
+                series.date_completed_source = "auto"
         series.reading_status = req.reading_status
-    # Manual date overrides
-    if req.clear_date_started:
+    # Manual date overrides / resets
+    if req.reset_date_started:
+        # Revert to auto: re-derive from reading_log (first "reading" transition) or clear
+        auto_start = db.query(ReadingLog).filter(
+            ReadingLog.series_id == series_id,
+            ReadingLog.action == "status_change",
+            ReadingLog.new_chapter == "reading",
+        ).order_by(ReadingLog.created_at).first()
+        series.date_started = auto_start.created_at if auto_start else None
+        series.date_started_source = "auto"
+    elif req.clear_date_started:
         series.date_started = None
+        series.date_started_source = "auto"
     elif req.date_started is not None:
         try:
             series.date_started = datetime.fromisoformat(req.date_started)
+            series.date_started_source = "manual"
         except ValueError:
             raise HTTPException(status_code=422, detail="date_started must be ISO-8601 format (YYYY-MM-DD)")
-    if req.clear_date_completed:
+    if req.reset_date_completed:
+        # Revert to auto: re-derive from reading_log (first "completed" transition) or clear
+        auto_complete = db.query(ReadingLog).filter(
+            ReadingLog.series_id == series_id,
+            ReadingLog.action == "status_change",
+            ReadingLog.new_chapter == "completed",
+        ).order_by(ReadingLog.created_at).first()
+        series.date_completed = auto_complete.created_at if auto_complete else None
+        series.date_completed_source = "auto"
+    elif req.clear_date_completed:
         series.date_completed = None
+        series.date_completed_source = "auto"
     elif req.date_completed is not None:
         try:
             series.date_completed = datetime.fromisoformat(req.date_completed)
+            series.date_completed_source = "manual"
         except ValueError:
             raise HTTPException(status_code=422, detail="date_completed must be ISO-8601 format (YYYY-MM-DD)")
     if req.notes is not None:
@@ -1024,15 +1066,32 @@ def refresh_series(series_id: int, background_tasks: BackgroundTasks, db: Sessio
                     notification_muted=bool(getattr(series, "notification_muted", False)),
                 )
             series.total_chapters  = flat["total_chapters"]
+            series.total_volumes   = flat.get("total_volumes")
             series.status          = flat["status"]
             if flat["cover_url"]:
                 series.cover_url = flat["cover_url"]
+            # Core metadata that can change over time
+            if flat.get("romanized_title") is not None:
+                series.romanized_title = flat["romanized_title"]
+            if flat.get("content_rating") is not None:
+                series.content_rating = flat["content_rating"]
+            if flat.get("is_licensed") is not None:
+                series.is_licensed = flat["is_licensed"]
+            if flat.get("has_anime") is not None:
+                series.has_anime = flat["has_anime"]
+            if flat.get("start_date"):
+                series.start_date = flat["start_date"]
+            if flat.get("end_date"):
+                series.end_date = flat["end_date"]
             # Refresh provider ID map (links may have been updated since initial add)
             if flat.get("mb_provider_ids"):
                 series.mb_provider_ids = flat["mb_provider_ids"]
             # Refresh external links (MB may add/update links over time)
             if flat.get("external_links"):
                 series.external_links = flat["external_links"]
+            # Refresh tags (MB taxonomy evolves)
+            if flat.get("mb_tags") is not None:
+                series.mb_tags = flat["mb_tags"]
     except Exception as e:
         logger.warning(f"MB refresh failed for series {series_id}: {e}")
 
