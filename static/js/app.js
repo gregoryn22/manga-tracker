@@ -317,10 +317,20 @@ function app() {
         let va, vb;
         switch(field) {
           case 'title': return mul * (a.title||'').localeCompare(b.title||'');
-          case 'rating':
-            va = this.sf.rating_source === 'mangabaka' ? (parseFloat(a.rating) || 0) : (a.mu_rating || 0);
-            vb = this.sf.rating_source === 'mangabaka' ? (parseFloat(b.rating) || 0) : (b.mu_rating || 0);
+          case 'rating': {
+            const ratingOf = s => {
+              if (this.sf.rating_source === 'mangabaka') {
+                const v = parseFloat(s.rating);
+                return isNaN(v) ? null : v;
+              }
+              return s.mu_rating ?? null;
+            };
+            va = ratingOf(a); vb = ratingOf(b);
+            if (va === null && vb === null) return 0;
+            if (va === null) return 1;
+            if (vb === null) return -1;
             return mul * (va - vb);
+          }
           case 'added':
             va = a.added_at || ''; vb = b.added_at || '';
             return mul * va.localeCompare(vb);
