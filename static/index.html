@@ -1744,17 +1744,50 @@
           <!-- Reading Dates -->
           <div class="form-group">
             <div class="form-label">Reading Dates</div>
-            <div class="flex gap-4 flex-wrap">
-              <div class="flex items-center gap-2">
+            <div class="flex flex-col gap-3">
+
+              <!-- Started -->
+              <div class="flex items-center gap-2 flex-wrap">
                 <label class="text-sm text-muted" style="min-width:60px">Started</label>
-                <input class="input input-sm" type="date" x-model="ef.date_started" />
-                <button type="button" class="btn btn-ghost btn-xs" x-show="ef.date_started" @click="ef.date_started = ''" title="Clear">×</button>
+                <!-- Auto / read-only state -->
+                <template x-if="!ef.date_started_overriding">
+                  <div class="flex items-center gap-2">
+                    <span class="text-sm" x-text="ef.date_started_reset ? 'Will reset to auto' : (ef.date_started ? new Date(ef.date_started + 'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '—')" :class="(ef.date_started && !ef.date_started_reset) ? '' : 'text-muted'"></span>
+                    <span x-show="!ef.date_started_reset && ef.date_started && ef.date_started_source === 'auto'" class="badge badge-xs" style="font-size:0.65rem;opacity:0.6" title="Set automatically when you started reading">auto</span>
+                    <button type="button" class="btn btn-ghost btn-xs text-muted" @click="ef.date_started_overriding = true; ef.date_started_reset = false" title="Override date">✎</button>
+                  </div>
+                </template>
+                <!-- Override / edit state -->
+                <template x-if="ef.date_started_overriding">
+                  <div class="flex items-center gap-2 flex-wrap">
+                    <input class="input input-sm" type="date" x-model="ef.date_started" />
+                    <button type="button" class="btn btn-ghost btn-xs" @click="ef.date_started_overriding = false; ef.date_started_reset = true; ef.date_started = ds.date_started || ''" title="Reset to auto-tracked value">↺ Reset to auto</button>
+                    <button type="button" class="btn btn-ghost btn-xs text-muted" @click="ef.date_started_overriding = false; ef.date_started_reset = false; ef.date_started = ds.date_started || ''" title="Cancel">Cancel</button>
+                  </div>
+                </template>
               </div>
-              <div class="flex items-center gap-2">
-                <label class="text-sm text-muted" style="min-width:70px">Completed</label>
-                <input class="input input-sm" type="date" x-model="ef.date_completed" />
-                <button type="button" class="btn btn-ghost btn-xs" x-show="ef.date_completed" @click="ef.date_completed = ''" title="Clear">×</button>
+
+              <!-- Completed -->
+              <div class="flex items-center gap-2 flex-wrap">
+                <label class="text-sm text-muted" style="min-width:60px">Completed</label>
+                <!-- Auto / read-only state -->
+                <template x-if="!ef.date_completed_overriding">
+                  <div class="flex items-center gap-2">
+                    <span class="text-sm" x-text="ef.date_completed_reset ? 'Will reset to auto' : (ef.date_completed ? new Date(ef.date_completed + 'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '—')" :class="(ef.date_completed && !ef.date_completed_reset) ? '' : 'text-muted'"></span>
+                    <span x-show="!ef.date_completed_reset && ef.date_completed && ef.date_completed_source === 'auto'" class="badge badge-xs" style="font-size:0.65rem;opacity:0.6" title="Set automatically when you marked as completed">auto</span>
+                    <button type="button" class="btn btn-ghost btn-xs text-muted" @click="ef.date_completed_overriding = true; ef.date_completed_reset = false" title="Override date">✎</button>
+                  </div>
+                </template>
+                <!-- Override / edit state -->
+                <template x-if="ef.date_completed_overriding">
+                  <div class="flex items-center gap-2 flex-wrap">
+                    <input class="input input-sm" type="date" x-model="ef.date_completed" />
+                    <button type="button" class="btn btn-ghost btn-xs" @click="ef.date_completed_overriding = false; ef.date_completed_reset = true; ef.date_completed = ds.date_completed || ''" title="Reset to auto-tracked value">↺ Reset to auto</button>
+                    <button type="button" class="btn btn-ghost btn-xs text-muted" @click="ef.date_completed_overriding = false; ef.date_completed_reset = false; ef.date_completed = ds.date_completed || ''" title="Cancel">Cancel</button>
+                  </div>
+                </template>
               </div>
+
             </div>
           </div>
 

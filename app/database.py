@@ -110,6 +110,8 @@ class TrackedSeries(Base):
     last_read_at = Column(DateTime, nullable=True)
     date_started = Column(DateTime, nullable=True)
     date_completed = Column(DateTime, nullable=True)
+    date_started_source = Column(String, nullable=True, default="auto")   # 'auto' | 'manual'
+    date_completed_source = Column(String, nullable=True, default="auto") # 'auto' | 'manual'
     tags = Column(Text, nullable=True)                 # JSON array of tag strings
 
     # ── Notification muting ────────────────────────────────────────────
@@ -206,7 +208,9 @@ class TrackedSeries(Base):
             "notes": self.notes,
             "last_read_at": self.last_read_at.isoformat() if self.last_read_at else None,
             "date_started": self.date_started.date().isoformat() if self.date_started else None,
+            "date_started_source": self.date_started_source or "auto",
             "date_completed": self.date_completed.date().isoformat() if self.date_completed else None,
+            "date_completed_source": self.date_completed_source or "auto",
             "tags": self._safe_json(self.tags, default=[]),
             "notification_muted": bool(self.notification_muted),
             "mangabaka_url": self.mangabaka_url,
@@ -378,8 +382,10 @@ def _migrate_db():
         ("tracked_series", "author_roles",       "TEXT"),
         ("tracked_series", "mu_link_status",     "VARCHAR"),
         ("tracked_series", "user_rating",        "REAL"),
-        ("tracked_series", "date_started",       "DATETIME"),
-        ("tracked_series", "date_completed",     "DATETIME"),
+        ("tracked_series", "date_started",         "DATETIME"),
+        ("tracked_series", "date_completed",       "DATETIME"),
+        ("tracked_series", "date_started_source",  "VARCHAR DEFAULT 'auto'"),
+        ("tracked_series", "date_completed_source","VARCHAR DEFAULT 'auto'"),
         # MangaBaka rich metadata (added in metadata expansion)
         ("tracked_series", "romanized_title",    "VARCHAR"),
         ("tracked_series", "content_rating",     "VARCHAR"),
