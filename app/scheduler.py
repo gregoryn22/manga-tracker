@@ -32,7 +32,7 @@ Series with simulpub_source='custom' are excluded from ALL automated polling.
 """
 import logging
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from sqlalchemy import func
@@ -67,8 +67,9 @@ logger = logging.getLogger(__name__)
 
 scheduler = BackgroundScheduler(timezone="UTC")
 _JOB_ID = "poll_updates"
+_METADATA_JOB_ID = "refresh_metadata"
 
-ACTIVE_STATUSES = {"reading", "on_hold"}
+ACTIVE_STATUSES = {"reading", "on_hold", "rereading"}
 
 _poll_state: dict = {
     "running": False,
@@ -76,6 +77,218 @@ _poll_state: dict = {
     "last_finished": None,
     "total_series": 0,
 }
+
+_metadata_refresh_state: dict = {
+    "running": False,
+    "last_started": None,
+    "last_finished": None,
+    "total_updated": 0,
+    "total_series": 0,
+}
+
+_mb_push_all_state: dict = {
+    "running": False,
+    "last_started": None,
+    "last_finished": None,
+    "total": 0,
+    "pushed": 0,
+    "skipped": 0,   # 404 — series not in MB library
+    "failed": 0,    # rate limited or transient error after retries
+}
+
+_komga_sync_state: dict = {
+    "running": False,
+    "last_started": None,
+    "last_finished": None,
+    "total": 0,
+    "synced": 0,
+}
+
+
+def trigger_komga_sync() -> bool:
+    """Fire a one-shot thread that runs the Komga soft-link sync pass."""
+    t = threading.Thread(target=_do_komga_sync, daemon=True)
+    t.start()
+    return True
+
+
+def _do_komga_sync() -> None:
+    """
+    Manual Komga sync: covers both native series (simulpub_source='komga') and
+    soft-linked series (komga_series_id set).
+
+    Native series: always syncs read-progress regardless of the global
+    komga_sync_read_progress setting — user explicitly requested it.
+    Also runs release detection (latest chapter check).
+
+    Soft-linked series: delegates to _process_komga_soft_links (respects
+    per-series komga_detect_releases / komga_sync_progress flags).
+    """
+    state = _komga_sync_state
+    if state["running"]:
+        return
+
+    state["running"] = True
+    state["last_started"] = datetime.utcnow()
+    state["total"] = 0
+    state["synced"] = 0
+
+    db: Session = None
+    try:
+        db = SessionLocal()
+        komga_url = get_setting(db, "komga_url", "")
+        komga_key = get_setting(db, "komga_api_key", "")
+        if not komga_url or not komga_key:
+            logger.warning("Manual Komga sync: URL or API key not configured — aborting")
+            return
+
+        client = KomgaClient(komga_url, komga_key)
+
+        # ── Native Komga series ────────────────────────────────────────────
+        native = db.query(TrackedSeries).filter(
+            TrackedSeries.simulpub_source == "komga"
+        ).all()
+        state["total"] += len(native)
+        logger.info(f"▶ Manual Komga sync: {len(native)} native series…")
+
+        synced = 0
+        for series in native:
+            try:
+                is_volume = (getattr(series, "komga_track_mode", None) or "chapter") == "volume"
+                # Always sync read-progress on manual trigger
+                _apply_komga_read_progress(db, series, client, series.simulpub_id, is_volume)
+                synced += 1
+            except Exception as e:
+                logger.warning(f"Manual Komga sync failed for '{series.title}': {e}")
+        db.commit()
+
+        # ── Soft-linked series ─────────────────────────────────────────────
+        _process_komga_soft_links(db)
+        soft_count = db.query(TrackedSeries).filter(
+            TrackedSeries.komga_series_id.isnot(None),
+            TrackedSeries.komga_series_id != "",
+            TrackedSeries.simulpub_source != "komga",
+        ).count()
+        state["total"] += soft_count
+        synced += soft_count
+
+        state["synced"] = synced
+        logger.info(f"✓ Manual Komga sync complete — {synced} series processed.")
+    except Exception as e:
+        logger.error(f"Manual Komga sync failed: {e}", exc_info=True)
+    finally:
+        state["running"] = False
+        state["last_finished"] = datetime.utcnow()
+        if db is not None:
+            db.close()
+
+
+def trigger_mb_push_all() -> bool:
+    """Fire a one-shot thread that pushes all tracked series to MangaBaka."""
+    t = threading.Thread(target=_do_mb_push_all, daemon=True)
+    t.start()
+    return True
+
+
+_MB_PUSH_INTERVAL = 0.4   # seconds between requests (stays well under MB rate limit)
+_MB_PUSH_RETRY_WAIT = 5.0  # seconds to wait after a 429 before retrying once
+
+
+def _do_mb_push_all() -> None:
+    """
+    Push every tracked series' current progress to MangaBaka via PAT.
+
+    Paces requests at _MB_PUSH_INTERVAL seconds apart. On a 429 (rate limited),
+    waits _MB_PUSH_RETRY_WAIT seconds then retries once. Distinguishes three
+    outcomes: pushed (200 OK), skipped (404 — not in MB library), failed (still
+    rate limited or error after retry).
+    """
+    import time as _time
+    from .mangabaka_sync import push_entry, _KOMGA_ID_FLOOR
+
+    state = _mb_push_all_state
+    if state["running"]:
+        return
+
+    state["running"] = True
+    state["last_started"] = datetime.utcnow()
+    state["pushed"] = 0
+    state["skipped"] = 0
+    state["failed"] = 0
+    state["total"] = 0
+
+    db: Session = None
+    try:
+        db = SessionLocal()
+        pat = get_setting(db, "mangabaka_pat", "")
+        if not pat:
+            logger.warning("MB push-all: no PAT configured — aborting")
+            return
+
+        all_series = db.query(TrackedSeries).all()
+        state["total"] = len(all_series)
+        logger.info(f"▶ MB push-all starting for {len(all_series)} series…")
+
+        for series in all_series:
+            # Synthetic Komga IDs are not real MB series — skip unless the user
+            # has manually linked this series to a MangaBaka entry via mb_linked_id.
+            if series.id >= _KOMGA_ID_FLOOR and not series.mb_linked_id:
+                state["skipped"] += 1
+                continue
+
+            effective_id = series.mb_linked_id if series.mb_linked_id else series.id
+            result = push_entry(
+                effective_id,
+                series.reading_status,
+                series.current_chapter,
+                series.current_volume,
+                series.date_started,
+                series.date_completed,
+                pat,
+                user_rating=series.user_rating,
+            )
+
+            if result is None:
+                # Rate limited — back off and retry once
+                logger.debug(
+                    f"MB push-all: rate limited on series {series.id}, "
+                    f"backing off {_MB_PUSH_RETRY_WAIT}s…"
+                )
+                _time.sleep(_MB_PUSH_RETRY_WAIT)
+                result = push_entry(
+                    effective_id,
+                    series.reading_status,
+                    series.current_chapter,
+                    series.current_volume,
+                    series.date_started,
+                    series.date_completed,
+                    pat,
+                    user_rating=series.user_rating,
+                )
+
+            if result is True:
+                state["pushed"] += 1
+            elif result is False:
+                state["skipped"] += 1   # 404 — not in MB library
+            else:
+                state["failed"] += 1    # still rate limited or error after retry
+                logger.warning(f"MB push-all: series {series.id} failed after retry")
+
+            _time.sleep(_MB_PUSH_INTERVAL)
+
+        logger.info(
+            f"✓ MB push-all done — "
+            f"pushed={state['pushed']}, "
+            f"skipped(not-in-MB)={state['skipped']}, "
+            f"failed={state['failed']}"
+        )
+    except Exception as e:
+        logger.error(f"MB push-all failed: {e}", exc_info=True)
+    finally:
+        state["running"] = False
+        state["last_finished"] = datetime.utcnow()
+        if db is not None:
+            db.close()
 
 
 def _mark_poll_success(series: TrackedSeries):
@@ -201,10 +414,11 @@ def _titles_plausibly_match(tracked_title: str, release_title: str) -> bool:
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
-def start_scheduler(interval_hours: float = 6.0):
+def start_scheduler(interval_hours: float = 6.0, metadata_refresh_days: float | None = None):
     if scheduler.running:
         scheduler.reschedule_job(_JOB_ID, trigger="interval", hours=interval_hours)
         logger.info(f"Scheduler rescheduled → every {interval_hours}h")
+        _reschedule_metadata_job(metadata_refresh_days)
         return
     scheduler.add_job(
         poll_updates,
@@ -217,10 +431,61 @@ def start_scheduler(interval_hours: float = 6.0):
     )
     scheduler.start()
     logger.info(f"Scheduler started → polling every {interval_hours}h")
+    _reschedule_metadata_job(metadata_refresh_days)
+
+
+def _reschedule_metadata_job(interval_days: float | None):
+    """Add, reschedule, or remove the metadata refresh job based on settings."""
+    if interval_days is None:
+        # Read from DB
+        from .database import SessionLocal
+        db = SessionLocal()
+        try:
+            enabled = get_setting(db, "metadata_refresh_enabled", "false") == "true"
+            if not enabled:
+                _remove_metadata_job()
+                return
+            try:
+                interval_days = float(get_setting(db, "metadata_refresh_interval_days", "7") or "7")
+            except ValueError:
+                interval_days = 7.0
+        finally:
+            db.close()
+    else:
+        if interval_days <= 0:
+            _remove_metadata_job()
+            return
+
+    if scheduler.get_job(_METADATA_JOB_ID):
+        scheduler.reschedule_job(_METADATA_JOB_ID, trigger="interval", days=interval_days)
+        logger.info(f"Metadata refresh rescheduled → every {interval_days}d")
+    else:
+        scheduler.add_job(
+            refresh_all_metadata,
+            trigger="interval",
+            days=interval_days,
+            id=_METADATA_JOB_ID,
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+        logger.info(f"Metadata refresh job added → every {interval_days}d")
+
+
+def _remove_metadata_job():
+    if scheduler.get_job(_METADATA_JOB_ID):
+        scheduler.remove_job(_METADATA_JOB_ID)
+        logger.info("Metadata refresh job removed (disabled)")
 
 
 def trigger_manual_poll():
     t = threading.Thread(target=poll_updates, daemon=True)
+    t.start()
+    return True
+
+
+def trigger_manual_metadata_refresh():
+    t = threading.Thread(target=refresh_all_metadata, daemon=True)
     t.start()
     return True
 
@@ -231,8 +496,9 @@ def poll_updates():
     _poll_state["running"] = True
     _poll_state["last_started"] = datetime.utcnow()
     _poll_state["total_series"] = 0
-    db: Session = SessionLocal()
+    db: Session = None
     try:
+        db = SessionLocal()
         clear_settings_cache()  # Fresh settings for this poll cycle
         logger.info("▶ Starting update poll...")
 
@@ -249,7 +515,9 @@ def poll_updates():
             return
 
         # 'custom' source = fully manual; exclude from all automated layers.
-        auto_series = [s for s in all_active if s.simulpub_source != "custom"]
+        # 'komga' source = Komga is authoritative; exclude from MU polling so
+        # MU chapter numbers don't overwrite Komga volume/chapter counts.
+        auto_series = [s for s in all_active if s.simulpub_source not in ("custom", "komga")]
         simulpub_series = [
             s for s in all_active
             if s.simulpub_source and s.simulpub_source != "custom" and s.simulpub_id
@@ -271,6 +539,9 @@ def poll_updates():
         if simulpub_series:
             _poll_via_simulpub(db, simulpub_series)
 
+        # ── Komga soft-link: release detection + read-progress sync ────────
+        _process_komga_soft_links(db)
+
         # ── Auto-archive idle series ────────────────────────────────────────
         _auto_archive_idle(db)
 
@@ -280,7 +551,8 @@ def poll_updates():
     finally:
         _poll_state["running"] = False
         _poll_state["last_finished"] = datetime.utcnow()
-        db.close()
+        if db is not None:
+            db.close()
 
 
 # ── Layer 1: MangaUpdates ─────────────────────────────────────────────────────
@@ -345,7 +617,7 @@ def _link_mu_id(db: Session, series: TrackedSeries):
         logger.debug(f"No MU match for '{series.title}'")
         return
 
-    best = find_best_match(series.title, results)
+    best, _ = find_best_match(series.title, results)
     if not best:
         return
 
@@ -510,6 +782,19 @@ def _process_release(db: Session, series: TrackedSeries, rec: dict, send_push: b
     ).first():
         return
 
+    # Backdate created_at for historical releases so they don't pollute the 24h live feed.
+    # If release_date is older than 2 days, use it as the log timestamp — the feed
+    # filters by created_at >= now-24h, so backdated records are naturally excluded.
+    # Fresh releases (including all simulpub sources) keep created_at = utcnow().
+    rel_created_at = datetime.utcnow()
+    if release_date:
+        try:
+            rd = datetime.fromisoformat(release_date)
+            if rd < datetime.utcnow() - timedelta(days=2):
+                rel_created_at = rd
+        except ValueError:
+            pass
+
     # Log the release
     rel = Release(
         series_id=series.id,
@@ -522,6 +807,7 @@ def _process_release(db: Session, series: TrackedSeries, rec: dict, send_push: b
         mu_release_id=mu_release_id,
         cover_url=series.best_cover(),
         mu_url=series.mu_url,
+        created_at=rel_created_at,
     )
     db.add(rel)
     db.flush()  # make visible to subsequent dedup queries in same transaction (autoflush=False)
@@ -1144,6 +1430,7 @@ def _poll_komga(db: Session, series_list: list[TrackedSeries]):
         logger.warning("Komga: server URL or API key not configured — skipping poll")
         return
 
+    sync_read_progress = get_setting(db, "komga_sync_read_progress", "false") == "true"
     client = KomgaClient(komga_url, komga_key)
 
     for series in series_list:
@@ -1151,7 +1438,7 @@ def _poll_komga(db: Session, series_list: list[TrackedSeries]):
             is_volume = (getattr(series, "komga_track_mode", None) or "chapter") == "volume"
             unit_label = "Vol." if is_volume else "Ch."
 
-            number = client.get_latest_chapter(series.simulpub_id)
+            number, date_added = client.get_latest_chapter(series.simulpub_id)
             if not number:
                 logger.debug(
                     f"Komga: no data for '{series.title}' (id={series.simulpub_id})"
@@ -1168,9 +1455,15 @@ def _poll_komga(db: Session, series_list: list[TrackedSeries]):
                     db.commit()
                     continue
 
+                # Use Komga's scan date when available; fall back to today.
+                # This lets the 24h live feed filter correctly exclude books
+                # that were scanned weeks/months ago (e.g. on first-poll of
+                # a newly-imported series).
+                release_date = date_added or datetime.utcnow().strftime("%Y-%m-%d")
+
                 old_chapter = series.mu_latest_chapter
                 series.mu_latest_chapter    = number
-                series.latest_release_date  = datetime.utcnow().strftime("%Y-%m-%d")
+                series.latest_release_date  = release_date
                 series.latest_release_group = group_name
 
                 message = f"{series.title} — {unit_label} {number} · Komga"
@@ -1182,7 +1475,7 @@ def _poll_komga(db: Session, series_list: list[TrackedSeries]):
                     series_title=series.title,
                     chapter=number,
                     volume=number if is_volume else None,
-                    release_date=series.latest_release_date,
+                    release_date=release_date,
                     group_name=group_name,
                     mu_release_id=None,
                     cover_url=series.best_cover(),
@@ -1206,6 +1499,13 @@ def _poll_komga(db: Session, series_list: list[TrackedSeries]):
                     f"Komga: '{series.title}' still at {unit_label} {number} "
                     f"(known: {series.mu_latest_chapter})"
                 )
+
+            # Opt-in: sync Komga read progress → current_volume (volume series)
+            # or current_chapter (chapter series).
+            # Uses the actual chapter/volume number of the furthest-read book,
+            # not booksReadCount (a raw file count that diverges for decimal chapters).
+            if sync_read_progress:
+                _apply_komga_read_progress(db, series, client, series.simulpub_id, is_volume)
 
             _mark_poll_success(series)
             series.last_checked = datetime.utcnow()
@@ -1246,7 +1546,6 @@ def _auto_archive_idle(db: Session):
     If idle_auto_archive=true, move 'reading' series with no release in
     idle_threshold_days days to 'dropped' status.  Runs at end of each poll cycle.
     """
-    from datetime import timedelta
     from .database import ReadingLog as _RL
 
     if get_setting(db, "idle_auto_archive", "false") != "true":
@@ -1291,3 +1590,292 @@ def _auto_archive_idle(db: Session):
     if archived:
         db.commit()
         logger.info(f"Auto-archived {archived} idle series → dropped")
+
+
+# ── Komga read-progress sync (shared by simulpub + soft-link paths) ──────────
+
+def _apply_komga_read_progress(
+    db: Session,
+    series: TrackedSeries,
+    client,
+    komga_id: str,
+    is_volume: bool,
+):
+    """
+    Query Komga for the furthest-read book in *komga_id* and sync the result
+    into series.current_volume (volume mode) or series.current_chapter (chapter mode).
+
+    Uses the actual chapter/volume number from book metadata rather than
+    booksReadCount so decimal chapters (e.g. "42.5") and numbered volumes work
+    correctly even when file count diverges from chapter numbers.
+    """
+    try:
+        read_num = client.get_last_read_progress(komga_id)
+        if not read_num:
+            return
+        if is_volume:
+            if series.current_volume != read_num:
+                logger.debug(
+                    f"Komga progress sync: '{series.title}' "
+                    f"current_volume {series.current_volume!r} → {read_num!r}"
+                )
+                series.current_volume = read_num
+        else:
+            if series.current_chapter != read_num:
+                logger.debug(
+                    f"Komga progress sync: '{series.title}' "
+                    f"current_chapter {series.current_chapter!r} → {read_num!r}"
+                )
+                series.current_chapter = read_num
+    except Exception as e:
+        logger.warning(f"Komga read-progress sync failed for '{series.title}': {e}")
+
+
+def _process_komga_soft_links(db: Session):
+    """
+    Single pass for all series with a komga_series_id soft-link
+    (simulpub_source != 'komga').  Two independent behaviours per series:
+
+    1. Release detection (komga_detect_releases=True, any reading_status in ACTIVE_STATUSES):
+       - Calls get_latest_chapter() on the linked Komga series.
+       - If the returned metadata.number is newer than mu_latest_chapter,
+         logs a Release row and fires a notification.
+       - Uses metadata.number (the user-editable display label in Komga),
+         NOT numberSort, so users can correct weird upstream numbering
+         (e.g. Berserk prologues) directly inside Komga.
+
+    2. Read-progress sync (komga_sync_read_progress global setting = true):
+       - Calls get_last_read_progress() to find the furthest-read book's
+         metadata.number and syncs it to current_chapter / current_volume.
+
+    Both behaviours require komga_url + komga_api_key to be configured.
+    Native Komga series (simulpub_source='komga') are handled in _poll_komga.
+    """
+    komga_url = get_setting(db, "komga_url", "")
+    komga_key = get_setting(db, "komga_api_key", "")
+    if not komga_url or not komga_key:
+        return
+
+    # Fetch all soft-linked series; each has its own per-series flags
+    candidates = db.query(TrackedSeries).filter(
+        TrackedSeries.komga_series_id.isnot(None),
+        TrackedSeries.komga_series_id != "",
+        # Exclude native Komga series — they have their own poll path
+        TrackedSeries.simulpub_source != "komga",
+    ).all()
+
+    if not candidates:
+        return
+
+    client = KomgaClient(komga_url, komga_key)
+    changed = False
+
+    for series in candidates:
+        is_volume = (getattr(series, "komga_track_mode", None) or "chapter") == "volume"
+        unit_label = "Vol." if is_volume else "Ch."
+        komga_id = series.komga_series_id
+
+        # ── Behaviour 1: release detection ──────────────────────────────
+        if series.komga_detect_releases and series.reading_status in ACTIVE_STATUSES:
+            try:
+                number, date_added = client.get_latest_chapter(komga_id)
+                if number and chapter_is_newer(number, series.mu_latest_chapter):
+                    group_name = "Komga (volume)" if is_volume else "Komga"
+                    if not _simulpub_release_exists(db, series.id, number, group_name):
+                        release_date = date_added or datetime.utcnow().strftime("%Y-%m-%d")
+                        old_chapter = series.mu_latest_chapter
+                        series.mu_latest_chapter   = number
+                        series.latest_release_date = release_date
+                        series.latest_release_group = group_name
+
+                        db.add(Release(
+                            series_id=series.id,
+                            mu_series_id=series.mu_series_id,
+                            series_title=series.title,
+                            chapter=number,
+                            volume=number if is_volume else None,
+                            release_date=release_date,
+                            group_name=group_name,
+                            mu_release_id=None,
+                            cover_url=series.best_cover(),
+                            mu_url=f"{komga_url}/series/{komga_id}",
+                        ))
+
+                        message = f"{series.title} — {unit_label} {number} · Komga"
+                        _send_chapter_notification(
+                            db=db,
+                            series=series,
+                            message=message,
+                            chapter=number,
+                            volume=number if is_volume else None,
+                            group_name=group_name,
+                            release_date=release_date,
+                            old_chapter=old_chapter,
+                        )
+                        logger.info(f"✓ Komga soft-link new: {message}")
+                        changed = True
+            except Exception as e:
+                logger.warning(f"Komga release detection failed for '{series.title}': {e}")
+
+        # ── Behaviour 2: read-progress sync (per-series opt-in) ─────────
+        if series.komga_sync_progress:
+            _apply_komga_read_progress(db, series, client, komga_id, is_volume)
+            changed = True
+
+    if changed:
+        db.commit()
+
+
+# ── Scheduled metadata refresh ────────────────────────────────────────────────
+
+def refresh_all_metadata():
+    """
+    Refresh MB and MU metadata for all tracked series.
+
+    MB fields updated: cover_url, description, status, total_chapters, total_volumes,
+    genres, mb_tags, is_licensed, has_anime, start_date, end_date, publishers,
+    external_links, content_rating, romanized_title.
+
+    MU fields updated: mu_cover_url, mu_rating, mu_rating_votes, authors, author_roles,
+    publishers (if empty), categories, associated_titles.
+
+    Series with simulpub_source='custom' are included — metadata stays fresh
+    even when chapter polling is disabled.
+    """
+    import json as _json
+    from .mangabaka import MangaBakaClient, series_from_api
+
+    _metadata_refresh_state["running"] = True
+    _metadata_refresh_state["last_started"] = datetime.utcnow()
+    _metadata_refresh_state["total_updated"] = 0
+    _metadata_refresh_state["total_series"] = 0
+
+    db: Session = None
+    try:
+        db = SessionLocal()
+        token = get_setting(db, "mangabaka_token", "")
+        if not token:
+            logger.warning("Metadata refresh: mangabaka_token not configured — skipping MB refresh")
+            mb_client = None
+        else:
+            mb_client = MangaBakaClient(token)
+
+        all_series = db.query(TrackedSeries).all()
+        _metadata_refresh_state["total_series"] = len(all_series)
+        logger.info(f"▶ Starting metadata refresh for {len(all_series)} series...")
+
+        updated = 0
+        for series in all_series:
+            try:
+                _refresh_series_metadata(db, series, mb_client)
+                updated += 1
+            except Exception as e:
+                logger.warning(f"Metadata refresh failed for '{series.title}' (id={series.id}): {e}")
+
+        db.commit()
+        _metadata_refresh_state["total_updated"] = updated
+        logger.info(f"✓ Metadata refresh complete — updated {updated}/{len(all_series)} series.")
+    except Exception as e:
+        logger.error(f"Metadata refresh job failed: {e}", exc_info=True)
+    finally:
+        _metadata_refresh_state["running"] = False
+        _metadata_refresh_state["last_finished"] = datetime.utcnow()
+        if db is not None:
+            db.close()
+
+
+def _refresh_series_metadata(db: Session, series: TrackedSeries, mb_client):
+    """Refresh MB and MU metadata for a single series in-place (no commit)."""
+    import json as _json
+    from .mangabaka import series_from_api
+
+    # ── MangaBaka refresh ──────────────────────────────────────────────────────
+    mb_id = series.mb_linked_id or series.id
+    if mb_client and mb_id:
+        try:
+            resp = mb_client.get_series(mb_id)
+            if resp.get("status") == 200 and resp.get("data"):
+                flat = series_from_api(resp["data"])
+
+                # Cover — always refresh (CDN URLs can rotate)
+                if flat.get("cover_url"):
+                    series.cover_url = flat["cover_url"]
+
+                # Textual metadata — always overwrite with latest upstream values
+                for field in ("description", "status", "content_rating", "romanized_title",
+                              "is_licensed", "has_anime", "start_date", "end_date"):
+                    val = flat.get(field)
+                    if val is not None:
+                        setattr(series, field, val)
+
+                # Numeric metadata
+                if flat.get("total_chapters") is not None:
+                    series.total_chapters = flat["total_chapters"]
+                if flat.get("total_volumes") is not None:
+                    series.total_volumes = flat["total_volumes"]
+
+                # JSON fields — refresh genres, tags, publishers, external_links
+                for field in ("genres", "mb_tags", "publishers", "external_links"):
+                    val = flat.get(field)
+                    if val and val != "[]" and val != "null":
+                        setattr(series, field, val)
+
+                logger.debug(f"MB metadata refreshed for '{series.title}' (mb_id={mb_id})")
+        except Exception as e:
+            logger.debug(f"MB metadata fetch failed for '{series.title}': {e}")
+
+    # ── MangaUpdates refresh ───────────────────────────────────────────────────
+    if series.mu_series_id:
+        try:
+            detail = get_series(series.mu_series_id)
+
+            # Always ensure mu_url is set
+            if not series.mu_url:
+                series.mu_url = (
+                    detail.get("url")
+                    or f"https://www.mangaupdates.com/series/{series.mu_series_id}"
+                )
+
+            # Cover — update MU cover (best_cover() picks MB primary over MU fallback)
+            mu_cover = extract_mu_cover(detail.get("image"))
+            if mu_cover:
+                series.mu_cover_url = mu_cover
+
+            # Ratings — always fresh
+            series.mu_rating = detail.get("bayesian_rating")
+            series.mu_rating_votes = detail.get("rating_votes")
+
+            # Authors — MU has role info; refresh unconditionally
+            import json as _json_mu
+            raw_authors = detail.get("authors", [])
+            if raw_authors:
+                flat_authors = [a.get("author_name", "").strip() for a in raw_authors if a.get("author_name")]
+                series.authors = _json_mu.dumps(flat_authors)
+                roles = []
+                for a in raw_authors:
+                    name = a.get("author_name", "").strip()
+                    role = (a.get("type") or "Author").strip().title()
+                    if name:
+                        roles.append({"name": name, "role": role})
+                if roles:
+                    series.author_roles = _json_mu.dumps(roles)
+
+            # Publishers — fill if missing; MU may have more than MB
+            pubs = [p.get("publisher_name", "") for p in detail.get("publishers", []) if p.get("publisher_name")]
+            if pubs:
+                series.publishers = _json_mu.dumps(pubs)
+
+            # Categories (MU community tags)
+            cats = [c.get("category", "") for c in detail.get("categories", []) if c.get("category")]
+            if cats:
+                series.categories = _json_mu.dumps(cats[:30])
+
+            # Alternate/associated titles
+            assoc = detail.get("associated", [])
+            alt_titles = [t.get("title", "").strip() for t in assoc if t.get("title", "").strip()]
+            if alt_titles:
+                series.associated_titles = _json_mu.dumps(alt_titles)
+
+            logger.debug(f"MU metadata refreshed for '{series.title}' (mu_id={series.mu_series_id})")
+        except Exception as e:
+            logger.debug(f"MU metadata fetch failed for '{series.title}': {e}")

@@ -14,13 +14,16 @@ from ..database import TrackedSeries, get_db
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/export", tags=["export"])
 
-# Tracker reading_status values match MangaBaka state values directly.
-# MB states observed in export: reading, completed, dropped, on_hold, plan_to_read
+# MB accepted state values: reading, completed, dropped, on_hold, plan_to_read, rereading
+_KOMGA_ID_FLOOR = 2_000_000_000
+
 _STATUS_MAP = {
-    "reading":   "reading",
-    "completed": "completed",
-    "dropped":   "dropped",
-    "on_hold":   "on_hold",
+    "reading":      "reading",
+    "completed":    "completed",
+    "dropped":      "dropped",
+    "on_hold":      "on_hold",
+    "plan_to_read": "plan_to_read",
+    "rereading":    "rereading",
 }
 
 
@@ -35,26 +38,42 @@ def _parse_chapter_progress(current_chapter: str | None) -> int | None:
         return None
 
 
+def _mb_export_id(s: TrackedSeries) -> str | None:
+    """
+    Return the MB series ID to use in the export source block.
+    - Real MB series: use s.id directly.
+    - Komga-synthetic series with a confirmed MB link: use mb_linked_id.
+    - Komga-synthetic series with no MB link: return None (exclude from export).
+    """
+    if s.id < _KOMGA_ID_FLOOR:
+        return str(s.id)
+    if s.mb_linked_id:
+        return str(s.mb_linked_id)
+    return None
+
+
 def _series_to_mb_entry(s: TrackedSeries) -> dict:
     provider_ids = s._safe_json(s.mb_provider_ids, default={})
     mu_slug = provider_ids.get("mu_id") or None
 
     added_at = s.added_at.isoformat() + "Z" if s.added_at else None
     last_read = s.last_read_at.isoformat() + "Z" if s.last_read_at else None
+    start_date = (s.date_started.isoformat() + "Z" if s.date_started else added_at)
+    finish_date = (s.date_completed.isoformat() + "Z" if s.date_completed else None)
 
     return {
         "entry": {
             "note": s.notes or None,
             "read_link": None,
-            "rating": s.user_rating,
+            "rating": round(s.user_rating) if s.user_rating is not None else None,
             "state": _STATUS_MAP.get(s.reading_status or "reading", "reading"),
             "priority": 20,
             "is_private": False,
             "number_of_rereads": 0,
             "progress_chapter": _parse_chapter_progress(s.current_chapter),
-            "progress_volume": None,
-            "start_date": added_at,
-            "finish_date": None,
+            "progress_volume": _parse_chapter_progress(s.current_volume),
+            "start_date": start_date,
+            "finish_date": finish_date,
             "imported_at": None,
             "created_at": added_at,
             "updated_at": last_read or added_at,
@@ -64,7 +83,7 @@ def _series_to_mb_entry(s: TrackedSeries) -> dict:
             "anime_news_network": None,
             "kitsu": None,
             "manga_updates": mu_slug,
-            "mangabaka": str(s.id),
+            "mangabaka": _mb_export_id(s),
             "my_anime_list": None,
             "shikimori": None,
         },
@@ -82,14 +101,21 @@ def export_mangabaka(db: Session = Depends(get_db)):
     """
     Export all tracked series as a MangaBaka-compatible library JSON.
     Download and import at https://mangabaka.org/my/library/import
+    Komga-sourced series without an MB link are excluded (MB can't resolve them).
     """
     series = db.query(TrackedSeries).order_by(TrackedSeries.title).all()
+
+    # Exclude Komga-synthetic series with no MB link — MB has no record of them
+    exportable = [s for s in series if _mb_export_id(s) is not None]
+    excluded = len(series) - len(exportable)
+    if excluded:
+        logger.info(f"MB export: excluded {excluded} Komga series without MB link")
 
     payload = {
         "schema_version": 2,
         "exported_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z"),
         "lists": [],
-        "entries": [_series_to_mb_entry(s) for s in series],
+        "entries": [_series_to_mb_entry(s) for s in exportable],
     }
 
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")

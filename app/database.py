@@ -45,7 +45,7 @@ class TrackedSeries(Base):
     mu_cover_url = Column(String, nullable=True)     # MangaUpdates cover (fallback)
     description = Column(Text, nullable=True)
     status = Column(String, nullable=True)           # releasing, finished, hiatus, etc.
-    series_type = Column(String, nullable=True)      # manga, light_novel, manhwa, manhua
+    series_type = Column(String, nullable=True)      # manga, manhwa, manhua, novel, other
     content_rating = Column(String, nullable=True)   # safe | suggestive | erotica | pornographic
     is_licensed = Column(Boolean, nullable=True)     # has official English license
     has_anime = Column(Boolean, nullable=True)       # has anime adaptation
@@ -62,7 +62,7 @@ class TrackedSeries(Base):
     rating = Column(String, nullable=True)           # MangaBaka aggregated
     mu_rating = Column(Float, nullable=True)         # MangaUpdates bayesian rating (0-10)
     mu_rating_votes = Column(Integer, nullable=True)
-    user_rating = Column(Float, nullable=True)       # User's personal rating (0-10, 0.5 increments)
+    user_rating = Column(Float, nullable=True)       # User's personal rating (0-10, integers)
 
     # ── Chapter / release tracking ────────────────────────────────────
     total_chapters = Column(String, nullable=True)       # MB chapter count — unreliable per dev; last-resort fallback only
@@ -81,6 +81,21 @@ class TrackedSeries(Base):
     # Komga-specific: 'chapter' (default) or 'volume' — controls whether we
     # track the highest chapter number or highest volume/book number.
     komga_track_mode = Column(String, nullable=True, default="chapter")
+    # Soft Komga link for any series (not just simulpub_source='komga').
+    # When set, read progress is synced from Komga on each poll cycle
+    # without affecting the chapter detection source (MU/MB/simulpub).
+    komga_series_id = Column(String, nullable=True)
+    # If true, the soft Komga link is also used for chapter/volume release
+    # detection and notifications (in addition to read-progress sync).
+    komga_detect_releases = Column(Boolean, nullable=True, default=False)
+    # If true, sync Komga read progress into current_chapter/current_volume
+    # for this series (per-series override for soft-linked series; native
+    # Komga series are gated by the global komga_sync_read_progress setting).
+    komga_sync_progress = Column(Boolean, nullable=True, default=False)
+    # Real MB series ID for Komga-sourced series (whose DB id is a synthetic
+    # value >= 2_000_000_000). Populated by the auto-link background task or
+    # manually via the "Relink MB" UI. Used by refresh to fetch MB metadata.
+    mb_linked_id = Column(Integer, nullable=True)
 
     # ── Detected provider IDs (from MangaBaka metadata) ───────────────
     # JSON dict populated at add/refresh time from MB's source + links fields.
@@ -105,6 +120,7 @@ class TrackedSeries(Base):
 
     # ── User progress ─────────────────────────────────────────────────
     current_chapter = Column(String, nullable=True, default="0")
+    current_volume = Column(String, nullable=True)   # user-entered volume progress (independent of chapter)
     reading_status = Column(String, default="reading")
     notes = Column(Text, nullable=True)
     last_read_at = Column(DateTime, nullable=True)
@@ -118,6 +134,10 @@ class TrackedSeries(Base):
     # When True, push notifications (Pushover/webhook) are suppressed for
     # this series.  In-app notifications are still created.
     notification_muted = Column(Boolean, default=False)
+
+    # When True, series is excluded from the "Updates" filter and badge count.
+    # Still tracked and polled normally — just hidden from the updates view.
+    updates_hidden = Column(Boolean, default=False)
 
     # ── Polling health ──────────────────────────────────────────────────
     poll_failures = Column(Integer, default=0)            # consecutive failures
@@ -147,11 +167,25 @@ class TrackedSeries(Base):
         return self.mu_latest_chapter or self.total_chapters
 
     def has_update(self) -> bool:
-        """True if known latest chapter is ahead of user's current chapter."""
+        """True if known latest is ahead of user's read progress.
+
+        For Komga-volume series, compares mu_latest_chapter (volume count from
+        Komga) against current_volume. Falls back to current_chapter so existing
+        series with no current_volume set yet continue to work during transition.
+        """
         latest = self.display_chapter()
+        is_komga_volume = (
+            getattr(self, "simulpub_source", None) == "komga"
+            and (getattr(self, "komga_track_mode", None) or "chapter") == "volume"
+        )
         try:
-            if latest and self.current_chapter is not None:
-                return float(latest) > float(self.current_chapter)
+            if latest:
+                if is_komga_volume:
+                    read = self.current_volume or self.current_chapter
+                else:
+                    read = self.current_chapter
+                if read is not None:
+                    return float(latest) > float(read)
         except (ValueError, TypeError):
             pass
         return False
@@ -202,8 +236,12 @@ class TrackedSeries(Base):
             "simulpub_source": self.simulpub_source or "",
             "simulpub_id": self.simulpub_id or "",
             "komga_track_mode": self.komga_track_mode or "chapter",
+            "komga_series_id": self.komga_series_id or "",
+            "komga_detect_releases": bool(self.komga_detect_releases),
+            "komga_sync_progress": bool(self.komga_sync_progress),
             "mb_provider_ids": self._safe_json(self.mb_provider_ids, default={}),
             "current_chapter": self.current_chapter,
+            "current_volume": self.current_volume,
             "reading_status": self.reading_status,
             "notes": self.notes,
             "last_read_at": self.last_read_at.isoformat() if self.last_read_at else None,
@@ -213,6 +251,8 @@ class TrackedSeries(Base):
             "date_completed_source": self.date_completed_source or "auto",
             "tags": self._safe_json(self.tags, default=[]),
             "notification_muted": bool(self.notification_muted),
+            "updates_hidden": bool(self.updates_hidden),
+            "mb_linked_id": self.mb_linked_id,
             "mangabaka_url": self.mangabaka_url,
             "mu_link_status": self.mu_link_status,
             "poll_failures": self.poll_failures or 0,
@@ -373,7 +413,12 @@ def _migrate_db():
         ("tracked_series", "last_poll_error",    "TEXT"),
         ("tracked_series", "last_poll_success",  "DATETIME"),
         ("tracked_series", "komga_track_mode",   "VARCHAR DEFAULT 'chapter'"),
+        ("tracked_series", "komga_series_id",      "VARCHAR"),
+        ("tracked_series", "komga_detect_releases", "BOOLEAN DEFAULT 0"),
+        ("tracked_series", "komga_sync_progress",   "BOOLEAN DEFAULT 0"),
         ("tracked_series", "notification_muted", "BOOLEAN DEFAULT 0"),
+        ("tracked_series", "updates_hidden",     "BOOLEAN DEFAULT 0"),
+        ("tracked_series", "mb_linked_id",       "INTEGER"),
         ("tracked_series", "last_read_at",       "DATETIME"),
         ("tracked_series", "tags",               "TEXT"),
         ("tracked_series", "external_links",     "TEXT"),
@@ -395,6 +440,8 @@ def _migrate_db():
         ("tracked_series", "end_date",           "VARCHAR"),
         ("tracked_series", "total_volumes",      "VARCHAR"),
         ("tracked_series", "mb_tags",            "TEXT"),
+        ("tracked_series", "publishers",         "TEXT"),
+        ("tracked_series", "current_volume",     "VARCHAR"),
     ]
 
     # Indexes to ensure on hot query columns (idempotent — CREATE IF NOT EXISTS)
@@ -477,6 +524,8 @@ def _seed_settings():
     try:
         defaults = {
             "mangabaka_token": os.getenv("MANGABAKA_TOKEN", ""),
+            "mangabaka_pat": os.getenv("MANGABAKA_PAT", ""),
+            "mb_sync_enabled": "false",
             "pushover_user_key": os.getenv("PUSHOVER_USER_KEY", ""),
             "pushover_app_token": os.getenv("PUSHOVER_APP_TOKEN", ""),
             "poll_interval_hours": os.getenv("POLL_INTERVAL_HOURS", "6"),
@@ -500,6 +549,7 @@ def _seed_settings():
             # Komga self-hosted server
             "komga_url": os.getenv("KOMGA_URL", ""),
             "komga_api_key": os.getenv("KOMGA_API_KEY", ""),
+            "komga_sync_read_progress": "false",
             # Dashboard behaviour
             "updates_reading_only": "false",
             # Poll failure push notifications
@@ -513,6 +563,8 @@ def _seed_settings():
             "grid_density": "normal",
             # Rating input mode
             "rating_input_mode": "stars",
+            # Rating source for display (mangaupdates | mangabaka)
+            "rating_source": "mangaupdates",
             # Reading date display
             "show_reading_dates": "true",
             # Notes indicator on cards
@@ -523,6 +575,10 @@ def _seed_settings():
             "card_radius": "md",
             "sidebar_width": "220",
             "dim_finished_covers": "true",
+            "show_recent_drops": "true",
+            # Scheduled metadata refresh from MangaBaka / MangaUpdates
+            "metadata_refresh_enabled": "false",
+            "metadata_refresh_interval_days": "7",
         }
         for k, v in defaults.items():
             if not db.query(Settings).filter(Settings.key == k).first():
