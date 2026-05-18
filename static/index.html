@@ -318,10 +318,10 @@
                   <div class="cover-placeholder">📖</div>
                 </template>
                 <!-- Rating overlay -->
-                <div class="cover-overlay" x-show="sf.show_ratings_on_cards !== 'false' && s.mu_rating">
+                <div class="cover-overlay" x-show="sf.show_ratings_on_cards !== 'false' && (sf.rating_source === 'mangabaka' ? s.rating : s.mu_rating)">
                   <div class="cover-rating">
-                    ★ <span x-text="s.mu_rating ? s.mu_rating.toFixed(1) : ''"></span>
-                    <span x-show="sf.show_rating_votes !== 'false' && s.mu_rating_votes" class="rating-votes text-2xs">(<span x-text="formatVotes(s.mu_rating_votes)"></span>)</span>
+                    ★ <span x-text="sf.rating_source === 'mangabaka' ? (parseFloat(s.rating)||0).toFixed(1) : (s.mu_rating ? s.mu_rating.toFixed(1) : '')"></span>
+                    <span x-show="sf.show_rating_votes !== 'false' && sf.rating_source !== 'mangabaka' && s.mu_rating_votes" class="rating-votes text-2xs">(<span x-text="formatVotes(s.mu_rating_votes)"></span>)</span>
                   </div>
                 </div>
                 <!-- Simulpub source badge -->
@@ -436,8 +436,8 @@
                         x-text="s.has_update ? 'NEW' : (s.reading_status||'').replace('_',' ')"></span>
                   <span x-show="sf.show_card_meta !== 'false'" class="capitalize" x-text="(s.series_type || 'manga')"></span>
                   <span x-show="sf.show_card_meta !== 'false' && s.year" x-text="s.year"></span>
-                  <span class="list-rating" x-show="sf.show_ratings_on_cards !== 'false' && s.mu_rating">★ <span x-text="s.mu_rating ? s.mu_rating.toFixed(1) : ''"></span>
-                    <span x-show="sf.show_rating_votes !== 'false' && s.mu_rating_votes" class="text-2xs opacity-70"(<span x-text="formatVotes(s.mu_rating_votes)"></span>)</span>
+                  <span class="list-rating" x-show="sf.show_ratings_on_cards !== 'false' && (sf.rating_source === 'mangabaka' ? s.rating : s.mu_rating)">★ <span x-text="sf.rating_source === 'mangabaka' ? (parseFloat(s.rating)||0).toFixed(1) : (s.mu_rating ? s.mu_rating.toFixed(1) : '')"></span>
+                    <span x-show="sf.show_rating_votes !== 'false' && sf.rating_source !== 'mangabaka' && s.mu_rating_votes" class="text-2xs opacity-70">(<span x-text="formatVotes(s.mu_rating_votes)"></span>)</span>
                   </span>
                   <span x-show="s.mu_series_id" class="text-2xs text-accent fw-600"
                         :title="pollHealthTitle(s)">
@@ -1396,6 +1396,14 @@
               <span class="text-sm">Vote count next to rating</span>
             </label>
 
+            <div class="flex items-center gap-2 mt-1">
+              <span class="text-sm">Rating source</span>
+              <button class="btn btn-sm" :class="sf.rating_source !== 'mangabaka' ? 'btn-primary' : 'btn-ghost'"
+                      @click="sf.rating_source = 'mangaupdates'">MangaUpdates</button>
+              <button class="btn btn-sm" :class="sf.rating_source === 'mangabaka' ? 'btn-primary' : 'btn-ghost'"
+                      @click="sf.rating_source = 'mangabaka'">MangaBaka</button>
+            </div>
+
             <label class="checkbox-label">
               <input type="checkbox" :checked="sf.show_source_badges !== 'false'"
                      @change="sf.show_source_badges = $event.target.checked ? 'true' : 'false'" />
@@ -1594,13 +1602,13 @@
               <span x-show="ds.total_volumes" x-text="ds.total_volumes + ' volumes'"></span>
             </div>
 
-            <!-- MU Rating -->
-            <template x-if="ds.mu_rating">
+            <!-- Rating -->
+            <template x-if="sf.rating_source === 'mangabaka' ? ds.rating : ds.mu_rating">
               <div class="flex items-center gap-1 mb-3">
                 <span class="rating-star">★</span>
-                <span class="rating-val" x-text="ds.mu_rating.toFixed(2)"></span>
-                <span class="rating-votes" x-show="ds.mu_rating_votes">(<span x-text="formatVotes(ds.mu_rating_votes)"></span> votes)</span>
-                <span class="text-xs text-muted">MangaUpdates Bayesian</span>
+                <span class="rating-val" x-text="sf.rating_source === 'mangabaka' ? (parseFloat(ds.rating)||0).toFixed(2) : ds.mu_rating.toFixed(2)"></span>
+                <span class="rating-votes" x-show="sf.rating_source !== 'mangabaka' && ds.mu_rating_votes">(<span x-text="formatVotes(ds.mu_rating_votes)"></span> votes)</span>
+                <span class="text-xs text-muted" x-text="sf.rating_source === 'mangabaka' ? 'MangaBaka' : 'MangaUpdates Bayesian'"></span>
               </div>
             </template>
 

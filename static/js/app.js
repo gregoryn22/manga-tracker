@@ -45,6 +45,8 @@ function app() {
       default_feed_grouped:  'false',  // persisted feed grouping: 'true' or 'false'
       // Rating input mode
       rating_input_mode:               'stars',
+      // Rating source for display
+      rating_source:                   'mangaupdates',
       // Reading dates display
       show_reading_dates:              'true',
       // Notes indicator on cards
@@ -316,7 +318,8 @@ function app() {
         switch(field) {
           case 'title': return mul * (a.title||'').localeCompare(b.title||'');
           case 'rating':
-            va = a.mu_rating || 0; vb = b.mu_rating || 0;
+            va = this.sf.rating_source === 'mangabaka' ? (parseFloat(a.rating) || 0) : (a.mu_rating || 0);
+            vb = this.sf.rating_source === 'mangabaka' ? (parseFloat(b.rating) || 0) : (b.mu_rating || 0);
             return mul * (va - vb);
           case 'added':
             va = a.added_at || ''; vb = b.added_at || '';

@@ -513,6 +513,8 @@ def _seed_settings():
             "grid_density": "normal",
             # Rating input mode
             "rating_input_mode": "stars",
+            # Rating source for display (mangaupdates | mangabaka)
+            "rating_source": "mangaupdates",
             # Reading date display
             "show_reading_dates": "true",
             # Notes indicator on cards

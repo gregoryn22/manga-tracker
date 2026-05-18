@@ -39,6 +39,7 @@ EXPOSED_KEYS = [
     "default_page",
     "grid_density",
     "rating_input_mode",
+    "rating_source",
     "show_reading_dates",
     "show_notes_indicator_on_cards",
     "accent_color",
@@ -93,6 +94,7 @@ class UpdateSettingsRequest(BaseModel):
     default_page: str | None = None
     grid_density: str | None = None
     rating_input_mode: str | None = None
+    rating_source: str | None = None
     show_reading_dates: str | None = None
     show_notes_indicator_on_cards: str | None = None
     accent_color: str | None = None
