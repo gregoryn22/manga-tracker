@@ -100,6 +100,8 @@ class TrackedSeries(Base):
     reading_status = Column(String, default="reading")
     notes = Column(Text, nullable=True)
     last_read_at = Column(DateTime, nullable=True)
+    date_started = Column(DateTime, nullable=True)
+    date_completed = Column(DateTime, nullable=True)
     tags = Column(Text, nullable=True)                 # JSON array of tag strings
 
     # ── Notification muting ────────────────────────────────────────────
@@ -187,6 +189,8 @@ class TrackedSeries(Base):
             "reading_status": self.reading_status,
             "notes": self.notes,
             "last_read_at": self.last_read_at.isoformat() if self.last_read_at else None,
+            "date_started": self.date_started.date().isoformat() if self.date_started else None,
+            "date_completed": self.date_completed.date().isoformat() if self.date_completed else None,
             "tags": self._safe_json(self.tags, default=[]),
             "notification_muted": bool(self.notification_muted),
             "mangabaka_url": self.mangabaka_url,
@@ -358,6 +362,8 @@ def _migrate_db():
         ("tracked_series", "author_roles",       "TEXT"),
         ("tracked_series", "mu_link_status",     "VARCHAR"),
         ("tracked_series", "user_rating",        "REAL"),
+        ("tracked_series", "date_started",       "DATETIME"),
+        ("tracked_series", "date_completed",     "DATETIME"),
     ]
 
     # Indexes to ensure on hot query columns (idempotent — CREATE IF NOT EXISTS)
@@ -474,6 +480,18 @@ def _seed_settings():
             # UI customization
             "default_page": "library",
             "grid_density": "normal",
+            # Rating input mode
+            "rating_input_mode": "stars",
+            # Reading date display
+            "show_reading_dates": "true",
+            # Notes indicator on cards
+            "show_notes_indicator_on_cards": "true",
+            # Appearance
+            "accent_color": "#7c6cff",
+            "font_scale": "1",
+            "card_radius": "md",
+            "sidebar_width": "220",
+            "dim_finished_covers": "true",
         }
         for k, v in defaults.items():
             if not db.query(Settings).filter(Settings.key == k).first():
