@@ -345,12 +345,16 @@ def komga_import(req: KomgaImportRequest, background_tasks: BackgroundTasks):
                         else:
                             current_chapter = str(books_read)
 
-                # Get latest chapter number
+                # Get latest chapter number — used as baseline so the first
+                # poll doesn't fire a spurious "new chapter" for existing content.
+                # Fall back to booksCount if the API call fails.
                 latest_ch = None
                 try:
-                    latest_ch = client.get_latest_chapter(sid)
+                    latest_ch, _ = client.get_latest_chapter(sid)
                 except Exception:
                     pass
+                if latest_ch is None and kg_series.get("booksCount"):
+                    latest_ch = str(kg_series["booksCount"])
 
                 series_obj = TrackedSeries(
                     id=next_id,

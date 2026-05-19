@@ -130,7 +130,7 @@ def _refresh_simulpub(series: TrackedSeries, db: Session) -> str | None:
             if komga_url and komga_key:
                 is_volume = (getattr(series, "komga_track_mode", None) or "chapter") == "volume"
                 client = KomgaClient(komga_url, komga_key)
-                chapter = client.get_latest_chapter(sim_id)
+                chapter, _ = client.get_latest_chapter(sim_id)
                 group_name = "Komga (volume)" if is_volume else "Komga"
             else:
                 logger.warning("Komga: URL or API key not configured — skipping refresh")

@@ -1170,7 +1170,7 @@ def _poll_komga(db: Session, series_list: list[TrackedSeries]):
             is_volume = (getattr(series, "komga_track_mode", None) or "chapter") == "volume"
             unit_label = "Vol." if is_volume else "Ch."
 
-            number = client.get_latest_chapter(series.simulpub_id)
+            number, date_added = client.get_latest_chapter(series.simulpub_id)
             if not number:
                 logger.debug(
                     f"Komga: no data for '{series.title}' (id={series.simulpub_id})"
@@ -1187,9 +1187,15 @@ def _poll_komga(db: Session, series_list: list[TrackedSeries]):
                     db.commit()
                     continue
 
+                # Use Komga's scan date when available; fall back to today.
+                # This lets the 24h live feed filter correctly exclude books
+                # that were scanned weeks/months ago (e.g. on first-poll of
+                # a newly-imported series).
+                release_date = date_added or datetime.utcnow().strftime("%Y-%m-%d")
+
                 old_chapter = series.mu_latest_chapter
                 series.mu_latest_chapter    = number
-                series.latest_release_date  = datetime.utcnow().strftime("%Y-%m-%d")
+                series.latest_release_date  = release_date
                 series.latest_release_group = group_name
 
                 message = f"{series.title} — {unit_label} {number} · Komga"
@@ -1201,7 +1207,7 @@ def _poll_komga(db: Session, series_list: list[TrackedSeries]):
                     series_title=series.title,
                     chapter=number,
                     volume=number if is_volume else None,
-                    release_date=series.latest_release_date,
+                    release_date=release_date,
                     group_name=group_name,
                     mu_release_id=None,
                     cover_url=series.best_cover(),
