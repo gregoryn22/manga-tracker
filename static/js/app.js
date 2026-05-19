@@ -780,6 +780,7 @@ function app() {
       this.ds = series;
       this.ef = {
         current_chapter: series.current_chapter||'0',
+        current_volume: series.current_volume||'',
         reading_status: series.reading_status||'reading',
         notes: series.notes||'',
         tags: [...(series.tags||[])],
@@ -845,6 +846,7 @@ function app() {
       try {
         const body = {
           current_chapter: this.ef.current_chapter,
+          current_volume: this.ef.current_volume || null,
           reading_status: this.ef.reading_status,
           notes: this.ef.notes,
           tags: this.ef.tags,

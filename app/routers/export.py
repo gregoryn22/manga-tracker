@@ -56,7 +56,7 @@ def _series_to_mb_entry(s: TrackedSeries) -> dict:
             "is_private": False,
             "number_of_rereads": 0,
             "progress_chapter": _parse_chapter_progress(s.current_chapter),
-            "progress_volume": None,
+            "progress_volume": _parse_chapter_progress(s.current_volume),
             "start_date": start_date,
             "finish_date": finish_date,
             "imported_at": None,

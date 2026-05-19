@@ -338,6 +338,7 @@ def mb_pull(db: Session = Depends(get_db)):
 
         mb_state    = entry.get("state") or "reading"
         mb_chapter  = entry.get("progress_chapter")
+        mb_volume   = entry.get("progress_volume")
         mb_start    = entry.get("start_date")
         mb_finish   = entry.get("finish_date")
         local_status = _MB_TO_LOCAL.get(mb_state, mb_state)
@@ -350,6 +351,11 @@ def mb_pull(db: Session = Depends(get_db)):
             mb_ch_str = str(mb_chapter)
             if series.current_chapter != mb_ch_str:
                 series.current_chapter = mb_ch_str
+                changed = True
+        if mb_volume is not None:
+            mb_vol_str = str(mb_volume)
+            if series.current_volume != mb_vol_str:
+                series.current_volume = mb_vol_str
                 changed = True
         if mb_start and not series.date_started:
             try:

@@ -105,6 +105,7 @@ class TrackedSeries(Base):
 
     # ── User progress ─────────────────────────────────────────────────
     current_chapter = Column(String, nullable=True, default="0")
+    current_volume = Column(String, nullable=True)   # user-entered volume progress (independent of chapter)
     reading_status = Column(String, default="reading")
     notes = Column(Text, nullable=True)
     last_read_at = Column(DateTime, nullable=True)
@@ -204,6 +205,7 @@ class TrackedSeries(Base):
             "komga_track_mode": self.komga_track_mode or "chapter",
             "mb_provider_ids": self._safe_json(self.mb_provider_ids, default={}),
             "current_chapter": self.current_chapter,
+            "current_volume": self.current_volume,
             "reading_status": self.reading_status,
             "notes": self.notes,
             "last_read_at": self.last_read_at.isoformat() if self.last_read_at else None,

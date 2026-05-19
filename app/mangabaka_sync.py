@@ -45,6 +45,7 @@ def push_entry(
     series_id: int,
     reading_status: str,
     current_chapter: str | None,
+    current_volume: str | None,
     date_started: datetime | None,
     date_completed: datetime | None,
     pat: str,
@@ -61,6 +62,7 @@ def push_entry(
     payload: dict = {
         "state": _STATE_MAP.get(reading_status, "reading"),
         "progress_chapter": _parse_chapter(current_chapter),
+        "progress_volume": _parse_chapter(current_volume),
         "start_date": _iso(date_started),
         "finish_date": _iso(date_completed),
     }

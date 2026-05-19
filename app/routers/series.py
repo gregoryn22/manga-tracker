@@ -461,7 +461,7 @@ def bulk_status(req: BulkStatusRequest, background_tasks: BackgroundTasks, db: S
             background_tasks.add_task(
                 _bg_sync_to_mb,
                 s.id, s.reading_status, s.current_chapter,
-                s.date_started, s.date_completed,
+                s.current_volume, s.date_started, s.date_completed,
             )
 
     return {"success": True, "updated": updated}
@@ -591,6 +591,7 @@ def import_library(req: ImportRequest, db: Session = Depends(get_db)):
             related_series=json.dumps(item["related_series"]) if item.get("related_series") else None,
             author_roles=json.dumps(item["author_roles"]) if item.get("author_roles") else None,
             current_chapter=item.get("current_chapter", "0"),
+            current_volume=item.get("current_volume") or None,
             reading_status=item.get("reading_status", "reading"),
             notes=item.get("notes"),
             tags=json.dumps(item.get("tags", [])) if item.get("tags") else None,
@@ -863,6 +864,8 @@ class UpdateSeriesRequest(BaseModel):
     komga_track_mode: str | None = None
     # Editable for 'custom' source — lets the user manually record the latest chapter
     mu_latest_chapter: str | None = None
+    # Volume progress (independent of chapter — for series tracked both ways)
+    current_volume: str | None = None
     # Tags for filtering
     tags: list[str] | None = None
     # Personal rating (0–10, half-point increments; null clears)
@@ -879,7 +882,7 @@ class UpdateSeriesRequest(BaseModel):
 
 
 def _bg_sync_to_mb(series_id: int, reading_status: str, current_chapter: str | None,
-                   date_started, date_completed):
+                   current_volume: str | None, date_started, date_completed):
     """Background task: push updated progress to MB if sync is enabled."""
     from ..database import SessionLocal, get_setting
     from ..mangabaka_sync import push_entry
@@ -890,7 +893,8 @@ def _bg_sync_to_mb(series_id: int, reading_status: str, current_chapter: str | N
         pat = get_setting(db, "mangabaka_pat", "")
         if not pat:
             return
-        push_entry(series_id, reading_status, current_chapter, date_started, date_completed, pat)
+        push_entry(series_id, reading_status, current_chapter, current_volume,
+                   date_started, date_completed, pat)
     finally:
         db.close()
 
@@ -1025,6 +1029,9 @@ def update_series(series_id: int, req: UpdateSeriesRequest,
             action="source_change", detail=detail, created_at=datetime.utcnow(),
         ))
 
+    if req.current_volume is not None:
+        series.current_volume = req.current_volume or None  # empty string clears it
+
     # Only allow direct mu_latest_chapter edits for custom-source series to avoid
     # accidentally overwriting data from an automated source.
     if req.mu_latest_chapter is not None:
@@ -1045,12 +1052,12 @@ def update_series(series_id: int, req: UpdateSeriesRequest,
     db.commit()
     db.refresh(series)
 
-    # Push to MB if sync is enabled (fires only when chapter or status changed)
-    if req.current_chapter is not None or req.reading_status is not None:
+    # Push to MB if sync is enabled (fires when chapter, volume, or status changed)
+    if req.current_chapter is not None or req.current_volume is not None or req.reading_status is not None:
         background_tasks.add_task(
             _bg_sync_to_mb,
             series.id, series.reading_status, series.current_chapter,
-            series.date_started, series.date_completed,
+            series.current_volume, series.date_started, series.date_completed,
         )
 
     return series.to_dict()
