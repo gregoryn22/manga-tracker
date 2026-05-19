@@ -343,6 +343,7 @@ def mb_pull(db: Session = Depends(get_db)):
         mb_volume   = entry.get("progress_volume")
         mb_start    = entry.get("start_date")
         mb_finish   = entry.get("finish_date")
+        mb_rating   = entry.get("rating")
         local_status = _MB_TO_LOCAL.get(mb_state, mb_state)
 
         changed = False
@@ -359,6 +360,14 @@ def mb_pull(db: Session = Depends(get_db)):
             if series.current_volume != mb_vol_str:
                 series.current_volume = mb_vol_str
                 changed = True
+        if mb_rating is not None and series.user_rating is None:
+            try:
+                val = float(mb_rating)
+                if 0.0 <= val <= 10.0:
+                    series.user_rating = round(val * 2) / 2  # snap to 0.5 increments
+                    changed = True
+            except (ValueError, TypeError):
+                pass
         if mb_start and not series.date_started:
             try:
                 series.date_started = _dt.fromisoformat(mb_start.replace("Z", "+00:00")).replace(tzinfo=None)

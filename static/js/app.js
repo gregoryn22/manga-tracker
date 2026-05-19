@@ -873,7 +873,7 @@ function app() {
           simulpub_source: this.ef.simulpub_source,
           simulpub_id: this.ef.simulpub_id,
           komga_track_mode: this.ef.simulpub_source === 'komga' ? this.ef.komga_track_mode : undefined,
-          user_rating: this.ef.user_rating,
+          user_rating: this.ef.user_rating !== this.ds.user_rating ? this.ef.user_rating : undefined,
           clear_user_rating: this.ef.user_rating === null && this.ds.user_rating !== null,
           date_started: this.ef.date_started_overriding ? (this.ef.date_started || undefined) : undefined,
           date_completed: this.ef.date_completed_overriding ? (this.ef.date_completed || undefined) : undefined,

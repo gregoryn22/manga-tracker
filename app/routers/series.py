@@ -313,6 +313,15 @@ def add_series(req: AddSeriesRequest, background_tasks: BackgroundTasks, db: Ses
         # Fall back to MU title search (for series MB hasn't linked yet)
         background_tasks.add_task(_bg_enrich_with_mu, series.id, series.title, None)
 
+    # Push initial state to MB if sync is enabled and there's something non-default to sync
+    if req.current_chapter != "0" or req.reading_status != "reading":
+        background_tasks.add_task(
+            _bg_sync_to_mb,
+            series.id, series.reading_status, series.current_chapter,
+            series.current_volume, series.date_started, series.date_completed,
+            series.user_rating,
+        )
+
     return series.to_dict()
 
 
@@ -550,10 +559,11 @@ class ImportRequest(BaseModel):
 
 
 @router.post("/import/json")
-def import_library(req: ImportRequest, db: Session = Depends(get_db)):
+def import_library(req: ImportRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     """Import series from a previously exported JSON. Skips duplicates."""
     imported = 0
     skipped = 0
+    imported_series_ids: list[int] = []
     for item in req.series:
         sid = item.get("id")
         if not sid:
@@ -616,6 +626,7 @@ def import_library(req: ImportRequest, db: Session = Depends(get_db)):
             added_at=datetime.utcnow(),
         )
         db.add(s)
+        imported_series_ids.append(sid)
         imported += 1
     db.commit()
 
@@ -646,7 +657,34 @@ def import_library(req: ImportRequest, db: Session = Depends(get_db)):
             db.rollback()
             activity_restored = 0
 
+    # Push imported series to MB in one background task (avoids N individual tasks)
+    if imported_series_ids:
+        background_tasks.add_task(_bg_sync_import_to_mb, imported_series_ids)
+
     return {"success": True, "imported": imported, "skipped": skipped, "activity_restored": activity_restored}
+
+
+def _bg_sync_import_to_mb(series_ids: list[int]):
+    """Push all imported series to MB if sync is enabled. Runs once after import."""
+    from ..database import SessionLocal, get_setting
+    from ..mangabaka_sync import push_entry
+    db = SessionLocal()
+    try:
+        if get_setting(db, "mb_sync_enabled", "false") != "true":
+            return
+        pat = get_setting(db, "mangabaka_pat", "")
+        if not pat:
+            return
+        for sid in series_ids:
+            series = db.query(TrackedSeries).filter(TrackedSeries.id == sid).first()
+            if series:
+                push_entry(
+                    series.id, series.reading_status, series.current_chapter,
+                    series.current_volume, series.date_started, series.date_completed,
+                    pat, user_rating=series.user_rating,
+                )
+    finally:
+        db.close()
 
 
 # ── Reading activity log ─────────────────────────────────────────────
