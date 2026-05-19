@@ -55,11 +55,16 @@ async def lifespan(app: FastAPI):
     db = SessionLocal()
     try:
         interval = float(get_setting(db, "poll_interval_hours", "6") or "6")
+        meta_enabled = get_setting(db, "metadata_refresh_enabled", "false") == "true"
+        try:
+            meta_days = float(get_setting(db, "metadata_refresh_interval_days", "7") or "7")
+        except ValueError:
+            meta_days = 7.0
     finally:
         db.close()
 
     logger.info(f"Starting background scheduler (every {interval}h)...")
-    start_scheduler(interval)
+    start_scheduler(interval, metadata_refresh_days=meta_days if meta_enabled else 0.0)
 
     yield
 

@@ -8,7 +8,14 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from ..database import Settings, get_db, get_setting, set_setting
-from ..scheduler import start_scheduler, trigger_manual_poll
+from ..scheduler import (
+    start_scheduler,
+    trigger_manual_poll,
+    trigger_manual_metadata_refresh,
+    _reschedule_metadata_job,
+    _remove_metadata_job,
+    _metadata_refresh_state,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/settings", tags=["settings"])
@@ -50,6 +57,8 @@ EXPOSED_KEYS = [
     "card_radius",
     "sidebar_width",
     "dim_finished_covers",
+    "metadata_refresh_enabled",
+    "metadata_refresh_interval_days",
 ]
 
 
@@ -110,6 +119,8 @@ class UpdateSettingsRequest(BaseModel):
     card_radius: str | None = None
     sidebar_width: str | None = None
     dim_finished_covers: str | None = None
+    metadata_refresh_enabled: str | None = None
+    metadata_refresh_interval_days: str | None = None
 
 
 # Sensitive keys that are masked in GET responses.  If a PATCH request sends
@@ -150,6 +161,18 @@ def update_settings(req: UpdateSettingsRequest, db: Session = Depends(get_db)):
                 status_code=422,
                 detail="poll_interval_hours must be a valid number",
             )
+
+    # If metadata refresh settings changed, update the job
+    if "metadata_refresh_enabled" in updates or "metadata_refresh_interval_days" in updates:
+        enabled = get_setting(db, "metadata_refresh_enabled", "false") == "true"
+        if not enabled:
+            _remove_metadata_job()
+        else:
+            try:
+                days = float(get_setting(db, "metadata_refresh_interval_days", "7") or "7")
+            except ValueError:
+                days = 7.0
+            _reschedule_metadata_job(days)
 
     return {"success": True}
 
@@ -289,6 +312,28 @@ def manual_poll(db: Session = Depends(get_db)):
     """Manually trigger an update poll for all tracked series."""
     trigger_manual_poll()
     return {"success": True, "message": "Poll started in the background."}
+
+
+@router.get("/metadata-refresh/status")
+def metadata_refresh_status():
+    """Return current metadata refresh job state."""
+    state = _metadata_refresh_state
+    return {
+        "running":        state["running"],
+        "last_started":   state["last_started"].isoformat() if state["last_started"] else None,
+        "last_finished":  state["last_finished"].isoformat() if state["last_finished"] else None,
+        "total_series":   state["total_series"],
+        "total_updated":  state["total_updated"],
+    }
+
+
+@router.post("/refresh-metadata-now")
+def manual_metadata_refresh():
+    """Manually trigger a full metadata refresh from MangaBaka and MangaUpdates."""
+    if _metadata_refresh_state["running"]:
+        raise HTTPException(status_code=409, detail="Metadata refresh already running.")
+    trigger_manual_metadata_refresh()
+    return {"success": True, "message": "Metadata refresh started in the background."}
 
 
 @router.post("/test-mb-sync")

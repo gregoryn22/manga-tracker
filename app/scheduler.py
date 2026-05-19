@@ -67,6 +67,7 @@ logger = logging.getLogger(__name__)
 
 scheduler = BackgroundScheduler(timezone="UTC")
 _JOB_ID = "poll_updates"
+_METADATA_JOB_ID = "refresh_metadata"
 
 ACTIVE_STATUSES = {"reading", "on_hold"}
 
@@ -74,6 +75,14 @@ _poll_state: dict = {
     "running": False,
     "last_started": None,
     "last_finished": None,
+    "total_series": 0,
+}
+
+_metadata_refresh_state: dict = {
+    "running": False,
+    "last_started": None,
+    "last_finished": None,
+    "total_updated": 0,
     "total_series": 0,
 }
 
@@ -201,10 +210,11 @@ def _titles_plausibly_match(tracked_title: str, release_title: str) -> bool:
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
-def start_scheduler(interval_hours: float = 6.0):
+def start_scheduler(interval_hours: float = 6.0, metadata_refresh_days: float | None = None):
     if scheduler.running:
         scheduler.reschedule_job(_JOB_ID, trigger="interval", hours=interval_hours)
         logger.info(f"Scheduler rescheduled → every {interval_hours}h")
+        _reschedule_metadata_job(metadata_refresh_days)
         return
     scheduler.add_job(
         poll_updates,
@@ -217,10 +227,61 @@ def start_scheduler(interval_hours: float = 6.0):
     )
     scheduler.start()
     logger.info(f"Scheduler started → polling every {interval_hours}h")
+    _reschedule_metadata_job(metadata_refresh_days)
+
+
+def _reschedule_metadata_job(interval_days: float | None):
+    """Add, reschedule, or remove the metadata refresh job based on settings."""
+    if interval_days is None:
+        # Read from DB
+        from .database import SessionLocal
+        db = SessionLocal()
+        try:
+            enabled = get_setting(db, "metadata_refresh_enabled", "false") == "true"
+            if not enabled:
+                _remove_metadata_job()
+                return
+            try:
+                interval_days = float(get_setting(db, "metadata_refresh_interval_days", "7") or "7")
+            except ValueError:
+                interval_days = 7.0
+        finally:
+            db.close()
+    else:
+        if interval_days <= 0:
+            _remove_metadata_job()
+            return
+
+    if scheduler.get_job(_METADATA_JOB_ID):
+        scheduler.reschedule_job(_METADATA_JOB_ID, trigger="interval", days=interval_days)
+        logger.info(f"Metadata refresh rescheduled → every {interval_days}d")
+    else:
+        scheduler.add_job(
+            refresh_all_metadata,
+            trigger="interval",
+            days=interval_days,
+            id=_METADATA_JOB_ID,
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+        logger.info(f"Metadata refresh job added → every {interval_days}d")
+
+
+def _remove_metadata_job():
+    if scheduler.get_job(_METADATA_JOB_ID):
+        scheduler.remove_job(_METADATA_JOB_ID)
+        logger.info("Metadata refresh job removed (disabled)")
 
 
 def trigger_manual_poll():
     t = threading.Thread(target=poll_updates, daemon=True)
+    t.start()
+    return True
+
+
+def trigger_manual_metadata_refresh():
+    t = threading.Thread(target=refresh_all_metadata, daemon=True)
     t.start()
     return True
 
@@ -1340,3 +1401,158 @@ def _auto_archive_idle(db: Session):
     if archived:
         db.commit()
         logger.info(f"Auto-archived {archived} idle series → dropped")
+
+
+# ── Scheduled metadata refresh ────────────────────────────────────────────────
+
+def refresh_all_metadata():
+    """
+    Refresh MB and MU metadata for all tracked series.
+
+    MB fields updated: cover_url, description, status, total_chapters, total_volumes,
+    genres, mb_tags, is_licensed, has_anime, start_date, end_date, publishers,
+    external_links, content_rating, romanized_title.
+
+    MU fields updated: mu_cover_url, mu_rating, mu_rating_votes, authors, author_roles,
+    publishers (if empty), categories, associated_titles.
+
+    Series with simulpub_source='custom' are included — metadata stays fresh
+    even when chapter polling is disabled.
+    """
+    import json as _json
+    from .mangabaka import MangaBakaClient, series_from_api
+
+    _metadata_refresh_state["running"] = True
+    _metadata_refresh_state["last_started"] = datetime.utcnow()
+    _metadata_refresh_state["total_updated"] = 0
+    _metadata_refresh_state["total_series"] = 0
+
+    db: Session = None
+    try:
+        db = SessionLocal()
+        token = get_setting(db, "mangabaka_token", "")
+        if not token:
+            logger.warning("Metadata refresh: mangabaka_token not configured — skipping MB refresh")
+            mb_client = None
+        else:
+            mb_client = MangaBakaClient(token)
+
+        all_series = db.query(TrackedSeries).all()
+        _metadata_refresh_state["total_series"] = len(all_series)
+        logger.info(f"▶ Starting metadata refresh for {len(all_series)} series...")
+
+        updated = 0
+        for series in all_series:
+            try:
+                _refresh_series_metadata(db, series, mb_client)
+                updated += 1
+            except Exception as e:
+                logger.warning(f"Metadata refresh failed for '{series.title}' (id={series.id}): {e}")
+
+        db.commit()
+        _metadata_refresh_state["total_updated"] = updated
+        logger.info(f"✓ Metadata refresh complete — updated {updated}/{len(all_series)} series.")
+    except Exception as e:
+        logger.error(f"Metadata refresh job failed: {e}", exc_info=True)
+    finally:
+        _metadata_refresh_state["running"] = False
+        _metadata_refresh_state["last_finished"] = datetime.utcnow()
+        if db is not None:
+            db.close()
+
+
+def _refresh_series_metadata(db: Session, series: TrackedSeries, mb_client):
+    """Refresh MB and MU metadata for a single series in-place (no commit)."""
+    import json as _json
+    from .mangabaka import series_from_api
+
+    # ── MangaBaka refresh ──────────────────────────────────────────────────────
+    mb_id = series.mb_linked_id or series.id
+    if mb_client and mb_id:
+        try:
+            resp = mb_client.get_series(mb_id)
+            if resp.get("status") == 200 and resp.get("data"):
+                flat = series_from_api(resp["data"])
+
+                # Cover — always refresh (CDN URLs can rotate)
+                if flat.get("cover_url"):
+                    series.cover_url = flat["cover_url"]
+
+                # Textual metadata — always overwrite with latest upstream values
+                for field in ("description", "status", "content_rating", "romanized_title",
+                              "is_licensed", "has_anime", "start_date", "end_date"):
+                    val = flat.get(field)
+                    if val is not None:
+                        setattr(series, field, val)
+
+                # Numeric metadata
+                if flat.get("total_chapters") is not None:
+                    series.total_chapters = flat["total_chapters"]
+                if flat.get("total_volumes") is not None:
+                    series.total_volumes = flat["total_volumes"]
+
+                # JSON fields — refresh genres, tags, publishers, external_links
+                for field in ("genres", "mb_tags", "publishers", "external_links"):
+                    val = flat.get(field)
+                    if val and val != "[]" and val != "null":
+                        setattr(series, field, val)
+
+                logger.debug(f"MB metadata refreshed for '{series.title}' (mb_id={mb_id})")
+        except Exception as e:
+            logger.debug(f"MB metadata fetch failed for '{series.title}': {e}")
+
+    # ── MangaUpdates refresh ───────────────────────────────────────────────────
+    if series.mu_series_id:
+        try:
+            detail = get_series(series.mu_series_id)
+
+            # Always ensure mu_url is set
+            if not series.mu_url:
+                series.mu_url = (
+                    detail.get("url")
+                    or f"https://www.mangaupdates.com/series/{series.mu_series_id}"
+                )
+
+            # Cover — update MU cover (best_cover() picks MB primary over MU fallback)
+            mu_cover = extract_mu_cover(detail.get("image"))
+            if mu_cover:
+                series.mu_cover_url = mu_cover
+
+            # Ratings — always fresh
+            series.mu_rating = detail.get("bayesian_rating")
+            series.mu_rating_votes = detail.get("rating_votes")
+
+            # Authors — MU has role info; refresh unconditionally
+            import json as _json_mu
+            raw_authors = detail.get("authors", [])
+            if raw_authors:
+                flat_authors = [a.get("author_name", "").strip() for a in raw_authors if a.get("author_name")]
+                series.authors = _json_mu.dumps(flat_authors)
+                roles = []
+                for a in raw_authors:
+                    name = a.get("author_name", "").strip()
+                    role = (a.get("type") or "Author").strip().title()
+                    if name:
+                        roles.append({"name": name, "role": role})
+                if roles:
+                    series.author_roles = _json_mu.dumps(roles)
+
+            # Publishers — fill if missing; MU may have more than MB
+            pubs = [p.get("publisher_name", "") for p in detail.get("publishers", []) if p.get("publisher_name")]
+            if pubs:
+                series.publishers = _json_mu.dumps(pubs)
+
+            # Categories (MU community tags)
+            cats = [c.get("category", "") for c in detail.get("categories", []) if c.get("category")]
+            if cats:
+                series.categories = _json_mu.dumps(cats[:30])
+
+            # Alternate/associated titles
+            assoc = detail.get("associated", [])
+            alt_titles = [t.get("title", "").strip() for t in assoc if t.get("title", "").strip()]
+            if alt_titles:
+                series.associated_titles = _json_mu.dumps(alt_titles)
+
+            logger.debug(f"MU metadata refreshed for '{series.title}' (mu_id={series.mu_series_id})")
+        except Exception as e:
+            logger.debug(f"MU metadata fetch failed for '{series.title}': {e}")

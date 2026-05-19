@@ -558,6 +558,9 @@ def _seed_settings():
             "card_radius": "md",
             "sidebar_width": "220",
             "dim_finished_covers": "true",
+            # Scheduled metadata refresh from MangaBaka / MangaUpdates
+            "metadata_refresh_enabled": "false",
+            "metadata_refresh_interval_days": "7",
         }
         for k, v in defaults.items():
             if not db.query(Settings).filter(Settings.key == k).first():
