@@ -22,6 +22,8 @@ EXPOSED_KEYS = [
     "push_reading_only",
     "poll_interval_hours",
     "mangabaka_token",
+    "mangabaka_pat",
+    "mb_sync_enabled",
     "mu_enabled",
     "kmanga_email",
     "kmanga_password",          # returned masked; full value stored in DB
@@ -59,6 +61,8 @@ def get_settings(db: Session = Depends(get_db)):
     _MASK = "••••••••••••"
     if result.get("mangabaka_token"):
         result["mangabaka_token"] = _MASK
+    if result.get("mangabaka_pat"):
+        result["mangabaka_pat"] = _MASK
     if result.get("kmanga_password"):
         result["kmanga_password"] = _MASK
     if result.get("komga_api_key"):
@@ -77,6 +81,8 @@ class UpdateSettingsRequest(BaseModel):
     push_reading_only: str | None = None
     poll_interval_hours: str | None = None
     mangabaka_token: str | None = None
+    mangabaka_pat: str | None = None
+    mb_sync_enabled: str | None = None
     mu_enabled: str | None = None
     kmanga_email: str | None = None
     kmanga_password: str | None = None
@@ -107,7 +113,7 @@ class UpdateSettingsRequest(BaseModel):
 # Sensitive keys that are masked in GET responses.  If a PATCH request sends
 # back the exact mask placeholder, that means the user left the field unchanged —
 # we must NOT overwrite the real stored value with the placeholder string.
-_MASKED_KEYS = {"mangabaka_token", "kmanga_password", "komga_api_key", "pushover_app_token"}
+_MASKED_KEYS = {"mangabaka_token", "mangabaka_pat", "kmanga_password", "komga_api_key", "pushover_app_token"}
 _MASK = "••••••••••••"
 
 
@@ -281,3 +287,89 @@ def manual_poll(db: Session = Depends(get_db)):
     """Manually trigger an update poll for all tracked series."""
     trigger_manual_poll()
     return {"success": True, "message": "Poll started in the background."}
+
+
+@router.post("/test-mb-sync")
+def test_mb_sync(db: Session = Depends(get_db)):
+    """Validate the MangaBaka PAT by fetching /v1/my/profile."""
+    from ..mangabaka_sync import get_profile
+    pat = get_setting(db, "mangabaka_pat", "")
+    if not pat:
+        raise HTTPException(status_code=400, detail="MangaBaka PAT not configured")
+    profile = get_profile(pat)
+    if not profile:
+        raise HTTPException(status_code=400, detail="PAT is invalid or expired")
+    return {"success": True, "username": profile.get("preferred_username") or profile.get("nickname")}
+
+
+@router.post("/mb-pull")
+def mb_pull(db: Session = Depends(get_db)):
+    """
+    Pull reading progress from MangaBaka library and update matching local series.
+    Only updates series that already exist in this tracker. Never adds new series.
+    Returns counts: updated, skipped (not tracked), unchanged.
+    """
+    from ..database import TrackedSeries
+    from ..mangabaka_sync import pull_library, _STATE_MAP
+    import json as _json
+    from datetime import datetime as _dt
+
+    pat = get_setting(db, "mangabaka_pat", "")
+    if not pat:
+        raise HTTPException(status_code=400, detail="MangaBaka PAT not configured")
+
+    entries = pull_library(pat)
+    if not entries:
+        raise HTTPException(status_code=502, detail="Failed to fetch MB library or library is empty")
+
+    # Reverse state map: MB state → our reading_status
+    _MB_TO_LOCAL = {v: k for k, v in _STATE_MAP.items()}
+
+    updated = skipped = unchanged = 0
+    for entry in entries:
+        series_id = entry.get("series_id")
+        if not series_id:
+            skipped += 1
+            continue
+        series = db.query(TrackedSeries).filter(TrackedSeries.id == series_id).first()
+        if not series:
+            skipped += 1
+            continue
+
+        mb_state    = entry.get("state") or "reading"
+        mb_chapter  = entry.get("progress_chapter")
+        mb_start    = entry.get("start_date")
+        mb_finish   = entry.get("finish_date")
+        local_status = _MB_TO_LOCAL.get(mb_state, mb_state)
+
+        changed = False
+        if series.reading_status != local_status:
+            series.reading_status = local_status
+            changed = True
+        if mb_chapter is not None:
+            mb_ch_str = str(mb_chapter)
+            if series.current_chapter != mb_ch_str:
+                series.current_chapter = mb_ch_str
+                changed = True
+        if mb_start and not series.date_started:
+            try:
+                series.date_started = _dt.fromisoformat(mb_start.rstrip("Z"))
+                series.date_started_source = "manual"
+                changed = True
+            except ValueError:
+                pass
+        if mb_finish and not series.date_completed:
+            try:
+                series.date_completed = _dt.fromisoformat(mb_finish.rstrip("Z"))
+                series.date_completed_source = "manual"
+                changed = True
+            except ValueError:
+                pass
+
+        if changed:
+            updated += 1
+        else:
+            unchanged += 1
+
+    db.commit()
+    return {"success": True, "updated": updated, "skipped": skipped, "unchanged": unchanged}

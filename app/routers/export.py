@@ -22,7 +22,7 @@ _STATUS_MAP = {
     "dropped":      "dropped",
     "on_hold":      "on_hold",
     "plan_to_read": "plan_to_read",
-    "rereading":    "reading",
+    "rereading":    "rereading",
 }
 
 

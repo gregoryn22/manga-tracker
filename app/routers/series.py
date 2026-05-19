@@ -431,7 +431,7 @@ class BulkStatusRequest(BaseModel):
 
 
 @router.post("/bulk/status")
-def bulk_status(req: BulkStatusRequest, db: Session = Depends(get_db)):
+def bulk_status(req: BulkStatusRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     """Change reading_status for multiple series at once."""
     if req.reading_status not in _VALID_READING_STATUSES:
         raise HTTPException(status_code=422, detail=f"Invalid reading_status: {req.reading_status!r}")
@@ -453,6 +453,17 @@ def bulk_status(req: BulkStatusRequest, db: Session = Depends(get_db)):
             series.reading_status = req.reading_status
             updated += 1
     db.commit()
+
+    # Push status change to MB for each updated series
+    for sid in req.series_ids:
+        s = db.query(TrackedSeries).filter(TrackedSeries.id == sid).first()
+        if s:
+            background_tasks.add_task(
+                _bg_sync_to_mb,
+                s.id, s.reading_status, s.current_chapter,
+                s.date_started, s.date_completed,
+            )
+
     return {"success": True, "updated": updated}
 
 
@@ -867,8 +878,26 @@ class UpdateSeriesRequest(BaseModel):
     reset_date_completed: bool = False
 
 
+def _bg_sync_to_mb(series_id: int, reading_status: str, current_chapter: str | None,
+                   date_started, date_completed):
+    """Background task: push updated progress to MB if sync is enabled."""
+    from ..database import SessionLocal, get_setting
+    from ..mangabaka_sync import push_entry
+    db = SessionLocal()
+    try:
+        if get_setting(db, "mb_sync_enabled", "false") != "true":
+            return
+        pat = get_setting(db, "mangabaka_pat", "")
+        if not pat:
+            return
+        push_entry(series_id, reading_status, current_chapter, date_started, date_completed, pat)
+    finally:
+        db.close()
+
+
 @router.patch("/{series_id}")
-def update_series(series_id: int, req: UpdateSeriesRequest, db: Session = Depends(get_db)):
+def update_series(series_id: int, req: UpdateSeriesRequest,
+                  background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     series = db.query(TrackedSeries).filter(TrackedSeries.id == series_id).first()
     if not series:
         raise HTTPException(status_code=404, detail="Series not tracked")
@@ -1015,6 +1044,15 @@ def update_series(series_id: int, req: UpdateSeriesRequest, db: Session = Depend
 
     db.commit()
     db.refresh(series)
+
+    # Push to MB if sync is enabled (fires only when chapter or status changed)
+    if req.current_chapter is not None or req.reading_status is not None:
+        background_tasks.add_task(
+            _bg_sync_to_mb,
+            series.id, series.reading_status, series.current_chapter,
+            series.date_started, series.date_completed,
+        )
+
     return series.to_dict()
 
 

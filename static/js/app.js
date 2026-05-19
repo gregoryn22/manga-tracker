@@ -31,7 +31,7 @@ function app() {
     activityFilter: '',
 
     // Settings form
-    sf: { pushover_user_key:'', pushover_app_token:'', pushover_enabled:'false', push_chapter_updates:'true', push_news:'false', push_reading_only:'false', updates_reading_only:'false', poll_interval_hours:'6', mangabaka_token:'', mu_enabled:'true', kmanga_email:'', kmanga_password:'', kmanga_recaptcha_token:'', komga_url:'', komga_api_key:'', idle_detection_enabled:'false', idle_threshold_days:'90', idle_auto_archive:'false', webhook_enabled:'false', webhook_url:'', default_page:'library', grid_density:'normal',
+    sf: { pushover_user_key:'', pushover_app_token:'', pushover_enabled:'false', push_chapter_updates:'true', push_news:'false', push_reading_only:'false', updates_reading_only:'false', poll_interval_hours:'6', mangabaka_token:'', mangabaka_pat:'', mb_sync_enabled:'false', mu_enabled:'true', kmanga_email:'', kmanga_password:'', kmanga_recaptcha_token:'', komga_url:'', komga_api_key:'', idle_detection_enabled:'false', idle_threshold_days:'90', idle_auto_archive:'false', webhook_enabled:'false', webhook_url:'', default_page:'library', grid_density:'normal',
       // ── Display preferences ────────────────────────────────────────────
       show_source_badges:    'true',   // platform banner (MangaPlus, K Manga, etc.) on cards
       show_ratings_on_cards: 'true',   // ★ score overlay on cover image
@@ -591,6 +591,21 @@ function app() {
     async testKomga() {
       try { const d = await this.api('/api/settings/test-komga', 'POST'); this.toast(d.message||'Connected!', 'success'); }
       catch(e) { this.toast(e.detail||'Komga connection failed', 'error'); }
+    },
+
+    async testMbSync() {
+      try {
+        const d = await this.api('/api/settings/test-mb-sync', 'POST');
+        this.toast(`Connected as ${d.username}`, 'success');
+      } catch(e) { this.toast(e.detail || 'PAT invalid or connection failed', 'error'); }
+    },
+
+    async mbPull() {
+      try {
+        const d = await this.api('/api/settings/mb-pull', 'POST');
+        this.toast(`MB pull: ${d.updated} updated, ${d.unchanged} unchanged, ${d.skipped} not tracked`, 'success');
+        if (d.updated > 0) await this.loadLibrary();
+      } catch(e) { this.toast(e.detail || 'MB pull failed', 'error'); }
     },
 
     async clearKMangaSession() {

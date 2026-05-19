@@ -1317,6 +1317,44 @@
           </div>
         </div>
 
+        <!-- ── MangaBaka Live Sync ───────────────────────── -->
+        <div class="card card-padded">
+          <div class="settings-block-title">⚡ MangaBaka Live Sync</div>
+          <div class="text-xs text-muted mb-3 leading-relaxed">
+            Automatically push chapter progress and reading status to your MangaBaka account whenever you update a series here.
+            Requires a <strong>Personal Access Token (PAT)</strong> from
+            <a href="https://mangabaka.org/my/settings/api" target="_blank" class="link">mangabaka.org/my/settings/api</a>.
+            Only updates series already in your MB library — adding new series still requires the export above.
+          </div>
+
+          <div class="settings-row">
+            <label>Personal Access Token</label>
+            <div class="flex gap-2 flex-1">
+              <input class="input flex-1" type="password" placeholder="mb-…"
+                     x-model="sf.mangabaka_pat" autocomplete="new-password" />
+              <button class="btn btn-ghost btn-sm" @click="testMbSync()">Test</button>
+            </div>
+          </div>
+
+          <div class="settings-row">
+            <label>Enable Live Sync</label>
+            <select class="input input-toggle" x-model="sf.mb_sync_enabled">
+              <option value="false">Off</option>
+              <option value="true">On</option>
+            </select>
+          </div>
+
+          <div class="flex gap-2 mt-3">
+            <button class="btn btn-primary btn-sm" @click="saveSettings()">💾 Save</button>
+            <button class="btn btn-ghost btn-sm" @click="mbPull()"
+                    x-show="!!sf.mangabaka_pat"
+                    title="Pull reading progress from your MB library into this app">⬇️ Pull from MB</button>
+          </div>
+          <div class="text-xs text-muted mt-2 leading-relaxed" x-show="sf.mb_sync_enabled === 'true'">
+            Live sync active — chapter and status changes will be pushed to MangaBaka automatically.
+          </div>
+        </div>
+
         <!-- Metadata Maintenance -->
         <div class="card card-padded">
           <div class="settings-block-title">🔧 Metadata Maintenance</div>

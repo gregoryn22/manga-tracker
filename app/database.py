@@ -477,6 +477,8 @@ def _seed_settings():
     try:
         defaults = {
             "mangabaka_token": os.getenv("MANGABAKA_TOKEN", ""),
+            "mangabaka_pat": os.getenv("MANGABAKA_PAT", ""),
+            "mb_sync_enabled": "false",
             "pushover_user_key": os.getenv("PUSHOVER_USER_KEY", ""),
             "pushover_app_token": os.getenv("PUSHOVER_APP_TOKEN", ""),
             "poll_interval_hours": os.getenv("POLL_INTERVAL_HOURS", "6"),
