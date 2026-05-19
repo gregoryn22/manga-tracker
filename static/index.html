@@ -384,12 +384,12 @@
                   <div class="text-xs mt-1" style="color:var(--text-muted)" title="Has notes">📝</div>
                 </template>
 
-                <!-- Inline chapter controls -->
+                <!-- Inline chapter/volume controls -->
                 <div class="card-chapter-controls" @click.stop
                      x-show="sf.show_card_controls !== 'false' && s.latest_chapter">
-                  <span class="ch-label">Read:</span>
+                  <span class="ch-label" x-text="isKomgaVolume(s) ? 'Vol:' : 'Read:'"></span>
                   <input class="ch-read-input" type="number" min="0" step="1"
-                         :value="s.current_chapter || '0'"
+                         :value="isKomgaVolume(s) ? (s.current_volume || '0') : (s.current_chapter || '0')"
                          @keydown.enter="quickSetChapter(s, $event.target.value); $event.target.blur()"
                          @blur="quickSetChapter(s, $event.target.value)"
                          @focus="$event.target.select()" />
@@ -477,7 +477,7 @@
               <div class="list-controls" @click.stop
                    x-show="sf.show_card_controls !== 'false' && s.latest_chapter">
                 <input class="ch-read-input" type="number" min="0" step="1"
-                       :value="s.current_chapter || '0'"
+                       :value="isKomgaVolume(s) ? (s.current_volume || '0') : (s.current_chapter || '0')"
                        @keydown.enter="quickSetChapter(s, $event.target.value); $event.target.blur()"
                        @blur="quickSetChapter(s, $event.target.value)"
                        @focus="$event.target.select()" />
@@ -1750,19 +1750,29 @@
           <div class="form-group">
             <div class="form-label">
               Current Chapter
-              <span class="text-muted fw-400" x-show="ds.latest_chapter" x-text="`(latest: ${ds.latest_chapter})`"></span>
+              <!-- For Komga-volume series latest_chapter is a volume number — don't show it here -->
+              <span class="text-muted fw-400"
+                    x-show="ds.latest_chapter && !isKomgaVolume(ds)"
+                    x-text="`(latest: ${ds.latest_chapter})`"></span>
             </div>
             <div class="flex gap-2 items-center">
               <input class="input input-sm" type="number" min="0" step="1" x-model="ef.current_chapter" />
-              <button class="btn btn-green btn-sm" x-show="ds.latest_chapter"
+              <!-- Mark Current only makes sense for non-Komga-volume series -->
+              <button class="btn btn-green btn-sm"
+                      x-show="ds.latest_chapter && !isKomgaVolume(ds)"
                       @click="ef.current_chapter = ds.latest_chapter">Mark Current</button>
             </div>
-            <div class="progress-wrap mt-2" x-show="ds.latest_chapter">
-              <div class="progress-bar" :class="{'green': ds.has_update}"
-                   :style="`width: ${chapterProgress({...ds, current_chapter: ef.current_chapter})}%`"></div>
-            </div>
-            <div class="text-xs text-muted mt-1" x-show="ds.latest_chapter"
-                 x-text="`${chapterProgress({...ds, current_chapter: ef.current_chapter}).toFixed(0)}% complete`"></div>
+            <!-- Progress bar only meaningful for non-Komga-volume series -->
+            <template x-if="!isKomgaVolume(ds)">
+              <div>
+                <div class="progress-wrap mt-2" x-show="ds.latest_chapter">
+                  <div class="progress-bar" :class="{'green': ds.has_update}"
+                       :style="`width: ${chapterProgress({...ds, current_chapter: ef.current_chapter})}%`"></div>
+                </div>
+                <div class="text-xs text-muted mt-1" x-show="ds.latest_chapter"
+                     x-text="`${chapterProgress({...ds, current_chapter: ef.current_chapter}).toFixed(0)}% complete`"></div>
+              </div>
+            </template>
             <div class="text-xs text-muted mt-2" x-show="ds.last_read_at">
               Last read: <strong x-text="relativeTime(ds.last_read_at)"></strong>
             </div>
@@ -1773,28 +1783,36 @@
             </div>
           </div>
 
-          <!-- Volume progress — hidden only for Komga-volume-tracked series -->
-          <template x-if="!(ds.simulpub_source === 'komga' && ds.komga_track_mode === 'volume')">
+          <!-- Volume progress — always shown for all series -->
+          <template x-if="true">
             <div class="form-group">
               <div class="form-label">
                 Volume Progress
-                <span class="text-muted fw-400" x-show="ds.total_volumes" x-text="`(of ${ds.total_volumes})`"></span>
+                <!-- Komga-volume: show latest from Komga; others: show total_volumes if known -->
+                <span class="text-muted fw-400"
+                      x-show="isKomgaVolume(ds) ? ds.latest_chapter : ds.total_volumes"
+                      x-text="isKomgaVolume(ds) ? `(latest: ${ds.latest_chapter})` : `(of ${ds.total_volumes})`"></span>
               </div>
               <div class="flex gap-2 items-center">
                 <input class="input input-sm" type="number" min="0" step="1" x-model="ef.current_volume"
                        placeholder="—" style="width:90px" />
-                <button class="btn btn-green btn-sm" x-show="ds.total_volumes" @click="ef.current_volume = String(ds.total_volumes)">Mark Complete</button>
+                <!-- Catch up to Komga's latest, or mark complete if total_volumes known -->
+                <button class="btn btn-green btn-sm"
+                        x-show="isKomgaVolume(ds) ? ds.latest_chapter : ds.total_volumes"
+                        x-text="isKomgaVolume(ds) ? 'Catch Up' : 'Mark Complete'"
+                        @click="ef.current_volume = isKomgaVolume(ds) ? ds.latest_chapter : String(ds.total_volumes)"></button>
                 <button class="btn btn-ghost btn-sm" x-show="ef.current_volume" @click="ef.current_volume = ''">Clear</button>
               </div>
-              <template x-if="ds.total_volumes">
+              <!-- Progress bar: Komga-volume uses latest_chapter as denominator; others use total_volumes -->
+              <template x-if="isKomgaVolume(ds) ? !!ds.latest_chapter : !!ds.total_volumes">
                 <div>
                   <div class="progress-wrap mt-2" x-show="ef.current_volume">
                     <div class="progress-bar"
-                         :style="`width: ${Math.min(100, (parseFloat(ef.current_volume)||0) / parseFloat(ds.total_volumes) * 100).toFixed(1)}%`"></div>
+                         :style="`width: ${Math.min(100, (parseFloat(ef.current_volume)||0) / parseFloat(isKomgaVolume(ds) ? ds.latest_chapter : ds.total_volumes) * 100).toFixed(1)}%`"></div>
                   </div>
                   <div class="text-xs text-muted mt-1" x-show="ef.current_volume">
-                    Vol. <span x-text="ef.current_volume"></span> / <span x-text="ds.total_volumes"></span>
-                    (<span x-text="Math.min(100,(parseFloat(ef.current_volume)||0)/parseFloat(ds.total_volumes)*100).toFixed(0)"></span>%)
+                    Vol. <span x-text="ef.current_volume"></span> / <span x-text="isKomgaVolume(ds) ? ds.latest_chapter : ds.total_volumes"></span>
+                    (<span x-text="Math.min(100,(parseFloat(ef.current_volume)||0)/parseFloat(isKomgaVolume(ds) ? ds.latest_chapter : ds.total_volumes)*100).toFixed(0)"></span>%)
                   </div>
                 </div>
               </template>

@@ -148,11 +148,25 @@ class TrackedSeries(Base):
         return self.mu_latest_chapter or self.total_chapters
 
     def has_update(self) -> bool:
-        """True if known latest chapter is ahead of user's current chapter."""
+        """True if known latest is ahead of user's read progress.
+
+        For Komga-volume series, compares mu_latest_chapter (volume count from
+        Komga) against current_volume. Falls back to current_chapter so existing
+        series with no current_volume set yet continue to work during transition.
+        """
         latest = self.display_chapter()
+        is_komga_volume = (
+            getattr(self, "simulpub_source", None) == "komga"
+            and (getattr(self, "komga_track_mode", None) or "chapter") == "volume"
+        )
         try:
-            if latest and self.current_chapter is not None:
-                return float(latest) > float(self.current_chapter)
+            if latest:
+                if is_komga_volume:
+                    read = self.current_volume or self.current_chapter
+                else:
+                    read = self.current_chapter
+                if read is not None:
+                    return float(latest) > float(read)
         except (ValueError, TypeError):
             pass
         return False

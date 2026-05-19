@@ -378,9 +378,16 @@ function app() {
       // No-op — filteredLibrary() already sorts reactively via sortBy binding
     },
 
+    isKomgaVolume(s) {
+      return s && s.simulpub_source === 'komga' && (s.komga_track_mode || 'chapter') === 'volume';
+    },
+
     chapterProgress(s) {
       const latest = parseFloat(s.mu_latest_chapter || s.latest_chapter || s.total_chapters);
-      const current = parseFloat(s.current_chapter);
+      // For Komga-volume series use current_volume (fallback to current_chapter during transition)
+      const current = this.isKomgaVolume(s)
+        ? parseFloat(s.current_volume || s.current_chapter)
+        : parseFloat(s.current_chapter);
       if (!latest || isNaN(latest) || isNaN(current)) return 0;
       return Math.min(100, (current / latest) * 100);
     },
@@ -388,30 +395,34 @@ function app() {
     unreadChapters(s) {
       try {
         const latest = parseFloat(s.latest_chapter);
-        const current = parseFloat(s.current_chapter || 0);
+        const current = this.isKomgaVolume(s)
+          ? parseFloat(s.current_volume || s.current_chapter || 0)
+          : parseFloat(s.current_chapter || 0);
         if (!isNaN(latest) && !isNaN(current)) return Math.max(0, Math.floor(latest - current));
       } catch {}
       return '?';
     },
 
-    // ── Inline chapter controls ──────────────────────────
+    // ── Inline chapter/volume controls ──────────────────────────
     async quickSetChapter(s, value) {
       const val = String(value).trim();
-      if (val === (s.current_chapter || '0')) return; // no change
-      if (val === '' || isNaN(parseFloat(val)) || parseFloat(val) < 0) return; // invalid
+      const isVolSeries = this.isKomgaVolume(s);
+      const field = isVolSeries ? 'current_volume' : 'current_chapter';
+      const current = isVolSeries ? (s.current_volume || '0') : (s.current_chapter || '0');
+      if (val === current) return;
+      if (val === '' || isNaN(parseFloat(val)) || parseFloat(val) < 0) return;
       try {
-        await this.api(`/api/series/${s.id}`, 'PATCH', { current_chapter: val });
-        // Update local state so the card re-renders immediately
+        await this.api(`/api/series/${s.id}`, 'PATCH', { [field]: val });
         const idx = this.library.findIndex(x => x.id === s.id);
         if (idx !== -1) {
-          this.library[idx].current_chapter = val;
+          this.library[idx][field] = val;
           const latest = parseFloat(this.library[idx].latest_chapter || 0);
-          const current = parseFloat(val);
-          this.library[idx].has_update = latest > 0 && current < latest;
+          const readVal = parseFloat(val);
+          this.library[idx].has_update = latest > 0 && readVal < latest;
         }
         this.toast(`${s.title} → ${this.unitLabel(s)} ${val} read`, 'success');
       } catch(e) {
-        this.toast('Failed to update chapter', 'error');
+        this.toast('Failed to update progress', 'error');
       }
     },
 
