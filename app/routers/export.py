@@ -14,8 +14,7 @@ from ..database import TrackedSeries, get_db
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/export", tags=["export"])
 
-# MB accepted state values: reading, completed, dropped, on_hold, plan_to_read
-# rereading has no MB equivalent — maps to reading
+# MB accepted state values: reading, completed, dropped, on_hold, plan_to_read, rereading
 _KOMGA_ID_FLOOR = 2_000_000_000
 
 _STATUS_MAP = {

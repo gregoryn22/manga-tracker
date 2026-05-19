@@ -437,7 +437,8 @@ def _schedule_mu_lookup(background_tasks: BackgroundTasks, series_id: int, title
             if not series or series.mu_series_id:
                 return  # already linked or deleted
 
-            results = search_series(title) or []
+            resp = search_series(title)
+            results = resp.get("results", [])
             if not results:
                 return
 

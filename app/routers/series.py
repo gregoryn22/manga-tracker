@@ -515,10 +515,14 @@ def fill_missing_covers(background_tasks: BackgroundTasks, db: Session = Depends
 
 def _bg_fill_covers(series_ids: list[int]):
     """Fetch fresh MB metadata for each series and update cover_url."""
-    from ..database import SessionLocal
+    from ..database import SessionLocal, get_setting
     db = SessionLocal()
     try:
-        client = get_mb_client(db)
+        token = get_setting(db, "mangabaka_token", "")
+        if not token:
+            logger.warning("fill_covers: MangaBaka token not configured — skipping")
+            return
+        client = MangaBakaClient(token)
         updated = 0
         for sid in series_ids:
             try:
