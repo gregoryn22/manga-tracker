@@ -1146,6 +1146,7 @@ def _poll_komga(db: Session, series_list: list[TrackedSeries]):
         logger.warning("Komga: server URL or API key not configured — skipping poll")
         return
 
+    sync_read_progress = get_setting(db, "komga_sync_read_progress", "false") == "true"
     client = KomgaClient(komga_url, komga_key)
 
     for series in series_list:
@@ -1208,6 +1209,31 @@ def _poll_komga(db: Session, series_list: list[TrackedSeries]):
                     f"Komga: '{series.title}' still at {unit_label} {number} "
                     f"(known: {series.mu_latest_chapter})"
                 )
+
+            # Opt-in: sync Komga read progress → current_volume (volume series)
+            # or current_chapter (chapter series)
+            if sync_read_progress:
+                try:
+                    progress = client.get_series_read_progress(series.simulpub_id)
+                    books_read = progress.get("books_read", 0)
+                    if books_read > 0:
+                        read_str = str(books_read)
+                        if is_volume:
+                            if series.current_volume != read_str:
+                                logger.debug(
+                                    f"Komga read-progress sync: '{series.title}' "
+                                    f"current_volume {series.current_volume!r} → {read_str!r}"
+                                )
+                                series.current_volume = read_str
+                        else:
+                            if series.current_chapter != read_str:
+                                logger.debug(
+                                    f"Komga read-progress sync: '{series.title}' "
+                                    f"current_chapter {series.current_chapter!r} → {read_str!r}"
+                                )
+                                series.current_chapter = read_str
+                except Exception as e:
+                    logger.warning(f"Komga read-progress sync failed for '{series.title}': {e}")
 
             _mark_poll_success(series)
             series.last_checked = datetime.utcnow()

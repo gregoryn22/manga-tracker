@@ -520,6 +520,7 @@ def _seed_settings():
             # Komga self-hosted server
             "komga_url": os.getenv("KOMGA_URL", ""),
             "komga_api_key": os.getenv("KOMGA_API_KEY", ""),
+            "komga_sync_read_progress": "false",
             # Dashboard behaviour
             "updates_reading_only": "false",
             # Poll failure push notifications

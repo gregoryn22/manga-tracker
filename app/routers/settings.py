@@ -30,6 +30,7 @@ EXPOSED_KEYS = [
     "kmanga_recaptcha_token",   # short-lived reCAPTCHA v3 token for re-login
     "komga_url",
     "komga_api_key",
+    "komga_sync_read_progress",
     "idle_detection_enabled",
     "idle_threshold_days",
     "idle_auto_archive",
@@ -89,6 +90,7 @@ class UpdateSettingsRequest(BaseModel):
     kmanga_recaptcha_token: str | None = None
     komga_url: str | None = None
     komga_api_key: str | None = None
+    komga_sync_read_progress: str | None = None
     idle_detection_enabled: str | None = None
     idle_threshold_days: str | None = None
     idle_auto_archive: str | None = None
