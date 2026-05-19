@@ -2220,6 +2220,61 @@
             </div>
           </template>
 
+          <!-- MB link management — Komga series only -->
+          <template x-if="ds.simulpub_source === 'komga'">
+            <div class="form-group">
+              <div class="form-label">MangaBaka Link</div>
+              <template x-if="ds.mb_linked_id">
+                <div>
+                  <div class="flex gap-2 items-center flex-wrap">
+                    <span class="text-sm text-muted">Linked to MB #<span x-text="ds.mb_linked_id"></span></span>
+                    <a x-show="ds.mangabaka_url" :href="ds.mangabaka_url" target="_blank"
+                       class="btn btn-ghost btn-sm">View ↗</a>
+                    <button class="btn btn-ghost btn-sm" @click="mbRelinkOpen = !mbRelinkOpen">🔗 Relink</button>
+                    <button class="btn btn-ghost btn-sm" style="color:var(--red)"
+                            @click="unlinkMb(ds.id)">Unlink</button>
+                  </div>
+                </div>
+              </template>
+              <template x-if="!ds.mb_linked_id">
+                <div>
+                  <div class="text-sm text-muted mb-2">Not linked — metadata and covers won't refresh from MangaBaka.</div>
+                  <button class="btn btn-primary btn-sm" @click="mbRelinkOpen = true">🔗 Link to MangaBaka</button>
+                </div>
+              </template>
+              <!-- Search + pick UI -->
+              <div x-show="mbRelinkOpen" class="mt-2">
+                <div class="flex gap-2">
+                  <input class="input input-sm flex-1" type="text" placeholder="Search MangaBaka…"
+                         x-model="mbRelinkQuery" @keydown.enter="searchMbRelink()" />
+                  <button class="btn btn-primary btn-sm" @click="searchMbRelink()"
+                          :disabled="mbRelinkSearching">
+                    <span x-show="mbRelinkSearching" class="spin spin-sm"></span>
+                    <span x-show="!mbRelinkSearching">Search</span>
+                  </button>
+                  <button class="btn btn-ghost btn-sm" @click="mbRelinkOpen = false; mbRelinkResults = []">✕</button>
+                </div>
+                <div class="mt-2" x-show="mbRelinkResults.length > 0">
+                  <template x-for="r in mbRelinkResults" :key="r.id">
+                    <div class="flex items-center gap-2 py-1" style="border-bottom:1px solid var(--border)">
+                      <img :src="r.cover" style="width:32px;height:44px;object-fit:cover;border-radius:3px" onerror="this.style.display='none'" />
+                      <div class="flex-1 min-w-0">
+                        <div class="text-sm fw-600 truncate" x-text="r.title"></div>
+                        <div class="text-xs text-muted" x-text="(r.type||'') + (r.year ? ' · ' + r.year : '')"></div>
+                      </div>
+                      <button class="btn btn-green btn-sm flex-shrink-0"
+                              @click="confirmMbLink(ds.id, r.id)">Link</button>
+                    </div>
+                  </template>
+                </div>
+                <div class="text-xs text-muted mt-1"
+                     x-show="mbRelinkResults.length === 0 && !mbRelinkSearching && mbRelinkSearched">
+                  No results found.
+                </div>
+              </div>
+            </div>
+          </template>
+
           <!-- External links -->
           <div class="ext-links-section">
             <div class="form-label mb-1">Links</div>

@@ -1094,10 +1094,11 @@ def refresh_series(series_id: int, background_tasks: BackgroundTasks, db: Sessio
     if not series:
         raise HTTPException(status_code=404, detail="Series not tracked")
 
-    # Refresh MB metadata
+    # Refresh MB metadata — use mb_linked_id for Komga-synthetic series
     client = get_mb_client(db)
+    mb_fetch_id = series.mb_linked_id if (series.id >= _KOMGA_ID_FLOOR and series.mb_linked_id) else series.id
     try:
-        resp = client.get_series(series_id)
+        resp = client.get_series(mb_fetch_id)
         if resp.get("status") == 200 and resp.get("data"):
             api_data = resp["data"]
             flat = series_from_api(api_data)
@@ -1223,3 +1224,146 @@ def get_series_releases_endpoint(series_id: int, db: Session = Depends(get_db)):
         "stored": [r.to_dict() for r in releases],
         "live": live_releases,
     }
+
+
+# ── MangaBaka linking for Komga-sourced series ───────────────────────────────
+
+class LinkMbRequest(BaseModel):
+    mb_id: int
+
+
+@router.post("/{series_id}/link-mb")
+def link_mb(series_id: int, req: LinkMbRequest, db: Session = Depends(get_db)):
+    """
+    Link a Komga-sourced series to a MangaBaka series by ID.
+    Fetches full MB metadata and applies it to the tracked series.
+    Also used for correcting a wrong auto-link.
+    """
+    series = db.query(TrackedSeries).filter(TrackedSeries.id == series_id).first()
+    if not series:
+        raise HTTPException(status_code=404, detail="Series not tracked")
+
+    client = get_mb_client(db)
+    try:
+        resp = client.get_series(req.mb_id)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"MangaBaka API error: {e}")
+
+    if resp.get("status") != 200 or not resp.get("data"):
+        raise HTTPException(status_code=404, detail=f"MB series {req.mb_id} not found")
+
+    flat = series_from_api(resp["data"])
+    _apply_mb_metadata(series, flat)
+    series.mb_linked_id = req.mb_id
+    db.commit()
+    db.refresh(series)
+    return series.to_dict()
+
+
+@router.delete("/{series_id}/link-mb")
+def unlink_mb(series_id: int, db: Session = Depends(get_db)):
+    """Remove the MB link from a Komga-sourced series."""
+    series = db.query(TrackedSeries).filter(TrackedSeries.id == series_id).first()
+    if not series:
+        raise HTTPException(status_code=404, detail="Series not tracked")
+    series.mb_linked_id = None
+    series.mangabaka_url = None
+    series.mb_provider_ids = None
+    db.commit()
+    return {"ok": True}
+
+
+def _apply_mb_metadata(series: TrackedSeries, flat: dict):
+    """Write MB API data onto an existing TrackedSeries (used for link + refresh)."""
+    if flat.get("cover_url") and (not series.cover_url or series.cover_url.startswith("/api/komga")):
+        series.cover_url = flat["cover_url"]
+    if flat.get("total_chapters"):
+        series.total_chapters = flat["total_chapters"]
+    if flat.get("total_volumes"):
+        series.total_volumes = flat["total_volumes"]
+    if flat.get("status"):
+        series.status = flat["status"]
+    if flat.get("genres"):
+        series.genres = flat["genres"]
+    if flat.get("authors"):
+        series.authors = flat["authors"]
+    if flat.get("author_roles"):
+        series.author_roles = flat["author_roles"]
+    if flat.get("year"):
+        series.year = flat["year"]
+    if flat.get("start_date"):
+        series.start_date = flat["start_date"]
+    if flat.get("end_date"):
+        series.end_date = flat["end_date"]
+    if flat.get("rating"):
+        series.rating = flat["rating"]
+    if flat.get("content_rating") is not None:
+        series.content_rating = flat["content_rating"]
+    if flat.get("is_licensed") is not None:
+        series.is_licensed = flat["is_licensed"]
+    if flat.get("has_anime") is not None:
+        series.has_anime = flat["has_anime"]
+    if flat.get("mangabaka_url"):
+        series.mangabaka_url = flat["mangabaka_url"]
+    if flat.get("mb_provider_ids"):
+        series.mb_provider_ids = flat["mb_provider_ids"]
+    if flat.get("external_links"):
+        series.external_links = flat["external_links"]
+    if flat.get("mb_tags"):
+        series.mb_tags = flat["mb_tags"]
+    if flat.get("publishers") and not series.publishers:
+        series.publishers = flat["publishers"]
+    if flat.get("native_title") and not series.native_title:
+        series.native_title = flat["native_title"]
+    if flat.get("romanized_title") and not series.romanized_title:
+        series.romanized_title = flat["romanized_title"]
+
+
+def _bg_link_mb(series_id: int, title: str):
+    """
+    Background: search MB by title, apply best-match metadata to a
+    Komga-sourced series. Silently no-ops if no match found.
+    """
+    from ..database import SessionLocal
+    db = SessionLocal()
+    try:
+        series = db.query(TrackedSeries).filter(TrackedSeries.id == series_id).first()
+        if not series or series.mb_linked_id:
+            return  # already linked or removed
+
+        client = get_mb_client(db)
+        result = client.search(title, page=1)
+        items = result.get("data", [])
+        if not items:
+            logger.info(f"MB auto-link: no results for '{title}'")
+            return
+
+        best = items[0]
+        mb_id = best.get("id")
+        if not mb_id:
+            return
+
+        resp = client.get_series(mb_id)
+        if resp.get("status") != 200 or not resp.get("data"):
+            return
+
+        flat = series_from_api(resp["data"])
+        _apply_mb_metadata(series, flat)
+        series.mb_linked_id = mb_id
+
+        # Also trigger MU enrichment now that we have MB data
+        mu_id_from_mb = flat.get("mu_numeric_id")
+        if mu_id_from_mb and not series.mu_series_id:
+            series.mu_series_id = mu_id_from_mb
+
+        db.commit()
+        logger.info(f"MB auto-link: '{title}' → MB #{mb_id} ({best.get('title', '?')})")
+
+        # Enrich with MU in background (separate thread would re-open session)
+        if mu_id_from_mb or not series.mu_series_id:
+            _bg_enrich_with_mu(series_id, title, mu_id_from_mb)
+
+    except Exception as e:
+        logger.warning(f"MB auto-link failed for '{title}': {e}")
+    finally:
+        db.close()

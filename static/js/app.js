@@ -61,6 +61,7 @@ function app() {
 
     // Detail modal
     detailOpen: false, ds: null, ef: {}, detailReleases: [],
+    mbRelinkOpen: false, mbRelinkQuery: '', mbRelinkResults: [], mbRelinkSearching: false, mbRelinkSearched: false,
     muReviewOpen: false, muSearchQ: '', muCandidates: [], muSearching: false, muSearched: false,
 
     // Add modal
@@ -789,6 +790,7 @@ function app() {
     // ── Detail modal ─────────────────────────────────────
     async openDetail(series) {
       this.ds = series;
+      this.mbRelinkOpen = false; this.mbRelinkQuery = series.title || ''; this.mbRelinkResults = []; this.mbRelinkSearched = false;
       this.ef = {
         current_chapter: series.current_chapter||'0',
         current_volume: series.current_volume||'',
@@ -938,6 +940,45 @@ function app() {
         this.ds = updated;
         this.toast('Refreshed from API','success');
       } catch(e) { this.toast('Refresh failed','error'); }
+    },
+
+    // ── MB relink (Komga series) ─────────────────────────
+    async searchMbRelink() {
+      if (!this.mbRelinkQuery.trim()) return;
+      this.mbRelinkSearching = true; this.mbRelinkSearched = false;
+      try {
+        const data = await this.api(`/api/series/search?q=${encodeURIComponent(this.mbRelinkQuery)}&page=1`);
+        this.mbRelinkResults = (data.data || []).slice(0, 6).map(r => ({
+          id: r.id,
+          title: r.title,
+          type: r.type,
+          year: r.year,
+          cover: this.getCoverUrl(r),
+        }));
+        this.mbRelinkSearched = true;
+      } catch(e) { this.toast('MB search failed', 'error'); }
+      finally { this.mbRelinkSearching = false; }
+    },
+
+    async confirmMbLink(seriesId, mbId) {
+      try {
+        const updated = await this.api(`/api/series/${seriesId}/link-mb`, 'POST', { mb_id: mbId });
+        const idx = this.library.findIndex(s => s.id === seriesId);
+        if (idx !== -1) this.library[idx] = updated;
+        this.ds = updated;
+        this.mbRelinkOpen = false; this.mbRelinkResults = [];
+        this.toast('Linked to MangaBaka', 'success');
+      } catch(e) { this.toast('Link failed', 'error'); }
+    },
+
+    async unlinkMb(seriesId) {
+      try {
+        await this.api(`/api/series/${seriesId}/link-mb`, 'DELETE');
+        const idx = this.library.findIndex(s => s.id === seriesId);
+        if (idx !== -1) { this.library[idx].mb_linked_id = null; this.library[idx].mangabaka_url = null; }
+        if (this.ds && this.ds.id === seriesId) { this.ds = { ...this.ds, mb_linked_id: null, mangabaka_url: null }; }
+        this.toast('MB link removed', 'success');
+      } catch(e) { this.toast('Unlink failed', 'error'); }
     },
 
     // ── Notifications ─────────────────────────────────────

@@ -331,12 +331,19 @@ def komga_import(req: KomgaImportRequest, background_tasks: BackgroundTasks):
                 metadata = kg_series.get("metadata", {})
                 title = metadata.get("title") or kg_series.get("name", "Unknown")
 
-                # Determine current chapter from read progress
+                # Determine read progress from Komga's booksReadCount
+                is_volume = item.track_mode == "volume"
+                group_name = "Komga (volume)" if is_volume else "Komga"
+
                 current_chapter = "0"
+                current_volume = None
                 if item.sync_progress:
                     books_read = kg_series.get("booksReadCount", 0)
                     if books_read > 0:
-                        current_chapter = str(books_read)
+                        if is_volume:
+                            current_volume = str(books_read)
+                        else:
+                            current_chapter = str(books_read)
 
                 # Get latest chapter number
                 latest_ch = None
@@ -344,9 +351,6 @@ def komga_import(req: KomgaImportRequest, background_tasks: BackgroundTasks):
                     latest_ch = client.get_latest_chapter(sid)
                 except Exception:
                     pass
-
-                is_volume = item.track_mode == "volume"
-                group_name = "Komga (volume)" if is_volume else "Komga"
 
                 series_obj = TrackedSeries(
                     id=next_id,
@@ -361,6 +365,7 @@ def komga_import(req: KomgaImportRequest, background_tasks: BackgroundTasks):
                     simulpub_id=sid,
                     komga_track_mode=item.track_mode,
                     current_chapter=current_chapter,
+                    current_volume=current_volume,
                     reading_status="reading",
                     total_chapters=str(kg_series.get("booksCount")) if kg_series.get("booksCount") is not None else None,
                     mu_latest_chapter=latest_ch,
@@ -371,14 +376,15 @@ def komga_import(req: KomgaImportRequest, background_tasks: BackgroundTasks):
                 db.add(series_obj)
 
                 # Log the initial add as activity
-                if current_chapter != "0":
+                logged_progress = current_volume if is_volume else current_chapter
+                if logged_progress and logged_progress != "0":
                     db.add(ReadingLog(
                         series_id=series_obj.id,
                         series_title=title,
                         action="chapter_update",
                         old_chapter="0",
-                        new_chapter=current_chapter,
-                        detail=f"Imported from Komga with {current_chapter} books read",
+                        new_chapter=logged_progress,
+                        detail=f"Imported from Komga with {logged_progress} {'volumes' if is_volume else 'chapters'} read",
                     ))
                     series_obj.last_read_at = datetime.utcnow()
 
@@ -386,7 +392,11 @@ def komga_import(req: KomgaImportRequest, background_tasks: BackgroundTasks):
                 _komga_import_progress["imported"] += 1
                 _komga_import_progress["done"] += 1
 
-                # Queue MU auto-link in background
+                # Queue MB auto-link (fetches metadata + cover + MU ID)
+                from .routers.series import _bg_link_mb
+                background_tasks.add_task(_bg_link_mb, series_obj.id, title)
+                # MU lookup is handled inside _bg_link_mb once MB data is known;
+                # also queue a standalone fallback so MU still links even if MB fails
                 _schedule_mu_lookup(background_tasks, series_obj.id, title)
 
             db.commit()
