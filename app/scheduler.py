@@ -231,8 +231,9 @@ def poll_updates():
     _poll_state["running"] = True
     _poll_state["last_started"] = datetime.utcnow()
     _poll_state["total_series"] = 0
-    db: Session = SessionLocal()
+    db: Session = None
     try:
+        db = SessionLocal()
         clear_settings_cache()  # Fresh settings for this poll cycle
         logger.info("▶ Starting update poll...")
 
@@ -282,7 +283,8 @@ def poll_updates():
     finally:
         _poll_state["running"] = False
         _poll_state["last_finished"] = datetime.utcnow()
-        db.close()
+        if db is not None:
+            db.close()
 
 
 # ── Layer 1: MangaUpdates ─────────────────────────────────────────────────────

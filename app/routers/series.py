@@ -628,7 +628,11 @@ def import_library(req: ImportRequest, db: Session = Depends(get_db)):
         except Exception:
             pass
     if activity_restored:
-        db.commit()
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
+            activity_restored = 0
 
     return {"success": True, "imported": imported, "skipped": skipped, "activity_restored": activity_restored}
 
@@ -1361,7 +1365,12 @@ def _bg_link_mb(series_id: int, title: str):
         if mu_id_from_mb and not series.mu_series_id:
             series.mu_series_id = mu_id_from_mb
 
-        db.commit()
+        try:
+            db.commit()
+        except Exception as e:
+            db.rollback()
+            logger.warning(f"MB auto-link commit failed for '{title}': {e}")
+            return
         logger.info(f"MB auto-link: '{title}' → MB #{mb_id} ({best.get('title', '?')})")
 
         # Enrich with MU in background (separate thread would re-open session)

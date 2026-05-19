@@ -422,7 +422,8 @@ def komga_import(req: KomgaImportRequest, background_tasks: BackgroundTasks):
 @app.get("/api/komga/import/progress")
 def komga_import_progress():
     """Poll this endpoint during a Komga import to show live progress."""
-    return dict(_komga_import_progress)
+    with _komga_import_lock:
+        return dict(_komga_import_progress)
 
 
 def _schedule_mu_lookup(background_tasks: BackgroundTasks, series_id: int, title: str):

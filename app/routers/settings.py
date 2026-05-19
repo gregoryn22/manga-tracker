@@ -361,14 +361,14 @@ def mb_pull(db: Session = Depends(get_db)):
                 changed = True
         if mb_start and not series.date_started:
             try:
-                series.date_started = _dt.fromisoformat(mb_start.rstrip("Z"))
+                series.date_started = _dt.fromisoformat(mb_start.replace("Z", "+00:00")).replace(tzinfo=None)
                 series.date_started_source = "manual"
                 changed = True
             except ValueError:
                 pass
         if mb_finish and not series.date_completed:
             try:
-                series.date_completed = _dt.fromisoformat(mb_finish.rstrip("Z"))
+                series.date_completed = _dt.fromisoformat(mb_finish.replace("Z", "+00:00")).replace(tzinfo=None)
                 series.date_completed_source = "manual"
                 changed = True
             except ValueError:
