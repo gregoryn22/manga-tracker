@@ -32,7 +32,7 @@ Series with simulpub_source='custom' are excluded from ALL automated polling.
 """
 import logging
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from sqlalchemy import func
@@ -514,6 +514,19 @@ def _process_release(db: Session, series: TrackedSeries, rec: dict, send_push: b
     ).first():
         return
 
+    # Backdate created_at for historical releases so they don't pollute the 24h live feed.
+    # If release_date is older than 2 days, use it as the log timestamp — the feed
+    # filters by created_at >= now-24h, so backdated records are naturally excluded.
+    # Fresh releases (including all simulpub sources) keep created_at = utcnow().
+    rel_created_at = datetime.utcnow()
+    if release_date:
+        try:
+            rd = datetime.fromisoformat(release_date)
+            if rd < datetime.utcnow() - timedelta(days=2):
+                rel_created_at = rd
+        except ValueError:
+            pass
+
     # Log the release
     rel = Release(
         series_id=series.id,
@@ -526,6 +539,7 @@ def _process_release(db: Session, series: TrackedSeries, rec: dict, send_push: b
         mu_release_id=mu_release_id,
         cover_url=series.best_cover(),
         mu_url=series.mu_url,
+        created_at=rel_created_at,
     )
     db.add(rel)
     db.flush()  # make visible to subsequent dedup queries in same transaction (autoflush=False)
@@ -1276,7 +1290,6 @@ def _auto_archive_idle(db: Session):
     If idle_auto_archive=true, move 'reading' series with no release in
     idle_threshold_days days to 'dropped' status.  Runs at end of each poll cycle.
     """
-    from datetime import timedelta
     from .database import ReadingLog as _RL
 
     if get_setting(db, "idle_auto_archive", "false") != "true":
