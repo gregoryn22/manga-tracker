@@ -281,6 +281,7 @@ def add_series(req: AddSeriesRequest, background_tasks: BackgroundTasks, db: Ses
         mb_provider_ids=flat.get("mb_provider_ids"),
         external_links=flat.get("external_links"),
         mb_tags=flat.get("mb_tags"),
+        publishers=flat.get("publishers"),
         # Seed MU series ID immediately if MB already has it
         mu_series_id=mu_id_from_mb,
         current_chapter=req.current_chapter,
@@ -1092,6 +1093,9 @@ def refresh_series(series_id: int, background_tasks: BackgroundTasks, db: Sessio
             # Refresh tags (MB taxonomy evolves)
             if flat.get("mb_tags") is not None:
                 series.mb_tags = flat["mb_tags"]
+            # Seed publishers from MB if not already set by MU enrichment
+            if flat.get("publishers") and not series.publishers:
+                series.publishers = flat["publishers"]
     except Exception as e:
         logger.warning(f"MB refresh failed for series {series_id}: {e}")
 

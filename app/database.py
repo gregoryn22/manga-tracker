@@ -45,7 +45,7 @@ class TrackedSeries(Base):
     mu_cover_url = Column(String, nullable=True)     # MangaUpdates cover (fallback)
     description = Column(Text, nullable=True)
     status = Column(String, nullable=True)           # releasing, finished, hiatus, etc.
-    series_type = Column(String, nullable=True)      # manga, light_novel, manhwa, manhua
+    series_type = Column(String, nullable=True)      # manga, manhwa, manhua, novel, other
     content_rating = Column(String, nullable=True)   # safe | suggestive | erotica | pornographic
     is_licensed = Column(Boolean, nullable=True)     # has official English license
     has_anime = Column(Boolean, nullable=True)       # has anime adaptation

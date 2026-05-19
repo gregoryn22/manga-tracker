@@ -14,13 +14,15 @@ from ..database import TrackedSeries, get_db
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/export", tags=["export"])
 
-# Tracker reading_status values match MangaBaka state values directly.
-# MB states observed in export: reading, completed, dropped, on_hold, plan_to_read
+# MB accepted state values: reading, completed, dropped, on_hold, plan_to_read
+# rereading has no MB equivalent — maps to reading
 _STATUS_MAP = {
-    "reading":   "reading",
-    "completed": "completed",
-    "dropped":   "dropped",
-    "on_hold":   "on_hold",
+    "reading":      "reading",
+    "completed":    "completed",
+    "dropped":      "dropped",
+    "on_hold":      "on_hold",
+    "plan_to_read": "plan_to_read",
+    "rereading":    "reading",
 }
 
 
@@ -41,6 +43,8 @@ def _series_to_mb_entry(s: TrackedSeries) -> dict:
 
     added_at = s.added_at.isoformat() + "Z" if s.added_at else None
     last_read = s.last_read_at.isoformat() + "Z" if s.last_read_at else None
+    start_date = (s.date_started.isoformat() + "Z" if s.date_started else added_at)
+    finish_date = (s.date_completed.isoformat() + "Z" if s.date_completed else None)
 
     return {
         "entry": {
@@ -53,8 +57,8 @@ def _series_to_mb_entry(s: TrackedSeries) -> dict:
             "number_of_rereads": 0,
             "progress_chapter": _parse_chapter_progress(s.current_chapter),
             "progress_volume": None,
-            "start_date": added_at,
-            "finish_date": None,
+            "start_date": start_date,
+            "finish_date": finish_date,
             "imported_at": None,
             "created_at": added_at,
             "updated_at": last_read or added_at,

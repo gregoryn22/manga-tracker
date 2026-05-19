@@ -311,6 +311,7 @@ def series_from_api(data: dict) -> dict:
     links       = data.get("links") or []
     links_v2    = data.get("links_v2") or []
     source      = data.get("source") or {}
+    raw_publishers = data.get("publishers") or []
 
     # Normalise author name casing
     def _norm(name: str) -> str:
@@ -386,4 +387,5 @@ def series_from_api(data: dict) -> dict:
         # Rich metadata
         "external_links":   json.dumps(ext_links),
         "mb_tags":          json.dumps(mb_tags) if mb_tags else None,
+        "publishers":       json.dumps([p["name"] for p in raw_publishers if p.get("name")]) if raw_publishers else None,
     }
