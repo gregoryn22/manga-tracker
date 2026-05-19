@@ -397,6 +397,8 @@ def _migrate_db():
         ("tracked_series", "end_date",           "VARCHAR"),
         ("tracked_series", "total_volumes",      "VARCHAR"),
         ("tracked_series", "mb_tags",            "TEXT"),
+        ("tracked_series", "publishers",         "TEXT"),
+        ("tracked_series", "current_volume",     "VARCHAR"),
     ]
 
     # Indexes to ensure on hot query columns (idempotent — CREATE IF NOT EXISTS)

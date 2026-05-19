@@ -21,10 +21,26 @@ from .database import ReadingLog, TrackedSeries, init_db, get_db, get_setting, S
 from .routers import export, notifications, releases, series, settings
 from .scheduler import start_scheduler
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s  %(levelname)-8s  %(name)s — %(message)s",
-)
+_LOG_FORMAT = "%(asctime)s  %(levelname)-8s  %(name)s — %(message)s"
+_LOG_DIR = Path(os.getenv("DATA_DIR", "/data"))
+
+logging.basicConfig(level=logging.INFO, format=_LOG_FORMAT)
+
+# Persistent rotating log — survives container restarts
+try:
+    _LOG_DIR.mkdir(parents=True, exist_ok=True)
+    from logging.handlers import RotatingFileHandler
+    _fh = RotatingFileHandler(
+        _LOG_DIR / "app.log",
+        maxBytes=5 * 1024 * 1024,   # 5 MB per file
+        backupCount=3,               # keep app.log + app.log.1 + .2 + .3
+        encoding="utf-8",
+    )
+    _fh.setFormatter(logging.Formatter(_LOG_FORMAT))
+    logging.getLogger().addHandler(_fh)
+except Exception as _e:
+    logging.warning(f"Could not set up file logging to {_LOG_DIR}/app.log: {_e}")
+
 logger = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).parent.parent / "static"
