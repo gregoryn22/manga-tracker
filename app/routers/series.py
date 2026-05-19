@@ -635,7 +635,7 @@ def import_library(req: ImportRequest, background_tasks: BackgroundTasks, db: Se
     db.commit()
 
     # Restore activity log entries (v2 backups only; skip if series wasn't imported)
-    imported_ids = {item.get("id") for item in req.series if item.get("id")}
+    imported_ids = set(imported_series_ids)
     activity_restored = 0
     for entry in req.activity_log:
         sid = entry.get("series_id")
