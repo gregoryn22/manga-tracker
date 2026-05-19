@@ -51,6 +51,18 @@ _SIMULPUB_ID_VALIDATORS: dict[str, tuple[str, callable]] = {
 }
 
 
+def _safe_progress(val, default):
+    """Return val if it parses as a non-negative float, else default."""
+    if not val:
+        return default
+    try:
+        if float(val) >= 0:
+            return str(val)
+    except (ValueError, TypeError):
+        pass
+    return default
+
+
 def _validate_simulpub_id(source: str | None, sid: str | None):
     """Raise HTTPException if simulpub_id format is wrong for the source."""
     if not source or not sid or source in ("custom", ""):
@@ -591,8 +603,8 @@ def import_library(req: ImportRequest, db: Session = Depends(get_db)):
             associated_titles=json.dumps(item["associated_titles"]) if item.get("associated_titles") else None,
             related_series=json.dumps(item["related_series"]) if item.get("related_series") else None,
             author_roles=json.dumps(item["author_roles"]) if item.get("author_roles") else None,
-            current_chapter=item.get("current_chapter", "0"),
-            current_volume=item.get("current_volume") or None,
+            current_chapter=_safe_progress(item.get("current_chapter"), "0"),
+            current_volume=_safe_progress(item.get("current_volume"), None),
             reading_status=item.get("reading_status", "reading"),
             notes=item.get("notes"),
             tags=json.dumps(item.get("tags", [])) if item.get("tags") else None,
@@ -916,6 +928,18 @@ def update_series(series_id: int, req: UpdateSeriesRequest,
         raise HTTPException(status_code=422, detail=f"Invalid reading_status: {req.reading_status!r}. Must be one of: {', '.join(sorted(_VALID_READING_STATUSES))}")
     if req.komga_track_mode is not None and req.komga_track_mode not in _VALID_TRACK_MODES:
         raise HTTPException(status_code=422, detail=f"Invalid komga_track_mode: {req.komga_track_mode!r}. Must be 'chapter' or 'volume'")
+    if req.current_chapter is not None and req.current_chapter != "":
+        try:
+            if float(req.current_chapter) < 0:
+                raise HTTPException(status_code=422, detail="current_chapter must be non-negative")
+        except ValueError:
+            raise HTTPException(status_code=422, detail=f"current_chapter must be a valid number, got: {req.current_chapter!r}")
+    if req.current_volume is not None and req.current_volume != "":
+        try:
+            if float(req.current_volume) < 0:
+                raise HTTPException(status_code=422, detail="current_volume must be non-negative")
+        except ValueError:
+            raise HTTPException(status_code=422, detail=f"current_volume must be a valid number, got: {req.current_volume!r}")
     if req.current_chapter is not None:
         old_ch = series.current_chapter
         if req.current_chapter != old_ch:
