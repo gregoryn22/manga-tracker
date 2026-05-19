@@ -57,6 +57,7 @@ EXPOSED_KEYS = [
     "card_radius",
     "sidebar_width",
     "dim_finished_covers",
+    "show_recent_drops",
     "metadata_refresh_enabled",
     "metadata_refresh_interval_days",
 ]
@@ -119,6 +120,7 @@ class UpdateSettingsRequest(BaseModel):
     card_radius: str | None = None
     sidebar_width: str | None = None
     dim_finished_covers: str | None = None
+    show_recent_drops: str | None = None
     metadata_refresh_enabled: str | None = None
     metadata_refresh_interval_days: str | None = None
 

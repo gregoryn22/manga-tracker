@@ -57,6 +57,7 @@ function app() {
       card_radius:      'md',
       sidebar_width:    '220',
       dim_finished_covers: 'true',
+      show_recent_drops: 'true',
     },
 
     // Detail modal
@@ -174,8 +175,10 @@ function app() {
         else if (defaultPage === 'komga') { this.loadKomgaBrowse().catch(()=>{}); }
         else if (defaultPage === 'settings') { this.loadSettings().catch(()=>{}); }
       } else {
-        // Silently prefetch feed in background
-        this.loadReleaseFeed().catch(()=>{});
+        // Silently prefetch feed in background (skip if section is hidden)
+        if (this.sf.show_recent_drops !== 'false') {
+          this.loadReleaseFeed().catch(()=>{});
+        }
       }
       setInterval(() => this.pollUnreadCount(), 30000);
     },

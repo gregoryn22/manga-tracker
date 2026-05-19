@@ -558,6 +558,7 @@ def _seed_settings():
             "card_radius": "md",
             "sidebar_width": "220",
             "dim_finished_covers": "true",
+            "show_recent_drops": "true",
             # Scheduled metadata refresh from MangaBaka / MangaUpdates
             "metadata_refresh_enabled": "false",
             "metadata_refresh_interval_days": "7",

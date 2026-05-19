@@ -133,7 +133,7 @@
         </div>
 
         <!-- Recent Drops (last 24h, from live feed + local DB) -->
-        <div class="drops-section" x-show="feedReleases.length > 0">
+        <div class="drops-section" x-show="feedReleases.length > 0 && sf.show_recent_drops !== 'false'">
           <div class="section-header">
             <span class="text-lg">⚡</span>
             <span class="section-title">Recent Drops</span>
@@ -1505,6 +1505,12 @@
               <input type="checkbox" :checked="sf.dim_finished_covers !== 'false'"
                      @change="sf.dim_finished_covers = $event.target.checked ? 'true' : 'false'" />
               <span class="text-sm">Dim covers for completed / dropped series</span>
+            </label>
+
+            <label class="checkbox-label">
+              <input type="checkbox" :checked="sf.show_recent_drops !== 'false'"
+                     @change="sf.show_recent_drops = $event.target.checked ? 'true' : 'false'" />
+              <span class="text-sm">Recent Drops section on library page</span>
             </label>
 
           </div>
