@@ -16,6 +16,8 @@ router = APIRouter(prefix="/api/export", tags=["export"])
 
 # MB accepted state values: reading, completed, dropped, on_hold, plan_to_read
 # rereading has no MB equivalent — maps to reading
+_KOMGA_ID_FLOOR = 2_000_000_000
+
 _STATUS_MAP = {
     "reading":      "reading",
     "completed":    "completed",
@@ -35,6 +37,20 @@ def _parse_chapter_progress(current_chapter: str | None) -> int | None:
         return int(val) if val > 0 else None
     except (ValueError, TypeError):
         return None
+
+
+def _mb_export_id(s: TrackedSeries) -> str | None:
+    """
+    Return the MB series ID to use in the export source block.
+    - Real MB series: use s.id directly.
+    - Komga-synthetic series with a confirmed MB link: use mb_linked_id.
+    - Komga-synthetic series with no MB link: return None (exclude from export).
+    """
+    if s.id < _KOMGA_ID_FLOOR:
+        return str(s.id)
+    if s.mb_linked_id:
+        return str(s.mb_linked_id)
+    return None
 
 
 def _series_to_mb_entry(s: TrackedSeries) -> dict:
@@ -68,7 +84,7 @@ def _series_to_mb_entry(s: TrackedSeries) -> dict:
             "anime_news_network": None,
             "kitsu": None,
             "manga_updates": mu_slug,
-            "mangabaka": str(s.id),
+            "mangabaka": _mb_export_id(s),
             "my_anime_list": None,
             "shikimori": None,
         },
@@ -86,14 +102,21 @@ def export_mangabaka(db: Session = Depends(get_db)):
     """
     Export all tracked series as a MangaBaka-compatible library JSON.
     Download and import at https://mangabaka.org/my/library/import
+    Komga-sourced series without an MB link are excluded (MB can't resolve them).
     """
     series = db.query(TrackedSeries).order_by(TrackedSeries.title).all()
+
+    # Exclude Komga-synthetic series with no MB link — MB has no record of them
+    exportable = [s for s in series if _mb_export_id(s) is not None]
+    excluded = len(series) - len(exportable)
+    if excluded:
+        logger.info(f"MB export: excluded {excluded} Komga series without MB link")
 
     payload = {
         "schema_version": 2,
         "exported_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z"),
         "lists": [],
-        "entries": [_series_to_mb_entry(s) for s in series],
+        "entries": [_series_to_mb_entry(s) for s in exportable],
     }
 
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
