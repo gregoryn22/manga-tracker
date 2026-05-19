@@ -207,6 +207,10 @@ function app() {
 
     // ── Metadata helpers ────────────────────────────────
 
+    _esc(s) {
+      return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    },
+
     /**
      * Format authors line: use role-aware display when author_roles is available.
      * Returns an HTML string like "Story: Oda Eiichiro · Art: Oda Eiichiro"
@@ -226,12 +230,12 @@ function app() {
         }
         const parts = Object.entries(groups)
           .filter(([, names]) => names.length > 0)
-          .map(([role, names]) => `<span>${role}:</span> <strong>${names.join(', ')}</strong>`);
+          .map(([role, names]) => `<span>${this._esc(role)}:</span> <strong>${names.map(n => this._esc(n)).join(', ')}</strong>`);
         if (parts.length > 0) return parts.join(' &nbsp;·&nbsp; ');
       }
       const authors = s.authors || [];
       if (authors.length > 0) {
-        return `By <strong>${authors.join(', ')}</strong>`;
+        return `By <strong>${authors.map(a => this._esc(a)).join(', ')}</strong>`;
       }
       return '';
     },

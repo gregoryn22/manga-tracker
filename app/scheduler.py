@@ -349,7 +349,7 @@ def _link_mu_id(db: Session, series: TrackedSeries):
         logger.debug(f"No MU match for '{series.title}'")
         return
 
-    best = find_best_match(series.title, results)
+    best, _ = find_best_match(series.title, results)
     if not best:
         return
 
