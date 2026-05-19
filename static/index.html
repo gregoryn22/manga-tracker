@@ -2303,6 +2303,9 @@
                  :href="ds.mangabaka_url" target="_blank" class="ext-link-chip type-tracker">MangaBaka ↗</a>
               <a x-show="ds.mu_url && !externalLinkExists(ds, 'mangaupdates')"
                  :href="ds.mu_url" target="_blank" class="ext-link-chip type-tracker">MangaUpdates ↗</a>
+              <button x-show="ds.mu_series_id || true" class="ext-link-chip type-tracker"
+                      style="cursor:pointer;border:none;background:none"
+                      @click="muReviewOpen = true; muSearchQ = ds.title">✏ Edit MU Link</button>
             </div>
           </div>
 
@@ -2330,7 +2333,7 @@
           <div class="mu-review-section">
             <hr class="divider" />
             <div class="mu-review-header">
-              <span class="mu-review-title">⚠ MangaUpdates Link — Low Confidence</span>
+              <span class="mu-review-title" x-text="ds.mu_link_status === 'uncertain' ? '⚠ MangaUpdates Link — Low Confidence' : '🔗 MangaUpdates Link'"></span>
               <button class="btn btn-ghost btn-xs" @click="muReviewOpen = !muReviewOpen"
                       x-text="muReviewOpen ? 'Close' : 'Review'"></button>
             </div>
