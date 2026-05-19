@@ -97,7 +97,7 @@ function app() {
     get stats() {
       const readingOnly = this.sf.updates_reading_only === 'true';
       return {
-        updates: this.library.filter(s => s.has_update && (!readingOnly || s.reading_status === 'reading')).length,
+        updates: this.library.filter(s => s.has_update && !s.updates_hidden && (!readingOnly || s.reading_status === 'reading')).length,
         reading: this.library.filter(s=>s.reading_status==='reading').length,
         mu_linked: this.library.filter(s=>s.mu_series_id).length,
       };
@@ -276,7 +276,7 @@ function app() {
       if (!this.filters.includes('all')) {
         list = list.filter(s => {
           for (const f of this.filters) {
-            if (f === 'updates' && s.has_update && (this.sf.updates_reading_only !== 'true' || s.reading_status === 'reading')) return true;
+            if (f === 'updates' && s.has_update && !s.updates_hidden && (this.sf.updates_reading_only !== 'true' || s.reading_status === 'reading')) return true;
             if (f === 'idle' && this.isIdle(s)) return true;
             if (s.reading_status === f) return true;
           }
@@ -797,6 +797,7 @@ function app() {
         tags: [...(series.tags||[])],
         newTag: '',
         notification_muted: !!series.notification_muted,
+        updates_hidden: !!series.updates_hidden,
         simulpub_source: series.simulpub_source||'',
         simulpub_id: series.simulpub_id||'',
         mu_latest_chapter_manual: series.mu_latest_chapter||'',
@@ -862,6 +863,7 @@ function app() {
           notes: this.ef.notes,
           tags: this.ef.tags,
           notification_muted: this.ef.notification_muted,
+          updates_hidden: this.ef.updates_hidden,
           simulpub_source: this.ef.simulpub_source,
           simulpub_id: this.ef.simulpub_id,
           komga_track_mode: this.ef.simulpub_source === 'komga' ? this.ef.komga_track_mode : undefined,

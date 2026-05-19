@@ -1950,6 +1950,16 @@
 
           <div class="form-group">
             <label class="checkbox-label text-sm">
+              <input type="checkbox" x-model="ef.updates_hidden" class="accent-check" />
+              <span>🙈 Hide from Updates filter &amp; badge count</span>
+            </label>
+            <div class="text-xs text-muted" style="margin-left:26px">
+              Still tracked and polled. Progress and notifications work normally. Just excluded from the Updates view.
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="checkbox-label text-sm">
               <input type="checkbox" x-model="ef.notification_muted" class="accent-check" />
               <span>🔇 Mute push notifications for this series</span>
             </label>

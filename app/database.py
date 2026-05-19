@@ -120,6 +120,10 @@ class TrackedSeries(Base):
     # this series.  In-app notifications are still created.
     notification_muted = Column(Boolean, default=False)
 
+    # When True, series is excluded from the "Updates" filter and badge count.
+    # Still tracked and polled normally — just hidden from the updates view.
+    updates_hidden = Column(Boolean, default=False)
+
     # ── Polling health ──────────────────────────────────────────────────
     poll_failures = Column(Integer, default=0)            # consecutive failures
     last_poll_error = Column(Text, nullable=True)         # last error message
@@ -229,6 +233,7 @@ class TrackedSeries(Base):
             "date_completed_source": self.date_completed_source or "auto",
             "tags": self._safe_json(self.tags, default=[]),
             "notification_muted": bool(self.notification_muted),
+            "updates_hidden": bool(self.updates_hidden),
             "mangabaka_url": self.mangabaka_url,
             "mu_link_status": self.mu_link_status,
             "poll_failures": self.poll_failures or 0,
@@ -390,6 +395,7 @@ def _migrate_db():
         ("tracked_series", "last_poll_success",  "DATETIME"),
         ("tracked_series", "komga_track_mode",   "VARCHAR DEFAULT 'chapter'"),
         ("tracked_series", "notification_muted", "BOOLEAN DEFAULT 0"),
+        ("tracked_series", "updates_hidden",     "BOOLEAN DEFAULT 0"),
         ("tracked_series", "last_read_at",       "DATETIME"),
         ("tracked_series", "tags",               "TEXT"),
         ("tracked_series", "external_links",     "TEXT"),

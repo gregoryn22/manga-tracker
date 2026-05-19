@@ -857,6 +857,7 @@ class UpdateSeriesRequest(BaseModel):
     reading_status: str | None = None
     notes: str | None = None
     notification_muted: bool | None = None
+    updates_hidden: bool | None = None
     # Simulpub source configuration
     simulpub_source: str | None = None   # 'mangaplus' | 'custom' | '' (clear)
     simulpub_id: str | None = None       # Platform-specific ID (e.g. MangaPlus title_id)
@@ -979,6 +980,8 @@ def update_series(series_id: int, req: UpdateSeriesRequest,
         series.tags = json.dumps(req.tags) if req.tags else None
     if req.notification_muted is not None:
         series.notification_muted = req.notification_muted
+    if req.updates_hidden is not None:
+        series.updates_hidden = req.updates_hidden
     if req.clear_user_rating:
         series.user_rating = None
     elif req.user_rating is not None:
