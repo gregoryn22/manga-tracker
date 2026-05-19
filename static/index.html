@@ -1914,9 +1914,9 @@
             <!-- Numeric mode -->
             <template x-if="sf.rating_input_mode === 'numeric'">
               <div class="flex items-center gap-2">
-                <input type="number" class="input input-sm" style="width:80px" min="0" max="10" step="0.5"
+                <input type="number" class="input input-sm" style="width:80px" min="0" max="10" step="1"
                   :value="ef.user_rating ?? ''"
-                  @change="const v = parseFloat($event.target.value); ef.user_rating = isNaN(v) ? null : Math.round(Math.min(10, Math.max(0, v)) * 2) / 2" />
+                  @change="const v = parseFloat($event.target.value); ef.user_rating = isNaN(v) ? null : Math.round(Math.min(10, Math.max(0, v)))" />
                 <span class="text-muted text-sm">/ 10</span>
                 <button type="button" class="btn btn-ghost btn-xs" x-show="ef.user_rating !== null" @click="ef.user_rating = null; $el.previousElementSibling.previousElementSibling.value = ''">Clear</button>
               </div>

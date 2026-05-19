@@ -49,15 +49,21 @@ def push_entry(
     date_started: datetime | None,
     date_completed: datetime | None,
     pat: str,
+    user_rating: float | None = None,
 ) -> bool:
     """
     PATCH /v1/my/library/{series_id} with current progress.
 
     Returns True on success. Returns False silently on 404 (series not in
     MB library yet — user needs to add it there first) or any other error.
+
+    MB rating field accepts integers 0–10 only; floats are rejected.
     """
     if series_id >= _KOMGA_ID_FLOOR:
         return False  # Komga synthetic ID — not a real MB series
+
+    # MB rating: integer 0–10, or null to clear. Round from app's 0.5-step scale.
+    mb_rating = round(user_rating) if user_rating is not None else None
 
     payload: dict = {
         "state": _STATE_MAP.get(reading_status, "reading"),
@@ -65,6 +71,7 @@ def push_entry(
         "progress_volume": _parse_chapter(current_volume),
         "start_date": _iso(date_started),
         "finish_date": _iso(date_completed),
+        "rating": mb_rating,
     }
 
     try:

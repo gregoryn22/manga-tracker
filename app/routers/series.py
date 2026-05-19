@@ -462,6 +462,7 @@ def bulk_status(req: BulkStatusRequest, background_tasks: BackgroundTasks, db: S
                 _bg_sync_to_mb,
                 s.id, s.reading_status, s.current_chapter,
                 s.current_volume, s.date_started, s.date_completed,
+                s.user_rating,
             )
 
     return {"success": True, "updated": updated}
@@ -883,7 +884,8 @@ class UpdateSeriesRequest(BaseModel):
 
 
 def _bg_sync_to_mb(series_id: int, reading_status: str, current_chapter: str | None,
-                   current_volume: str | None, date_started, date_completed):
+                   current_volume: str | None, date_started, date_completed,
+                   user_rating: float | None = None):
     """Background task: push updated progress to MB if sync is enabled."""
     from ..database import SessionLocal, get_setting
     from ..mangabaka_sync import push_entry
@@ -895,7 +897,7 @@ def _bg_sync_to_mb(series_id: int, reading_status: str, current_chapter: str | N
         if not pat:
             return
         push_entry(series_id, reading_status, current_chapter, current_volume,
-                   date_started, date_completed, pat)
+                   date_started, date_completed, pat, user_rating=user_rating)
     finally:
         db.close()
 
@@ -1055,12 +1057,15 @@ def update_series(series_id: int, req: UpdateSeriesRequest,
     db.commit()
     db.refresh(series)
 
-    # Push to MB if sync is enabled (fires when chapter, volume, or status changed)
-    if req.current_chapter is not None or req.current_volume is not None or req.reading_status is not None:
+    # Push to MB if sync is enabled (fires when chapter, volume, status, or rating changed)
+    if (req.current_chapter is not None or req.current_volume is not None
+            or req.reading_status is not None or req.user_rating is not None
+            or req.clear_user_rating):
         background_tasks.add_task(
             _bg_sync_to_mb,
             series.id, series.reading_status, series.current_chapter,
             series.current_volume, series.date_started, series.date_completed,
+            series.user_rating,
         )
 
     return series.to_dict()
