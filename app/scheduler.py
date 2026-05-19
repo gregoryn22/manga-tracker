@@ -249,7 +249,9 @@ def poll_updates():
             return
 
         # 'custom' source = fully manual; exclude from all automated layers.
-        auto_series = [s for s in all_active if s.simulpub_source != "custom"]
+        # 'komga' source = Komga is authoritative; exclude from MU polling so
+        # MU chapter numbers don't overwrite Komga volume/chapter counts.
+        auto_series = [s for s in all_active if s.simulpub_source not in ("custom", "komga")]
         simulpub_series = [
             s for s in all_active
             if s.simulpub_source and s.simulpub_source != "custom" and s.simulpub_id
