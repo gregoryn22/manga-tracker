@@ -463,8 +463,8 @@
               <div class="flex-shrink-0 text-right" style="min-width:90px">
                 <div class="list-chapter" x-show="s.latest_chapter" x-text="unitLabel(s) + ' ' + s.latest_chapter"></div>
                 <div class="text-xs text-muted"
-                     x-show="s.latest_chapter && (isKomgaVolume(s) ? (s.current_volume || s.current_chapter) : s.current_chapter)"
-                     x-text="readProgress(s) + ' / ' + s.latest_chapter + ' read'"></div>
+                     x-show="(isKomgaVolume(s) ? (s.current_volume || s.current_chapter) : s.current_chapter)"
+                     x-text="readProgress(s) + (isKomgaVolume(s) ? (volumeTotal(s) ? ' / ' + volumeTotal(s) : '') : (s.latest_chapter ? ' / ' + s.latest_chapter : '')) + ' read'"></div>
               </div>
 
               <!-- Progress -->
@@ -1850,29 +1850,29 @@
                 Volume Progress
                 <!-- Komga-volume: show latest from Komga; others: show total_volumes if known -->
                 <span class="text-muted fw-400"
-                      x-show="isKomgaVolume(ds) ? ds.latest_chapter : ds.total_volumes"
-                      x-text="isKomgaVolume(ds) ? `(latest: ${ds.latest_chapter})` : `(of ${ds.total_volumes})`"></span>
+                      x-show="volumeTotal(ds) || ds.total_volumes"
+                      x-text="isKomgaVolume(ds) ? (volumeTotal(ds) ? `(latest: ${volumeTotal(ds)})` : '') : `(of ${ds.total_volumes})`"></span>
               </div>
               <div class="flex gap-2 items-center">
                 <input class="input input-sm" type="number" min="0" step="1" x-model="ef.current_volume"
                        placeholder="—" style="width:90px" />
                 <!-- Catch up to Komga's latest, or mark complete if total_volumes known -->
                 <button class="btn btn-green btn-sm"
-                        x-show="isKomgaVolume(ds) ? ds.latest_chapter : ds.total_volumes"
+                        x-show="isKomgaVolume(ds) ? !!volumeTotal(ds) : !!ds.total_volumes"
                         x-text="isKomgaVolume(ds) ? 'Catch Up' : 'Mark Complete'"
-                        @click="ef.current_volume = isKomgaVolume(ds) ? ds.latest_chapter : String(ds.total_volumes)"></button>
+                        @click="ef.current_volume = isKomgaVolume(ds) ? volumeTotal(ds) : String(ds.total_volumes)"></button>
                 <button class="btn btn-ghost btn-sm" x-show="ef.current_volume" @click="ef.current_volume = ''">Clear</button>
               </div>
               <!-- Progress bar: Komga-volume uses latest_chapter as denominator; others use total_volumes -->
-              <template x-if="isKomgaVolume(ds) ? !!ds.latest_chapter : !!ds.total_volumes">
+              <template x-if="isKomgaVolume(ds) ? !!volumeTotal(ds) : !!ds.total_volumes">
                 <div>
                   <div class="progress-wrap mt-2" x-show="ef.current_volume">
                     <div class="progress-bar"
-                         :style="`width: ${Math.min(100, (parseFloat(ef.current_volume)||0) / parseFloat(isKomgaVolume(ds) ? ds.latest_chapter : ds.total_volumes) * 100).toFixed(1)}%`"></div>
+                         :style="`width: ${Math.min(100, (parseFloat(ef.current_volume)||0) / parseFloat(isKomgaVolume(ds) ? volumeTotal(ds) : ds.total_volumes) * 100).toFixed(1)}%`"></div>
                   </div>
                   <div class="text-xs text-muted mt-1" x-show="ef.current_volume">
-                    Vol. <span x-text="ef.current_volume"></span> / <span x-text="isKomgaVolume(ds) ? ds.latest_chapter : ds.total_volumes"></span>
-                    (<span x-text="Math.min(100,(parseFloat(ef.current_volume)||0)/parseFloat(isKomgaVolume(ds) ? ds.latest_chapter : ds.total_volumes)*100).toFixed(0)"></span>%)
+                    Vol. <span x-text="ef.current_volume"></span> / <span x-text="isKomgaVolume(ds) ? volumeTotal(ds) : ds.total_volumes"></span>
+                    (<span x-text="Math.min(100,(parseFloat(ef.current_volume)||0)/parseFloat(isKomgaVolume(ds) ? volumeTotal(ds) : ds.total_volumes)*100).toFixed(0)"></span>%)
                   </div>
                 </div>
               </template>

@@ -407,8 +407,21 @@ function app() {
         : (s.current_chapter || '0');
     },
 
+    // Return the correct total/denominator for volume display.
+    // Native Komga volume series: latest_chapter holds the Komga-polled volume count.
+    // Soft-linked volume series: latest_chapter is from a chapter source (wrong unit) —
+    //   use MB total_volumes instead, or null if unknown.
+    volumeTotal(s) {
+      if (!s || !this.isKomgaVolume(s)) return null;
+      if (s.simulpub_source === 'komga') return s.latest_chapter || null;
+      return s.total_volumes || null;
+    },
+
     chapterProgress(s) {
-      const latest = parseFloat(s.mu_latest_chapter || s.latest_chapter || s.total_chapters);
+      // Volume series: use volumeTotal (Komga-polled or MB total_volumes) not latest_chapter
+      const latest = this.isKomgaVolume(s)
+        ? parseFloat(this.volumeTotal(s))
+        : parseFloat(s.mu_latest_chapter || s.latest_chapter || s.total_chapters);
       // For Komga-volume series use current_volume (fallback to current_chapter during transition)
       const current = this.isKomgaVolume(s)
         ? parseFloat(s.current_volume || s.current_chapter)
