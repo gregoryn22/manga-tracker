@@ -350,14 +350,14 @@
                 <div class="card-chapter" :class="{'new': s.has_update}" x-show="s.latest_chapter">
                   <span x-text="unitLabel(s)"></span> <span x-text="s.latest_chapter"></span>
                   <template x-if="s.has_update">
-                    <span class="text-2xs text-muted"> ← <span x-text="s.current_chapter || '0'"></span> read</span>
+                    <span class="text-2xs text-muted"> ← <span x-text="readProgress(s)"></span> read</span>
                   </template>
                 </div>
                 <div x-show="sf.show_release_group !== 'false' && s.latest_release_group"
                      class="text-xs text-muted mt-1" x-text="s.latest_release_group"></div>
 
                 <!-- Progress bar -->
-                <div class="progress-wrap" x-show="sf.show_progress_bars !== 'false' && s.latest_chapter && s.current_chapter">
+                <div class="progress-wrap" x-show="sf.show_progress_bars !== 'false' && s.latest_chapter && (isKomgaVolume(s) ? s.current_volume : s.current_chapter)">
                   <div class="progress-bar" :class="{'green': s.has_update}" :style="`width: ${chapterProgress(s)}%`"></div>
                 </div>
 
@@ -462,12 +462,13 @@
               <!-- Chapter info -->
               <div class="flex-shrink-0 text-right" style="min-width:90px">
                 <div class="list-chapter" x-show="s.latest_chapter" x-text="unitLabel(s) + ' ' + s.latest_chapter"></div>
-                <div class="text-xs text-muted" x-show="s.latest_chapter && s.current_chapter"
-                     x-text="s.current_chapter + ' / ' + s.latest_chapter + ' read'"></div>
+                <div class="text-xs text-muted"
+                     x-show="s.latest_chapter && (isKomgaVolume(s) ? (s.current_volume || s.current_chapter) : s.current_chapter)"
+                     x-text="readProgress(s) + ' / ' + s.latest_chapter + ' read'"></div>
               </div>
 
               <!-- Progress -->
-              <div class="list-progress" x-show="sf.show_progress_bars !== 'false' && s.latest_chapter && s.current_chapter">
+              <div class="list-progress" x-show="sf.show_progress_bars !== 'false' && s.latest_chapter && (isKomgaVolume(s) ? (s.current_volume || s.current_chapter) : s.current_chapter)">
                 <div class="progress-wrap">
                   <div class="progress-bar" :class="{'green': s.has_update}" :style="`width: ${chapterProgress(s)}%`"></div>
                 </div>

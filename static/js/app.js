@@ -391,7 +391,17 @@ function app() {
     },
 
     isKomgaVolume(s) {
-      return s && s.simulpub_source === 'komga' && (s.komga_track_mode || 'chapter') === 'volume';
+      // True for any series tracked by volume: native Komga (simulpub_source='komga')
+      // OR soft-linked series — as long as komga_track_mode is 'volume'.
+      return s && (s.komga_track_mode || 'chapter') === 'volume'
+        && (s.simulpub_source === 'komga' || !!s.komga_series_id);
+    },
+
+    // Return the user's read progress for display (chapter or volume depending on series type)
+    readProgress(s) {
+      return this.isKomgaVolume(s)
+        ? (s.current_volume || s.current_chapter || '0')
+        : (s.current_chapter || '0');
     },
 
     chapterProgress(s) {
