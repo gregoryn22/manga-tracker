@@ -1011,6 +1011,61 @@
           </div>
         </template>
 
+        <!-- ── MangaBaka ──────────────────────────────────────── -->
+        <div class="card card-padded">
+          <div class="settings-block-title">🔶 MangaBaka</div>
+
+          <div class="text-sm fw-600 mb-1">API Token</div>
+          <div class="settings-row">
+            <label>Token</label>
+            <input class="input flex-1" type="text" placeholder="mb-…" x-model="sf.mangabaka_token" />
+          </div>
+          <div class="text-xs text-muted mt-1 mb-3">
+            Required for series search and metadata lookups. Get yours at
+            <a href="https://mangabaka.org" target="_blank" class="text-accent">mangabaka.org</a>.
+            Rate limits: 30 searches/min, 120 lookups/min.
+          </div>
+
+          <div class="text-sm fw-600 mb-1">Library Sync</div>
+          <div class="text-xs text-muted mb-3 leading-relaxed">
+            Automatically push chapter progress and reading status to your MangaBaka account whenever you update a series here.
+            Requires a <strong>Personal Access Token (PAT)</strong> from
+            <a href="https://mangabaka.org/my/settings/api" target="_blank" class="link">mangabaka.org/my/settings/api</a>.
+            Only updates series already in your MB library — use Export to add new ones.
+          </div>
+          <div class="settings-row">
+            <label>Personal Access Token</label>
+            <div class="flex gap-2 flex-1">
+              <input class="input flex-1" type="password" placeholder="mb-…"
+                     x-model="sf.mangabaka_pat" autocomplete="new-password" />
+              <button class="btn btn-ghost btn-sm" @click="testMbSync()">Test</button>
+            </div>
+          </div>
+          <div class="settings-row">
+            <label>Live Sync</label>
+            <select class="input input-toggle" x-model="sf.mb_sync_enabled">
+              <option value="false">Off</option>
+              <option value="true">On</option>
+            </select>
+          </div>
+          <div class="text-xs text-muted mt-1 leading-relaxed" x-show="sf.mb_sync_enabled === 'true'">
+            ✅ Live sync active — changes pushed to MangaBaka automatically.
+          </div>
+
+          <div class="flex gap-2 mt-3 flex-wrap">
+            <button class="btn btn-primary btn-sm" @click="saveSettings()">💾 Save</button>
+            <button class="btn btn-ghost btn-sm" @click="exportMangabaka()"
+                    title="Export library in MangaBaka's format for import at mangabaka.org">⬇️ Export for MB</button>
+            <button class="btn btn-ghost btn-sm" @click="mbPull()"
+                    x-show="!!sf.mangabaka_pat"
+                    title="Pull reading progress from your MB library into this app">⬇️ Pull from MB</button>
+          </div>
+          <div class="text-xs text-muted mt-2">
+            Export imports at
+            <a href="https://mangabaka.org/my/library/import" target="_blank" class="link">mangabaka.org/my/library/import</a>.
+          </div>
+        </div>
+
         <!-- ── Notification Behaviour ───────────────────────── -->
         <div class="card card-padded">
           <div class="settings-block-title">🔔 Notification Behaviour</div>
@@ -1151,7 +1206,9 @@
         </div>
 
         <div class="card card-padded">
-          <div class="settings-block-title">🔄 Update Polling</div>
+          <div class="settings-block-title">🔄 Polling &amp; Background Jobs</div>
+
+          <div class="text-sm fw-600 mb-2">Chapter Detection</div>
           <div class="settings-row">
             <label>Check Interval</label>
             <select class="input" x-model="sf.poll_interval_hours" style="width:180px">
@@ -1162,13 +1219,40 @@
               <option value="24">Once a day</option>
             </select>
           </div>
-          <div class="flex gap-2 mt-2">
+          <div class="flex gap-2 mt-2 mb-4">
             <button class="btn btn-primary btn-sm" @click="saveSettings()">💾 Save</button>
             <button class="btn btn-ghost btn-sm" @click="pollNow()" :disabled="polling">
               <span x-show="polling" class="spin spin-sm"></span>
               <span x-show="!polling">🔄</span>
               <span x-text="polling ? 'Running…' : 'Poll Now'"></span>
             </button>
+          </div>
+
+          <div class="text-sm fw-600 mb-1">Scheduled Metadata Refresh</div>
+          <div class="text-xs text-muted mb-3 leading-relaxed">
+            Periodically re-fetch metadata (covers, descriptions, completion status, ratings, tags, authors)
+            from MangaBaka and MangaUpdates for all tracked series. Runs as a separate background job
+            and won't interfere with chapter detection polls.
+          </div>
+          <div class="settings-row">
+            <label>Enable</label>
+            <select class="input input-toggle" x-model="sf.metadata_refresh_enabled">
+              <option value="false">Off</option>
+              <option value="true">On</option>
+            </select>
+          </div>
+          <div class="settings-row" x-show="sf.metadata_refresh_enabled === 'true'">
+            <label>Interval</label>
+            <select class="input" x-model="sf.metadata_refresh_interval_days" style="width:180px">
+              <option value="1">Daily</option>
+              <option value="3">Every 3 days</option>
+              <option value="7">Weekly</option>
+              <option value="14">Every 2 weeks</option>
+              <option value="30">Monthly</option>
+            </select>
+          </div>
+          <div class="flex gap-2 mt-2">
+            <button class="btn btn-primary btn-sm" @click="saveSettings()">💾 Save</button>
           </div>
         </div>
 
@@ -1222,14 +1306,15 @@
                    x-model="sf.komga_api_key" autocomplete="off" />
           </div>
           <div class="settings-row" x-show="sf.komga_url && sf.komga_api_key">
-            <label>Sync Read Progress</label>
+            <label>Sync Read Progress <span class="text-xs fw-400 text-muted">(native series)</span></label>
             <select class="input input-toggle" x-model="sf.komga_sync_read_progress">
               <option value="false">Off</option>
               <option value="true">On</option>
             </select>
           </div>
           <div class="text-xs text-muted mt-1" x-show="sf.komga_url && sf.komga_api_key && sf.komga_sync_read_progress === 'true'">
-            Each poll, Komga's read count updates your volume/chapter progress automatically.
+            Each poll, syncs read progress for series whose chapter source is set to Komga (simulpub_source = komga).
+            For other series linked via Komga soft-link, enable per-series from the series detail modal.
           </div>
           <div class="flex gap-2 mt-2">
             <button class="btn btn-primary btn-sm" @click="saveSettings()">💾 Save</button>
@@ -1314,65 +1399,21 @@
           </div>
         </div>
 
-        <!-- ── MangaBaka Sync Export ───────────────────────── -->
-        <div class="card card-padded">
-          <div class="settings-block-title">🔄 MangaBaka Sync</div>
-          <div class="flex gap-2">
-            <button class="btn btn-primary btn-sm" @click="exportMangabaka()">⬇️ Export for MangaBaka</button>
-          </div>
-          <div class="text-xs text-muted mt-2 leading-relaxed">
-            Export your library in MangaBaka's native format. Import the file at
-            <a href="https://mangabaka.org/my/library/import" target="_blank" class="link">mangabaka.org/my/library/import</a>
-            to sync reading progress and status to your MangaBaka account.
-          </div>
-        </div>
-
-        <!-- ── MangaBaka Live Sync ───────────────────────── -->
-        <div class="card card-padded">
-          <div class="settings-block-title">⚡ MangaBaka Live Sync</div>
-          <div class="text-xs text-muted mb-3 leading-relaxed">
-            Automatically push chapter progress and reading status to your MangaBaka account whenever you update a series here.
-            Requires a <strong>Personal Access Token (PAT)</strong> from
-            <a href="https://mangabaka.org/my/settings/api" target="_blank" class="link">mangabaka.org/my/settings/api</a>.
-            Only updates series already in your MB library — adding new series still requires the export above.
-          </div>
-
-          <div class="settings-row">
-            <label>Personal Access Token</label>
-            <div class="flex gap-2 flex-1">
-              <input class="input flex-1" type="password" placeholder="mb-…"
-                     x-model="sf.mangabaka_pat" autocomplete="new-password" />
-              <button class="btn btn-ghost btn-sm" @click="testMbSync()">Test</button>
-            </div>
-          </div>
-
-          <div class="settings-row">
-            <label>Enable Live Sync</label>
-            <select class="input input-toggle" x-model="sf.mb_sync_enabled">
-              <option value="false">Off</option>
-              <option value="true">On</option>
-            </select>
-          </div>
-
-          <div class="flex gap-2 mt-3">
-            <button class="btn btn-primary btn-sm" @click="saveSettings()">💾 Save</button>
-            <button class="btn btn-ghost btn-sm" @click="mbPull()"
-                    x-show="!!sf.mangabaka_pat"
-                    title="Pull reading progress from your MB library into this app">⬇️ Pull from MB</button>
-          </div>
-          <div class="text-xs text-muted mt-2 leading-relaxed" x-show="sf.mb_sync_enabled === 'true'">
-            Live sync active — chapter and status changes will be pushed to MangaBaka automatically.
-          </div>
-        </div>
 
         <!-- Metadata Maintenance -->
         <div class="card card-padded">
           <div class="settings-block-title">🔧 Metadata Maintenance</div>
-          <div class="flex gap-2">
+          <div class="flex gap-2 flex-wrap">
             <button class="btn btn-ghost btn-sm" @click="fillMissingCovers()">🖼 Fetch Missing Covers</button>
+            <button class="btn btn-ghost btn-sm" @click="refreshMetadataNow()" :disabled="metadataRefreshing">
+              <span x-show="metadataRefreshing">⏳</span>
+              <span x-show="!metadataRefreshing">🔄</span>
+              <span x-text="metadataRefreshing ? 'Refreshing…' : 'Refresh All Metadata'"></span>
+            </button>
           </div>
           <div class="text-xs text-muted mt-2 leading-relaxed">
-            Fetches cover art from MangaBaka for any series missing a cover image. Runs in the background — refresh the library after a moment to see results.
+            <strong>Fetch Missing Covers</strong> — fills blank cover art from MangaBaka for series missing a cover image.<br>
+            <strong>Refresh All Metadata</strong> — re-fetches covers, descriptions, status, ratings, tags, and author info from MangaBaka and MangaUpdates for every tracked series. Use this for a one-time refresh or after linking new series. Both run in the background.
           </div>
         </div>
 
@@ -1593,20 +1634,6 @@
           <div class="text-xs text-muted mt-2">Changes apply immediately. Save to persist across sessions.</div>
         </div>
 
-        <div class="card card-padded">
-          <div class="settings-block-title">🔑 MangaBaka API</div>
-          <div class="settings-row">
-            <label>API Token</label>
-            <input class="input flex-1" type="text" placeholder="mb-…" x-model="sf.mangabaka_token" />
-          </div>
-          <div class="flex gap-2 mt-2">
-            <button class="btn btn-primary btn-sm" @click="saveSettings()">💾 Save</button>
-          </div>
-          <div class="text-xs text-muted mt-2">
-            Token from <a href="https://mangabaka.org" target="_blank" class="text-accent">mangabaka.org</a>.
-            Rate limits: 30 searches/min, 120 lookups/min.
-          </div>
-        </div>
 
       </div><!-- /settings -->
 

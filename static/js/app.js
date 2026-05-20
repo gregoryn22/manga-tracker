@@ -58,6 +58,9 @@ function app() {
       sidebar_width:    '220',
       dim_finished_covers: 'true',
       show_recent_drops: 'true',
+      // Scheduled metadata refresh
+      metadata_refresh_enabled: 'false',
+      metadata_refresh_interval_days: '7',
     },
 
     // Detail modal
@@ -83,6 +86,7 @@ function app() {
 
     // Polling
     polling: false,
+    metadataRefreshing: false,
 
     // System warnings
     systemWarnings: [],
@@ -1080,6 +1084,19 @@ function app() {
         setTimeout(async () => { await this.loadLibrary(); await this.loadReleaseFeed(); this.pollUnreadCount(); }, 6000);
         setTimeout(() => { this.polling = false; }, 10000);
       } catch(e) { this.toast('Poll failed','error'); this.polling=false; }
+    },
+
+    async refreshMetadataNow() {
+      if (this.metadataRefreshing) return;
+      this.metadataRefreshing = true;
+      try {
+        await this.api('/api/settings/refresh-metadata-now','POST');
+        this.toast('Metadata refresh started — runs in the background.','success');
+        setTimeout(() => { this.metadataRefreshing = false; }, 15000);
+      } catch(e) {
+        this.toast(e.detail || 'Metadata refresh failed','error');
+        this.metadataRefreshing = false;
+      }
     },
 
     // ── Utilities ─────────────────────────────────────────
