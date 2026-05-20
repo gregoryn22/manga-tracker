@@ -27,12 +27,4 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
   100% { background-position: 200% 0; }
 }
 
-/* ── Responsive ───────────────────────────────────────────────────── */
-@media (max-width: 768px) {
-  .sidebar { display: none; position: fixed; left: 0; top: 0; bottom: 0; z-index: 50; }
-  .sidebar.open { display: flex; }
-  .sidebar-overlay.open { display: block; }
-  .hamburger { display: block; }
-  .series-grid { grid-template-columns: repeat(auto-fill, minmax(140px,1fr)); }
-  .stats-row { grid-template-columns: repeat(2,1fr); }
-}
+/* Responsive styles live in utilities.css (loaded last) so they win the cascade. */

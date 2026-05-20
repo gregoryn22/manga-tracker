@@ -91,3 +91,71 @@
 .input-wide { width: 220px; }
 .settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 4px; }
 .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 24px; }
+
+/* ── Responsive ─────────────────────────────────────────────────────── */
+/* Lives here (loaded last) so it wins the cascade over components.css  */
+
+@media (max-width: 768px) {
+  /* Sidebar: hidden by default, overlays content when .open */
+  .sidebar {
+    display: none;
+    position: fixed; left: 0; top: 0; bottom: 0; z-index: 50;
+    width: 240px;
+    box-shadow: var(--shadow);
+  }
+  .sidebar.open { display: flex; }
+  .sidebar-overlay.open { display: block; }
+  .hamburger { display: block; }
+
+  /* Topbar: tighter padding, title truncates instead of pushing buttons off-screen */
+  .topbar { padding: var(--sp-3) var(--sp-3-5); gap: var(--sp-2); }
+  .topbar-title {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-size: var(--fs-md);
+  }
+
+  /* Content area: reduce horizontal padding */
+  .content { padding: var(--sp-4) var(--sp-3-5); }
+
+  /* Library grid: tighter cards */
+  .series-grid { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 10px; }
+
+  /* Stats row: 2 columns */
+  .stats-row { grid-template-columns: repeat(2, 1fr); }
+
+  /* Modals: bottom-sheet (slide up from bottom edge, full width) */
+  .overlay { padding: 0; align-items: flex-end; }
+  .modal { border-radius: var(--radius-xl) var(--radius-xl) 0 0; max-height: 92vh; max-width: 100%; }
+  .modal--sm { max-width: 100%; }
+
+  /* Settings rows: stack label above input */
+  .settings-row { flex-direction: column; align-items: flex-start; gap: var(--sp-1-5); }
+  .settings-row label { width: auto; }
+
+  /* 2-col grids → single column */
+  .settings-grid { grid-template-columns: 1fr; }
+  .detail-grid { grid-template-columns: 1fr; gap: 8px 0; }
+
+  /* Search page toolbar: stack input + button vertically */
+  .search-wrap { flex-direction: column; }
+
+  /* Settings text inputs: full width so they don't overflow */
+  .input-settings { width: 100%; }
+  .input-wide { width: 100%; }
+
+  /* Library toolbar search: can grow full width */
+  .library-toolbar .search-input { max-width: 100%; }
+
+  /* Toast: full width at bottom */
+  .toast-wrap { left: var(--sp-3-5); right: var(--sp-3-5); bottom: var(--sp-4); }
+  .toast { max-width: 100%; }
+}
+
+/* Very small screens: compact modal cover */
+@media (max-width: 420px) {
+  .modal-cover, .modal-cover-ph { width: 80px; }
+  .modal-cover--sm, .modal-cover-ph--sm { width: 64px; }
+  .modal-head { gap: var(--sp-3); padding: var(--sp-4); }
+  .modal-body { padding: var(--sp-3-5) var(--sp-4); }
+  .modal-footer { padding: var(--sp-3) var(--sp-4); }
+}
