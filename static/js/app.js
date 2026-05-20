@@ -8,7 +8,7 @@ function app() {
 
     // Library toolbar
     librarySearch: '',
-    sortBy: 'added_desc',
+    sortBy: localStorage.getItem('library_sort') || 'added_desc',
     genreFilter: '',
     authorFilter: '',
     tagFilter: '',
@@ -389,7 +389,8 @@ function app() {
     },
 
     sortLibrary() {
-      // No-op — filteredLibrary() already sorts reactively via sortBy binding
+      // Persist chosen sort so it survives page reloads
+      localStorage.setItem('library_sort', this.sortBy);
     },
 
     isKomgaVolume(s) {

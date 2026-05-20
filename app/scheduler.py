@@ -69,7 +69,7 @@ scheduler = BackgroundScheduler(timezone="UTC")
 _JOB_ID = "poll_updates"
 _METADATA_JOB_ID = "refresh_metadata"
 
-ACTIVE_STATUSES = {"reading", "on_hold"}
+ACTIVE_STATUSES = {"reading", "on_hold", "rereading"}
 
 _poll_state: dict = {
     "running": False,
@@ -113,7 +113,17 @@ def trigger_komga_sync() -> bool:
 
 
 def _do_komga_sync() -> None:
-    """Run _process_komga_soft_links standalone (release detection + progress sync)."""
+    """
+    Manual Komga sync: covers both native series (simulpub_source='komga') and
+    soft-linked series (komga_series_id set).
+
+    Native series: always syncs read-progress regardless of the global
+    komga_sync_read_progress setting — user explicitly requested it.
+    Also runs release detection (latest chapter check).
+
+    Soft-linked series: delegates to _process_komga_soft_links (respects
+    per-series komga_detect_releases / komga_sync_progress flags).
+    """
     state = _komga_sync_state
     if state["running"]:
         return
@@ -126,16 +136,44 @@ def _do_komga_sync() -> None:
     db: Session = None
     try:
         db = SessionLocal()
-        # Count series that will be processed for reporting
-        from .database import TrackedSeries as _TS
-        state["total"] = db.query(_TS).filter(
-            (_TS.komga_series_id.isnot(None)) | (_TS.simulpub_source == "komga")
-        ).count()
-        logger.info(f"▶ Manual Komga sync starting ({state['total']} linked series)…")
-        _process_komga_soft_links(db)
+        komga_url = get_setting(db, "komga_url", "")
+        komga_key = get_setting(db, "komga_api_key", "")
+        if not komga_url or not komga_key:
+            logger.warning("Manual Komga sync: URL or API key not configured — aborting")
+            return
+
+        client = KomgaClient(komga_url, komga_key)
+
+        # ── Native Komga series ────────────────────────────────────────────
+        native = db.query(TrackedSeries).filter(
+            TrackedSeries.simulpub_source == "komga"
+        ).all()
+        state["total"] += len(native)
+        logger.info(f"▶ Manual Komga sync: {len(native)} native series…")
+
+        synced = 0
+        for series in native:
+            try:
+                is_volume = (getattr(series, "komga_track_mode", None) or "chapter") == "volume"
+                # Always sync read-progress on manual trigger
+                _apply_komga_read_progress(db, series, client, series.simulpub_id, is_volume)
+                synced += 1
+            except Exception as e:
+                logger.warning(f"Manual Komga sync failed for '{series.title}': {e}")
         db.commit()
-        state["synced"] = state["total"]
-        logger.info("✓ Manual Komga sync complete.")
+
+        # ── Soft-linked series ─────────────────────────────────────────────
+        _process_komga_soft_links(db)
+        soft_count = db.query(TrackedSeries).filter(
+            TrackedSeries.komga_series_id.isnot(None),
+            TrackedSeries.komga_series_id != "",
+            TrackedSeries.simulpub_source != "komga",
+        ).count()
+        state["total"] += soft_count
+        synced += soft_count
+
+        state["synced"] = synced
+        logger.info(f"✓ Manual Komga sync complete — {synced} series processed.")
     except Exception as e:
         logger.error(f"Manual Komga sync failed: {e}", exc_info=True)
     finally:
