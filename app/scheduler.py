@@ -230,12 +230,15 @@ def _do_mb_push_all() -> None:
         logger.info(f"▶ MB push-all starting for {len(all_series)} series…")
 
         for series in all_series:
-            if series.id >= _KOMGA_ID_FLOOR:
+            # Synthetic Komga IDs are not real MB series — skip unless the user
+            # has manually linked this series to a MangaBaka entry via mb_linked_id.
+            if series.id >= _KOMGA_ID_FLOOR and not series.mb_linked_id:
                 state["skipped"] += 1
                 continue
 
+            effective_id = series.mb_linked_id if series.mb_linked_id else series.id
             result = push_entry(
-                series.id,
+                effective_id,
                 series.reading_status,
                 series.current_chapter,
                 series.current_volume,
@@ -253,7 +256,7 @@ def _do_mb_push_all() -> None:
                 )
                 _time.sleep(_MB_PUSH_RETRY_WAIT)
                 result = push_entry(
-                    series.id,
+                    effective_id,
                     series.reading_status,
                     series.current_chapter,
                     series.current_volume,

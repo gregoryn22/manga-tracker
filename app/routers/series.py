@@ -682,8 +682,9 @@ def _bg_sync_import_to_mb(series_ids: list[int]):
         for sid in series_ids:
             series = db.query(TrackedSeries).filter(TrackedSeries.id == sid).first()
             if series:
+                effective_id = series.mb_linked_id if series.mb_linked_id else series.id
                 push_entry(
-                    series.id, series.reading_status, series.current_chapter,
+                    effective_id, series.reading_status, series.current_chapter,
                     series.current_volume, series.date_started, series.date_completed,
                     pat, user_rating=series.user_rating,
                 )
@@ -952,7 +953,7 @@ def _bg_sync_to_mb(series_id: int, reading_status: str, current_chapter: str | N
                    current_volume: str | None, date_started, date_completed,
                    user_rating: float | None = None):
     """Background task: push updated progress to MB if sync is enabled."""
-    from ..database import SessionLocal, get_setting
+    from ..database import SessionLocal, get_setting, TrackedSeries as _TS
     from ..mangabaka_sync import push_entry
     db = SessionLocal()
     try:
@@ -961,7 +962,11 @@ def _bg_sync_to_mb(series_id: int, reading_status: str, current_chapter: str | N
         pat = get_setting(db, "mangabaka_pat", "")
         if not pat:
             return
-        push_entry(series_id, reading_status, current_chapter, current_volume,
+        # Komga-imported series have synthetic IDs (>= 2_000_000_000).
+        # Use mb_linked_id if the user has linked this series to a real MB entry.
+        series = db.query(_TS).filter(_TS.id == series_id).first()
+        effective_id = (series.mb_linked_id if series and series.mb_linked_id else series_id)
+        push_entry(effective_id, reading_status, current_chapter, current_volume,
                    date_started, date_completed, pat, user_rating=user_rating)
     finally:
         db.close()
