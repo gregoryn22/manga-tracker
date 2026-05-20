@@ -2284,28 +2284,30 @@
                         title="Remove Komga link">✕</button>
               </div>
               <template x-if="ef.komga_series_id">
-                <div class="flex gap-3 items-center mt-3 komga-track-toggle">
-                  <span class="text-xs fw-600">Track by:</span>
-                  <label class="flex items-center gap-1 cursor-pointer">
-                    <input type="radio" value="chapter" x-model="ef.komga_track_mode" />
-                    <span class="text-xs">Chapters</span>
-                  </label>
-                  <label class="flex items-center gap-1 cursor-pointer">
-                    <input type="radio" value="volume" x-model="ef.komga_track_mode" />
-                    <span class="text-xs">Volumes</span>
-                  </label>
-                </div>
-                <div class="flex flex-col gap-2 mt-2">
-                  <label class="checkbox-label">
-                    <input type="checkbox" x-model="ef.komga_sync_progress" />
-                    <span class="text-xs">Automatically sync read progress from Komga each poll</span>
-                  </label>
-                  <div class="text-xs text-muted" x-show="!ef.komga_sync_progress">
-                    Off — progress won't be overwritten. Update manually or toggle on when Komga is your primary reading app for this series.
+                <div>
+                  <div class="flex gap-3 items-center mt-3 komga-track-toggle">
+                    <span class="text-xs fw-600">Track by:</span>
+                    <label class="flex items-center gap-1 cursor-pointer">
+                      <input type="radio" value="chapter" x-model="ef.komga_track_mode" />
+                      <span class="text-xs">Chapters</span>
+                    </label>
+                    <label class="flex items-center gap-1 cursor-pointer">
+                      <input type="radio" value="volume" x-model="ef.komga_track_mode" />
+                      <span class="text-xs">Volumes</span>
+                    </label>
+                  </div>
+                  <div class="flex flex-col gap-2 mt-2">
+                    <label class="checkbox-label">
+                      <input type="checkbox" x-model="ef.komga_sync_progress" />
+                      <span class="text-xs">Automatically sync read progress from Komga each poll</span>
+                    </label>
+                    <div class="text-xs text-muted" x-show="!ef.komga_sync_progress">
+                      Off — progress won't be overwritten. Update manually or toggle on when Komga is your primary reading app for this series.
+                    </div>
                   </div>
                 </div>
               </template>
-              <div class="text-xs text-muted mt-1" x-show="!sf.komga_url || !sf.komga_api_key">
+              <div class="text-xs text-muted mt-1" x-show="(!sf.komga_url || !sf.komga_api_key) && !ef.komga_series_id">
                 ⚠️ Configure Komga URL and API key in Settings first.
               </div>
             </div>
