@@ -81,6 +81,17 @@ class TrackedSeries(Base):
     # Komga-specific: 'chapter' (default) or 'volume' — controls whether we
     # track the highest chapter number or highest volume/book number.
     komga_track_mode = Column(String, nullable=True, default="chapter")
+    # Soft Komga link for any series (not just simulpub_source='komga').
+    # When set, read progress is synced from Komga on each poll cycle
+    # without affecting the chapter detection source (MU/MB/simulpub).
+    komga_series_id = Column(String, nullable=True)
+    # If true, the soft Komga link is also used for chapter/volume release
+    # detection and notifications (in addition to read-progress sync).
+    komga_detect_releases = Column(Boolean, nullable=True, default=False)
+    # If true, sync Komga read progress into current_chapter/current_volume
+    # for this series (per-series override for soft-linked series; native
+    # Komga series are gated by the global komga_sync_read_progress setting).
+    komga_sync_progress = Column(Boolean, nullable=True, default=False)
     # Real MB series ID for Komga-sourced series (whose DB id is a synthetic
     # value >= 2_000_000_000). Populated by the auto-link background task or
     # manually via the "Relink MB" UI. Used by refresh to fetch MB metadata.
@@ -225,6 +236,9 @@ class TrackedSeries(Base):
             "simulpub_source": self.simulpub_source or "",
             "simulpub_id": self.simulpub_id or "",
             "komga_track_mode": self.komga_track_mode or "chapter",
+            "komga_series_id": self.komga_series_id or "",
+            "komga_detect_releases": bool(self.komga_detect_releases),
+            "komga_sync_progress": bool(self.komga_sync_progress),
             "mb_provider_ids": self._safe_json(self.mb_provider_ids, default={}),
             "current_chapter": self.current_chapter,
             "current_volume": self.current_volume,
@@ -399,6 +413,9 @@ def _migrate_db():
         ("tracked_series", "last_poll_error",    "TEXT"),
         ("tracked_series", "last_poll_success",  "DATETIME"),
         ("tracked_series", "komga_track_mode",   "VARCHAR DEFAULT 'chapter'"),
+        ("tracked_series", "komga_series_id",      "VARCHAR"),
+        ("tracked_series", "komga_detect_releases", "BOOLEAN DEFAULT 0"),
+        ("tracked_series", "komga_sync_progress",   "BOOLEAN DEFAULT 0"),
         ("tracked_series", "notification_muted", "BOOLEAN DEFAULT 0"),
         ("tracked_series", "updates_hidden",     "BOOLEAN DEFAULT 0"),
         ("tracked_series", "mb_linked_id",       "INTEGER"),

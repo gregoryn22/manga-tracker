@@ -922,6 +922,13 @@ class UpdateSeriesRequest(BaseModel):
     simulpub_id: str | None = None       # Platform-specific ID (e.g. MangaPlus title_id)
     # Komga-specific: 'chapter' or 'volume'
     komga_track_mode: str | None = None
+    # Soft Komga link for non-Komga series — enables read progress sync without
+    # changing the chapter detection source. Pass "" to clear.
+    komga_series_id: str | None = None
+    # If true, also use the soft Komga link for new chapter/volume detection + notifications.
+    komga_detect_releases: bool | None = None
+    # If true, sync Komga read progress into current_chapter/current_volume for this series.
+    komga_sync_progress: bool | None = None
     # Editable for 'custom' source — lets the user manually record the latest chapter
     mu_latest_chapter: str | None = None
     # Volume progress (independent of chapter — for series tracked both ways)
@@ -1074,6 +1081,12 @@ def update_series(series_id: int, req: UpdateSeriesRequest,
         series.simulpub_id = clean_id or None
     if req.komga_track_mode is not None:
         series.komga_track_mode = req.komga_track_mode
+    if req.komga_series_id is not None:
+        series.komga_series_id = req.komga_series_id.strip() or None
+    if req.komga_detect_releases is not None:
+        series.komga_detect_releases = req.komga_detect_releases
+    if req.komga_sync_progress is not None:
+        series.komga_sync_progress = req.komga_sync_progress
 
     track_mode_changed = (
         req.komga_track_mode is not None and req.komga_track_mode != old_track_mode

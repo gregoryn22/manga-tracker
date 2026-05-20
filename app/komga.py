@@ -271,6 +271,46 @@ class KomgaClient:
             "books_in_progress": series.get("booksInProgressCount", 0),
         }
 
+    def get_last_read_progress(self, series_id: str) -> str | None:
+        """
+        Return the chapter/volume number string of the furthest-read book in a series.
+
+        Queries books filtered to READ and IN_PROGRESS status, sorted by
+        metadata.numberSort descending, and returns the first result's
+        metadata.number (the display number, e.g. "3", "42", "12.5").
+
+        This is more accurate than booksReadCount for progress tracking because
+        it returns the actual chapter/volume number rather than a file count,
+        which diverges when chapters have decimal numbers or gaps.
+
+        Returns None if no books have been read or are in progress.
+        """
+        data = self._get(
+            f"/series/{series_id}/books",
+            params={
+                "read_status": "READ,IN_PROGRESS",
+                "sort":        "metadata.numberSort,desc",
+                "size":        1,
+            },
+        )
+        content = data.get("content", [])
+        if not content:
+            return None
+
+        book = content[0]
+        metadata = book.get("metadata", {})
+        number = metadata.get("number")
+        if number is not None:
+            return str(number).strip() or None
+
+        # Fallback to numberSort if number field is missing
+        number_sort = metadata.get("numberSort")
+        if number_sort is not None:
+            val = float(number_sort)
+            return str(int(val)) if val == int(val) else str(val)
+
+        return None
+
     def thumbnail_url(self, series_id: str) -> str:
         """Return the URL for the series thumbnail image."""
         return f"{self.base_url}/api/v1/series/{series_id}/thumbnail"

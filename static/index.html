@@ -2188,6 +2188,58 @@
             </template>
           </div>
 
+          <!-- Komga soft-link: read-progress sync for non-Komga series -->
+          <template x-if="ef.simulpub_source !== 'komga'">
+            <div class="mb-4">
+              <div class="form-label mb-1">Komga Read Progress Sync
+                <span class="text-xs text-muted fw-400"> — optional</span>
+              </div>
+              <div class="text-xs text-muted mb-2">
+                Link to a Komga series to sync your reading progress. Doesn't affect chapter detection — useful for volume series or any series you read through Komga.
+              </div>
+              <div class="flex gap-2 items-center">
+                <input class="input" type="text" placeholder="Komga series ID (paste from URL)"
+                       x-model="ef.komga_series_id" style="width:280px" />
+                <a x-show="ef.komga_series_id && sf.komga_url"
+                   :href="`${sf.komga_url}/series/${ef.komga_series_id}`"
+                   target="_blank" class="btn btn-ghost btn-sm">Komga ↗</a>
+                <button x-show="ef.komga_series_id"
+                        class="btn btn-ghost btn-sm text-muted"
+                        @click="ef.komga_series_id = ''"
+                        title="Remove Komga link">✕</button>
+              </div>
+              <template x-if="ef.komga_series_id">
+                <div class="flex gap-3 items-center mt-3 komga-track-toggle">
+                  <span class="text-xs fw-600">Track by:</span>
+                  <label class="flex items-center gap-1 cursor-pointer">
+                    <input type="radio" value="chapter" x-model="ef.komga_track_mode" />
+                    <span class="text-xs">Chapters</span>
+                  </label>
+                  <label class="flex items-center gap-1 cursor-pointer">
+                    <input type="radio" value="volume" x-model="ef.komga_track_mode" />
+                    <span class="text-xs">Volumes</span>
+                  </label>
+                </div>
+                <div class="flex flex-col gap-2 mt-2">
+                  <label class="checkbox-label">
+                    <input type="checkbox" x-model="ef.komga_detect_releases" />
+                    <span class="text-xs">Detect new releases &amp; notify from Komga</span>
+                  </label>
+                  <div class="text-xs text-muted" x-show="ef.komga_detect_releases">
+                    Uses the chapter label (<code>metadata.number</code>) you can edit in Komga — so you control the numbering.
+                  </div>
+                  <label class="checkbox-label">
+                    <input type="checkbox" x-model="ef.komga_sync_progress" />
+                    <span class="text-xs">Sync read progress from Komga</span>
+                  </label>
+                </div>
+              </template>
+              <div class="text-xs text-muted mt-1" x-show="!sf.komga_url || !sf.komga_api_key">
+                ⚠️ Configure Komga URL and API key in Settings first.
+              </div>
+            </div>
+          </template>
+
           <!-- MU Categories cloud -->
           <template x-if="ds.categories && ds.categories.length > 0">
             <div class="mb-4">

@@ -812,6 +812,9 @@ function app() {
         mu_latest_chapter_manual: series.mu_latest_chapter||'',
         komgaSearch: '', komgaResults: [], komgaSearching: false, komgaSearched: false,
         komga_track_mode: series.komga_track_mode || 'chapter',
+        komga_series_id: series.komga_series_id || '',
+        komga_detect_releases: !!series.komga_detect_releases,
+        komga_sync_progress: !!series.komga_sync_progress,
         user_rating: series.user_rating ?? null,
         date_started: series.date_started || '',
         date_completed: series.date_completed || '',
@@ -875,7 +878,12 @@ function app() {
           updates_hidden: this.ef.updates_hidden,
           simulpub_source: this.ef.simulpub_source,
           simulpub_id: this.ef.simulpub_id,
-          komga_track_mode: this.ef.simulpub_source === 'komga' ? this.ef.komga_track_mode : undefined,
+          // komga_track_mode is used for both native Komga series and soft-linked series
+          komga_track_mode: (this.ef.simulpub_source === 'komga' || this.ef.komga_series_id)
+            ? this.ef.komga_track_mode : undefined,
+          komga_series_id: this.ef.komga_series_id,
+          komga_detect_releases: this.ef.komga_series_id ? this.ef.komga_detect_releases : undefined,
+          komga_sync_progress: this.ef.komga_series_id ? this.ef.komga_sync_progress : undefined,
           user_rating: this.ef.user_rating !== this.ds.user_rating ? this.ef.user_rating : undefined,
           clear_user_rating: this.ef.user_rating === null && this.ds.user_rating !== null,
           date_started: this.ef.date_started_overriding ? (this.ef.date_started || undefined) : undefined,

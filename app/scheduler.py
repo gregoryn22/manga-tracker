@@ -335,6 +335,9 @@ def poll_updates():
         if simulpub_series:
             _poll_via_simulpub(db, simulpub_series)
 
+        # ── Komga soft-link: release detection + read-progress sync ────────
+        _process_komga_soft_links(db)
+
         # ── Auto-archive idle series ────────────────────────────────────────
         _auto_archive_idle(db)
 
@@ -1294,29 +1297,11 @@ def _poll_komga(db: Session, series_list: list[TrackedSeries]):
                 )
 
             # Opt-in: sync Komga read progress → current_volume (volume series)
-            # or current_chapter (chapter series)
+            # or current_chapter (chapter series).
+            # Uses the actual chapter/volume number of the furthest-read book,
+            # not booksReadCount (a raw file count that diverges for decimal chapters).
             if sync_read_progress:
-                try:
-                    progress = client.get_series_read_progress(series.simulpub_id)
-                    books_read = progress.get("books_read", 0)
-                    if books_read > 0:
-                        read_str = str(books_read)
-                        if is_volume:
-                            if series.current_volume != read_str:
-                                logger.debug(
-                                    f"Komga read-progress sync: '{series.title}' "
-                                    f"current_volume {series.current_volume!r} → {read_str!r}"
-                                )
-                                series.current_volume = read_str
-                        else:
-                            if series.current_chapter != read_str:
-                                logger.debug(
-                                    f"Komga read-progress sync: '{series.title}' "
-                                    f"current_chapter {series.current_chapter!r} → {read_str!r}"
-                                )
-                                series.current_chapter = read_str
-                except Exception as e:
-                    logger.warning(f"Komga read-progress sync failed for '{series.title}': {e}")
+                _apply_komga_read_progress(db, series, client, series.simulpub_id, is_volume)
 
             _mark_poll_success(series)
             series.last_checked = datetime.utcnow()
@@ -1401,6 +1386,140 @@ def _auto_archive_idle(db: Session):
     if archived:
         db.commit()
         logger.info(f"Auto-archived {archived} idle series → dropped")
+
+
+# ── Komga read-progress sync (shared by simulpub + soft-link paths) ──────────
+
+def _apply_komga_read_progress(
+    db: Session,
+    series: TrackedSeries,
+    client,
+    komga_id: str,
+    is_volume: bool,
+):
+    """
+    Query Komga for the furthest-read book in *komga_id* and sync the result
+    into series.current_volume (volume mode) or series.current_chapter (chapter mode).
+
+    Uses the actual chapter/volume number from book metadata rather than
+    booksReadCount so decimal chapters (e.g. "42.5") and numbered volumes work
+    correctly even when file count diverges from chapter numbers.
+    """
+    try:
+        read_num = client.get_last_read_progress(komga_id)
+        if not read_num:
+            return
+        if is_volume:
+            if series.current_volume != read_num:
+                logger.debug(
+                    f"Komga progress sync: '{series.title}' "
+                    f"current_volume {series.current_volume!r} → {read_num!r}"
+                )
+                series.current_volume = read_num
+        else:
+            if series.current_chapter != read_num:
+                logger.debug(
+                    f"Komga progress sync: '{series.title}' "
+                    f"current_chapter {series.current_chapter!r} → {read_num!r}"
+                )
+                series.current_chapter = read_num
+    except Exception as e:
+        logger.warning(f"Komga read-progress sync failed for '{series.title}': {e}")
+
+
+def _process_komga_soft_links(db: Session):
+    """
+    Single pass for all series with a komga_series_id soft-link
+    (simulpub_source != 'komga').  Two independent behaviours per series:
+
+    1. Release detection (komga_detect_releases=True, any reading_status in ACTIVE_STATUSES):
+       - Calls get_latest_chapter() on the linked Komga series.
+       - If the returned metadata.number is newer than mu_latest_chapter,
+         logs a Release row and fires a notification.
+       - Uses metadata.number (the user-editable display label in Komga),
+         NOT numberSort, so users can correct weird upstream numbering
+         (e.g. Berserk prologues) directly inside Komga.
+
+    2. Read-progress sync (komga_sync_read_progress global setting = true):
+       - Calls get_last_read_progress() to find the furthest-read book's
+         metadata.number and syncs it to current_chapter / current_volume.
+
+    Both behaviours require komga_url + komga_api_key to be configured.
+    Native Komga series (simulpub_source='komga') are handled in _poll_komga.
+    """
+    komga_url = get_setting(db, "komga_url", "")
+    komga_key = get_setting(db, "komga_api_key", "")
+    if not komga_url or not komga_key:
+        return
+
+    # Fetch all soft-linked series; each has its own per-series flags
+    candidates = db.query(TrackedSeries).filter(
+        TrackedSeries.komga_series_id.isnot(None),
+        TrackedSeries.komga_series_id != "",
+        # Exclude native Komga series — they have their own poll path
+        TrackedSeries.simulpub_source != "komga",
+    ).all()
+
+    if not candidates:
+        return
+
+    client = KomgaClient(komga_url, komga_key)
+    changed = False
+
+    for series in candidates:
+        is_volume = (getattr(series, "komga_track_mode", None) or "chapter") == "volume"
+        unit_label = "Vol." if is_volume else "Ch."
+        komga_id = series.komga_series_id
+
+        # ── Behaviour 1: release detection ──────────────────────────────
+        if series.komga_detect_releases and series.reading_status in ACTIVE_STATUSES:
+            try:
+                number, date_added = client.get_latest_chapter(komga_id)
+                if number and chapter_is_newer(number, series.mu_latest_chapter):
+                    group_name = "Komga (volume)" if is_volume else "Komga"
+                    if not _simulpub_release_exists(db, series.id, number, group_name):
+                        release_date = date_added or datetime.utcnow().strftime("%Y-%m-%d")
+                        old_chapter = series.mu_latest_chapter
+                        series.mu_latest_chapter   = number
+                        series.latest_release_date = release_date
+                        series.latest_release_group = group_name
+
+                        db.add(Release(
+                            series_id=series.id,
+                            mu_series_id=series.mu_series_id,
+                            series_title=series.title,
+                            chapter=number,
+                            volume=number if is_volume else None,
+                            release_date=release_date,
+                            group_name=group_name,
+                            mu_release_id=None,
+                            cover_url=series.best_cover(),
+                            mu_url=f"{komga_url}/series/{komga_id}",
+                        ))
+
+                        message = f"{series.title} — {unit_label} {number} · Komga"
+                        _send_chapter_notification(
+                            db=db,
+                            series=series,
+                            message=message,
+                            chapter=number,
+                            volume=number if is_volume else None,
+                            group_name=group_name,
+                            release_date=release_date,
+                            old_chapter=old_chapter,
+                        )
+                        logger.info(f"✓ Komga soft-link new: {message}")
+                        changed = True
+            except Exception as e:
+                logger.warning(f"Komga release detection failed for '{series.title}': {e}")
+
+        # ── Behaviour 2: read-progress sync (per-series opt-in) ─────────
+        if series.komga_sync_progress:
+            _apply_komga_read_progress(db, series, client, komga_id, is_volume)
+            changed = True
+
+    if changed:
+        db.commit()
 
 
 # ── Scheduled metadata refresh ────────────────────────────────────────────────
