@@ -92,7 +92,8 @@ _mb_push_all_state: dict = {
     "last_finished": None,
     "total": 0,
     "pushed": 0,
-    "skipped": 0,
+    "skipped": 0,   # 404 — series not in MB library
+    "failed": 0,    # rate limited or transient error after retries
 }
 
 _komga_sync_state: dict = {
@@ -151,8 +152,20 @@ def trigger_mb_push_all() -> bool:
     return True
 
 
+_MB_PUSH_INTERVAL = 0.4   # seconds between requests (stays well under MB rate limit)
+_MB_PUSH_RETRY_WAIT = 5.0  # seconds to wait after a 429 before retrying once
+
+
 def _do_mb_push_all() -> None:
-    """Push every tracked series' current progress to MangaBaka via PAT."""
+    """
+    Push every tracked series' current progress to MangaBaka via PAT.
+
+    Paces requests at _MB_PUSH_INTERVAL seconds apart. On a 429 (rate limited),
+    waits _MB_PUSH_RETRY_WAIT seconds then retries once. Distinguishes three
+    outcomes: pushed (200 OK), skipped (404 — not in MB library), failed (still
+    rate limited or error after retry).
+    """
+    import time as _time
     from .mangabaka_sync import push_entry, _KOMGA_ID_FLOOR
 
     state = _mb_push_all_state
@@ -163,6 +176,7 @@ def _do_mb_push_all() -> None:
     state["last_started"] = datetime.utcnow()
     state["pushed"] = 0
     state["skipped"] = 0
+    state["failed"] = 0
     state["total"] = 0
 
     db: Session = None
@@ -181,7 +195,8 @@ def _do_mb_push_all() -> None:
             if series.id >= _KOMGA_ID_FLOOR:
                 state["skipped"] += 1
                 continue
-            ok = push_entry(
+
+            result = push_entry(
                 series.id,
                 series.reading_status,
                 series.current_chapter,
@@ -191,13 +206,40 @@ def _do_mb_push_all() -> None:
                 pat,
                 user_rating=series.user_rating,
             )
-            if ok:
+
+            if result is None:
+                # Rate limited — back off and retry once
+                logger.debug(
+                    f"MB push-all: rate limited on series {series.id}, "
+                    f"backing off {_MB_PUSH_RETRY_WAIT}s…"
+                )
+                _time.sleep(_MB_PUSH_RETRY_WAIT)
+                result = push_entry(
+                    series.id,
+                    series.reading_status,
+                    series.current_chapter,
+                    series.current_volume,
+                    series.date_started,
+                    series.date_completed,
+                    pat,
+                    user_rating=series.user_rating,
+                )
+
+            if result is True:
                 state["pushed"] += 1
+            elif result is False:
+                state["skipped"] += 1   # 404 — not in MB library
             else:
-                state["skipped"] += 1  # 404 = not in MB library, or error
+                state["failed"] += 1    # still rate limited or error after retry
+                logger.warning(f"MB push-all: series {series.id} failed after retry")
+
+            _time.sleep(_MB_PUSH_INTERVAL)
 
         logger.info(
-            f"✓ MB push-all done — pushed={state['pushed']}, skipped={state['skipped']}"
+            f"✓ MB push-all done — "
+            f"pushed={state['pushed']}, "
+            f"skipped(not-in-MB)={state['skipped']}, "
+            f"failed={state['failed']}"
         )
     except Exception as e:
         logger.error(f"MB push-all failed: {e}", exc_info=True)

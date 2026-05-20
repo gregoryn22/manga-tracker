@@ -392,6 +392,7 @@ def mb_push_all_status():
         "total":          state["total"],
         "pushed":         state["pushed"],
         "skipped":        state["skipped"],
+        "failed":         state.get("failed", 0),
     }
 
 

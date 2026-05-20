@@ -6,6 +6,7 @@ Only PATCH /v1/my/library/{series_id} is available; no API endpoint exists
 to add new entries, so sync is update-only for series already in MB.
 """
 import logging
+import time
 from datetime import datetime
 
 import httpx
@@ -50,12 +51,14 @@ def push_entry(
     date_completed: datetime | None,
     pat: str,
     user_rating: float | None = None,
-) -> bool:
+) -> bool | None:
     """
     PATCH /v1/my/library/{series_id} with current progress.
 
-    Returns True on success. Returns False silently on 404 (series not in
-    MB library yet — user needs to add it there first) or any other error.
+    Returns:
+      True   — success
+      False  — 404 (series not in MB library; user must add it there first)
+      None   — rate limited (429) or other transient error; caller should retry
 
     MB rating field accepts integers 0–10 only; floats are rejected.
     """
@@ -84,11 +87,18 @@ def push_entry(
             if resp.status_code == 404:
                 logger.debug(f"MB sync: series {series_id} not in MB library — skipped")
                 return False
+            if resp.status_code == 429:
+                retry_after = resp.headers.get("Retry-After")
+                logger.debug(
+                    f"MB sync: series {series_id} rate limited"
+                    + (f" (Retry-After: {retry_after}s)" if retry_after else "")
+                )
+                return None  # signal caller to back off and retry
             resp.raise_for_status()
             return resp.json().get("data") is True
     except Exception as e:
         logger.warning(f"MB sync failed for series {series_id}: {e}")
-        return False
+        return None
 
 
 def get_profile(pat: str) -> dict | None:

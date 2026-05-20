@@ -680,7 +680,9 @@ function app() {
             if (!s.running) {
               clearInterval(poll);
               this.mbPushingAll = false;
-              this.toast(`MB push done — ${s.pushed} pushed, ${s.skipped} skipped/not-in-MB`, 'success');
+              const parts = [`${s.pushed} pushed`, `${s.skipped} not in MB`];
+              if (s.failed > 0) parts.push(`${s.failed} failed (rate limited)`);
+              this.toast(`MB push done — ${parts.join(', ')}`, s.failed > 0 ? 'warning' : 'success');
             }
           } catch { clearInterval(poll); this.mbPushingAll = false; }
         }, 3000);
