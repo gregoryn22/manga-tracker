@@ -980,7 +980,6 @@ function app() {
           komga_track_mode: (this.ef.simulpub_source === 'komga' || this.ef.komga_series_id)
             ? this.ef.komga_track_mode : undefined,
           komga_series_id: this.ef.komga_series_id,
-          komga_detect_releases: this.ef.komga_series_id ? this.ef.komga_detect_releases : undefined,
           komga_sync_progress: this.ef.komga_series_id ? this.ef.komga_sync_progress : undefined,
           user_rating: this.ef.user_rating !== this.ds.user_rating ? this.ef.user_rating : undefined,
           clear_user_rating: this.ef.user_rating === null && this.ds.user_rating !== null,
