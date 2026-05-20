@@ -2241,6 +2241,36 @@
               <div class="text-xs text-muted mb-2">
                 Link to a Komga series to sync your reading progress. Doesn't affect chapter detection — useful for volume series or any series you read through Komga.
               </div>
+
+              <!-- Search -->
+              <template x-if="sf.komga_url && sf.komga_api_key">
+                <div class="mb-2">
+                  <div class="flex gap-2 items-center mb-1">
+                    <input class="input" type="text" placeholder="Search Komga library…"
+                           x-model="ef.komgaLinkSearch"
+                           @input.debounce.400ms="searchKomgaLink()"
+                           style="width:280px" />
+                    <span class="text-xs text-muted" x-show="ef.komgaLinkSearching">searching…</span>
+                  </div>
+                  <template x-if="ef.komgaLinkResults && ef.komgaLinkResults.length > 0">
+                    <div class="komga-search-results">
+                      <template x-for="ks in ef.komgaLinkResults" :key="ks.id">
+                        <div class="flex items-center gap-2 komga-search-item cursor-pointer"
+                             :class="{'bg-surface2': ef.komga_series_id === ks.id}"
+                             @click="ef.komga_series_id = ks.id; ef.komgaLinkSearch = ks.metadata?.title || ks.name; ef.komgaLinkResults = []">
+                          <span class="text-sm" x-text="ks.metadata?.title || ks.name"></span>
+                          <span class="text-xs text-muted" x-text="ks.booksCount + ' books'"></span>
+                        </div>
+                      </template>
+                    </div>
+                  </template>
+                  <template x-if="ef.komgaLinkSearched && ef.komgaLinkResults && ef.komgaLinkResults.length === 0">
+                    <div class="text-xs text-muted mb-1">No results — paste the ID directly below.</div>
+                  </template>
+                </div>
+              </template>
+
+              <!-- Direct ID input + link/clear -->
               <div class="flex gap-2 items-center">
                 <input class="input" type="text" placeholder="Komga series ID (paste from URL)"
                        x-model="ef.komga_series_id" style="width:280px" />
@@ -2249,7 +2279,7 @@
                    target="_blank" class="btn btn-ghost btn-sm">Komga ↗</a>
                 <button x-show="ef.komga_series_id"
                         class="btn btn-ghost btn-sm text-muted"
-                        @click="ef.komga_series_id = ''"
+                        @click="ef.komga_series_id = ''; ef.komgaLinkSearch = ''; ef.komgaLinkResults = []"
                         title="Remove Komga link">✕</button>
               </div>
               <template x-if="ef.komga_series_id">

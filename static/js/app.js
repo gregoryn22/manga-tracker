@@ -778,6 +778,21 @@ function app() {
       this.ef.komgaSearching = false;
     },
 
+    async searchKomgaLink() {
+      const q = (this.ef.komgaLinkSearch || '').trim();
+      if (!q) { this.ef.komgaLinkResults = []; this.ef.komgaLinkSearched = false; return; }
+      this.ef.komgaLinkSearching = true;
+      try {
+        const data = await this.api(`/api/komga/search?q=${encodeURIComponent(q)}`);
+        this.ef.komgaLinkResults = data.content || [];
+        this.ef.komgaLinkSearched = true;
+      } catch(e) {
+        this.toast(e.detail || 'Komga search failed', 'error');
+        this.ef.komgaLinkResults = [];
+      }
+      this.ef.komgaLinkSearching = false;
+    },
+
     formatVotes(n) {
       if (!n) return '';
       if (n >= 1000) return (n/1000).toFixed(1) + 'k';
@@ -879,6 +894,8 @@ function app() {
         simulpub_id: series.simulpub_id||'',
         mu_latest_chapter_manual: series.mu_latest_chapter||'',
         komgaSearch: '', komgaResults: [], komgaSearching: false, komgaSearched: false,
+        // Soft-link search (separate state so it doesn't conflict with native Komga search)
+        komgaLinkSearch: '', komgaLinkResults: [], komgaLinkSearching: false, komgaLinkSearched: false,
         komga_track_mode: series.komga_track_mode || 'chapter',
         komga_series_id: series.komga_series_id || '',
         komga_detect_releases: !!series.komga_detect_releases,
