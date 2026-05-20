@@ -87,6 +87,8 @@ function app() {
     // Polling
     polling: false,
     metadataRefreshing: false,
+    mbPushingAll: false,
+    komgaSyncing: false,
 
     // System warnings
     systemWarnings: [],
@@ -626,6 +628,30 @@ function app() {
       catch(e) { this.toast(e.detail||'Komga connection failed', 'error'); }
     },
 
+    async komgaSyncNow() {
+      if (this.komgaSyncing) return;
+      this.komgaSyncing = true;
+      try {
+        await this.api('/api/settings/komga-sync-now', 'POST');
+        this.toast('Komga sync started — runs in the background.', 'success');
+        const poll = setInterval(async () => {
+          try {
+            const s = await this.api('/api/settings/komga-sync/status', 'GET');
+            if (!s.running) {
+              clearInterval(poll);
+              this.komgaSyncing = false;
+              this.toast(`Komga sync done — ${s.synced} series processed.`, 'success');
+              await this.loadLibrary();
+            }
+          } catch { clearInterval(poll); this.komgaSyncing = false; }
+        }, 2000);
+        setTimeout(() => { this.komgaSyncing = false; }, 120000);
+      } catch(e) {
+        this.toast(e.detail || 'Komga sync failed', 'error');
+        this.komgaSyncing = false;
+      }
+    },
+
     async testMbSync() {
       try {
         const d = await this.api('/api/settings/test-mb-sync', 'POST');
@@ -639,6 +665,31 @@ function app() {
         this.toast(`MB pull: ${d.updated} updated, ${d.unchanged} unchanged, ${d.skipped} not tracked`, 'success');
         if (d.updated > 0) await this.loadLibrary();
       } catch(e) { this.toast(e.detail || 'MB pull failed', 'error'); }
+    },
+
+    async mbPushAll() {
+      if (this.mbPushingAll) return;
+      this.mbPushingAll = true;
+      try {
+        await this.api('/api/settings/mb-push-all', 'POST');
+        this.toast('Push to MB started — runs in the background.', 'success');
+        // Poll for completion so we can show final counts
+        const poll = setInterval(async () => {
+          try {
+            const s = await this.api('/api/settings/mb-push-all/status', 'GET');
+            if (!s.running) {
+              clearInterval(poll);
+              this.mbPushingAll = false;
+              this.toast(`MB push done — ${s.pushed} pushed, ${s.skipped} skipped/not-in-MB`, 'success');
+            }
+          } catch { clearInterval(poll); this.mbPushingAll = false; }
+        }, 3000);
+        // Safety fallback — clear flag after 5 min even if poll dies
+        setTimeout(() => { this.mbPushingAll = false; }, 300000);
+      } catch(e) {
+        this.toast(e.detail || 'MB push failed', 'error');
+        this.mbPushingAll = false;
+      }
     },
 
     async clearKMangaSession() {

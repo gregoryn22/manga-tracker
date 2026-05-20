@@ -15,6 +15,10 @@ from ..scheduler import (
     _reschedule_metadata_job,
     _remove_metadata_job,
     _metadata_refresh_state,
+    trigger_mb_push_all,
+    _mb_push_all_state,
+    trigger_komga_sync,
+    _komga_sync_state,
 )
 
 logger = logging.getLogger(__name__)
@@ -270,6 +274,32 @@ def test_webhook(db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=f"Webhook error: {e}")
 
 
+@router.get("/komga-sync/status")
+def komga_sync_status():
+    """Return current state of the manual Komga sync background job."""
+    state = _komga_sync_state
+    return {
+        "running":       state["running"],
+        "last_started":  state["last_started"].isoformat() if state["last_started"] else None,
+        "last_finished": state["last_finished"].isoformat() if state["last_finished"] else None,
+        "total":         state["total"],
+        "synced":        state["synced"],
+    }
+
+
+@router.post("/komga-sync-now")
+def komga_sync_now(db: Session = Depends(get_db)):
+    """Manually trigger a Komga soft-link sync pass (release detection + read progress)."""
+    komga_url = get_setting(db, "komga_url", "")
+    komga_key = get_setting(db, "komga_api_key", "")
+    if not komga_url or not komga_key:
+        raise HTTPException(status_code=400, detail="Komga URL or API key not configured")
+    if _komga_sync_state["running"]:
+        raise HTTPException(status_code=409, detail="Komga sync already in progress.")
+    trigger_komga_sync()
+    return {"success": True, "message": "Komga sync started in the background."}
+
+
 @router.post("/test-komga")
 def test_komga(db: Session = Depends(get_db)):
     """Test Komga connection by fetching server info."""
@@ -349,6 +379,32 @@ def test_mb_sync(db: Session = Depends(get_db)):
     if not profile:
         raise HTTPException(status_code=400, detail="PAT is invalid or expired")
     return {"success": True, "username": profile.get("preferred_username") or profile.get("nickname")}
+
+
+@router.get("/mb-push-all/status")
+def mb_push_all_status():
+    """Return current state of the MB push-all background job."""
+    state = _mb_push_all_state
+    return {
+        "running":        state["running"],
+        "last_started":   state["last_started"].isoformat() if state["last_started"] else None,
+        "last_finished":  state["last_finished"].isoformat() if state["last_finished"] else None,
+        "total":          state["total"],
+        "pushed":         state["pushed"],
+        "skipped":        state["skipped"],
+    }
+
+
+@router.post("/mb-push-all")
+def mb_push_all(db: Session = Depends(get_db)):
+    """Push all tracked series' current progress to MangaBaka (runs in background)."""
+    pat = get_setting(db, "mangabaka_pat", "")
+    if not pat:
+        raise HTTPException(status_code=400, detail="MangaBaka PAT not configured")
+    if _mb_push_all_state["running"]:
+        raise HTTPException(status_code=409, detail="MB push already in progress.")
+    trigger_mb_push_all()
+    return {"success": True, "message": "Push started in the background."}
 
 
 @router.post("/mb-pull")

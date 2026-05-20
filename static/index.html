@@ -1060,6 +1060,14 @@
             <button class="btn btn-ghost btn-sm" @click="mbPull()"
                     x-show="!!sf.mangabaka_pat"
                     title="Pull reading progress from your MB library into this app">⬇️ Pull from MB</button>
+            <button class="btn btn-ghost btn-sm" @click="mbPushAll()"
+                    x-show="!!sf.mangabaka_pat"
+                    :disabled="mbPushingAll"
+                    :class="{'opacity-60 cursor-wait': mbPushingAll}"
+                    title="Push all tracked series' current progress to your MB library (failsafe re-sync)">
+              <span x-show="!mbPushingAll">⬆️ Push All to MB</span>
+              <span x-show="mbPushingAll">⏳ Pushing…</span>
+            </button>
           </div>
           <div class="text-xs text-muted mt-2">
             Export imports at
@@ -1317,9 +1325,17 @@
             Each poll, syncs read progress for series whose chapter source is set to Komga (simulpub_source = komga).
             For other series linked via Komga soft-link, enable per-series from the series detail modal.
           </div>
-          <div class="flex gap-2 mt-2">
+          <div class="flex gap-2 mt-2 flex-wrap">
             <button class="btn btn-primary btn-sm" @click="saveSettings()">💾 Save</button>
             <button class="btn btn-ghost btn-sm" @click="testKomga()">🔌 Test Connection</button>
+            <button class="btn btn-ghost btn-sm" @click="komgaSyncNow()"
+                    x-show="sf.komga_url && sf.komga_api_key"
+                    :disabled="komgaSyncing"
+                    :class="{'opacity-60 cursor-wait': komgaSyncing}"
+                    title="Force-run Komga release detection and read-progress sync now, without waiting for the next poll">
+              <span x-show="!komgaSyncing">🔄 Sync Komga Now</span>
+              <span x-show="komgaSyncing">⏳ Syncing…</span>
+            </button>
           </div>
           <div class="text-xs text-muted mt-2">
             Connect your Komga server to track chapter updates from your self-hosted library.

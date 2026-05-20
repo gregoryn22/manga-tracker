@@ -86,6 +86,127 @@ _metadata_refresh_state: dict = {
     "total_series": 0,
 }
 
+_mb_push_all_state: dict = {
+    "running": False,
+    "last_started": None,
+    "last_finished": None,
+    "total": 0,
+    "pushed": 0,
+    "skipped": 0,
+}
+
+_komga_sync_state: dict = {
+    "running": False,
+    "last_started": None,
+    "last_finished": None,
+    "total": 0,
+    "synced": 0,
+}
+
+
+def trigger_komga_sync() -> bool:
+    """Fire a one-shot thread that runs the Komga soft-link sync pass."""
+    t = threading.Thread(target=_do_komga_sync, daemon=True)
+    t.start()
+    return True
+
+
+def _do_komga_sync() -> None:
+    """Run _process_komga_soft_links standalone (release detection + progress sync)."""
+    state = _komga_sync_state
+    if state["running"]:
+        return
+
+    state["running"] = True
+    state["last_started"] = datetime.utcnow()
+    state["total"] = 0
+    state["synced"] = 0
+
+    db: Session = None
+    try:
+        db = SessionLocal()
+        # Count series that will be processed for reporting
+        from .database import TrackedSeries as _TS
+        state["total"] = db.query(_TS).filter(
+            (_TS.komga_series_id.isnot(None)) | (_TS.simulpub_source == "komga")
+        ).count()
+        logger.info(f"▶ Manual Komga sync starting ({state['total']} linked series)…")
+        _process_komga_soft_links(db)
+        db.commit()
+        state["synced"] = state["total"]
+        logger.info("✓ Manual Komga sync complete.")
+    except Exception as e:
+        logger.error(f"Manual Komga sync failed: {e}", exc_info=True)
+    finally:
+        state["running"] = False
+        state["last_finished"] = datetime.utcnow()
+        if db is not None:
+            db.close()
+
+
+def trigger_mb_push_all() -> bool:
+    """Fire a one-shot thread that pushes all tracked series to MangaBaka."""
+    t = threading.Thread(target=_do_mb_push_all, daemon=True)
+    t.start()
+    return True
+
+
+def _do_mb_push_all() -> None:
+    """Push every tracked series' current progress to MangaBaka via PAT."""
+    from .mangabaka_sync import push_entry, _KOMGA_ID_FLOOR
+
+    state = _mb_push_all_state
+    if state["running"]:
+        return
+
+    state["running"] = True
+    state["last_started"] = datetime.utcnow()
+    state["pushed"] = 0
+    state["skipped"] = 0
+    state["total"] = 0
+
+    db: Session = None
+    try:
+        db = SessionLocal()
+        pat = get_setting(db, "mangabaka_pat", "")
+        if not pat:
+            logger.warning("MB push-all: no PAT configured — aborting")
+            return
+
+        all_series = db.query(TrackedSeries).all()
+        state["total"] = len(all_series)
+        logger.info(f"▶ MB push-all starting for {len(all_series)} series…")
+
+        for series in all_series:
+            if series.id >= _KOMGA_ID_FLOOR:
+                state["skipped"] += 1
+                continue
+            ok = push_entry(
+                series.id,
+                series.reading_status,
+                series.current_chapter,
+                series.current_volume,
+                series.date_started,
+                series.date_completed,
+                pat,
+                user_rating=series.user_rating,
+            )
+            if ok:
+                state["pushed"] += 1
+            else:
+                state["skipped"] += 1  # 404 = not in MB library, or error
+
+        logger.info(
+            f"✓ MB push-all done — pushed={state['pushed']}, skipped={state['skipped']}"
+        )
+    except Exception as e:
+        logger.error(f"MB push-all failed: {e}", exc_info=True)
+    finally:
+        state["running"] = False
+        state["last_finished"] = datetime.utcnow()
+        if db is not None:
+            db.close()
+
 
 def _mark_poll_success(series: TrackedSeries):
     """Reset poll health counters on a successful poll."""
