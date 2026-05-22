@@ -24,12 +24,14 @@ Protobuf structure (from Tachiyomi MangaPlus extension):
           [2] midChapterList    (repeated Chapter)
           [3] lastChapterList   (repeated Chapter)
   Chapter
-    [3] name  →  "Ch. 68" | "#68" | "68"
+    [3] name     →  "Ch. 68" | "#68" | "68"   (chapter number label)
+    [4] subTitle →  "The Final Battle"          (actual chapter title, may be absent)
 
 We use blackboxprotobuf so we don't need to maintain .proto files.
-Instead, _collect_chapter_names() recursively scans the decoded dict for
-strings matching chapter-number patterns and returns the maximum found.
-This makes the parser resilient to minor schema changes.
+_collect_chapter_info() does a structural walk: when it finds a dict whose
+field "3" matches a chapter-number pattern it also captures the adjacent
+field "4" (subTitle) as the chapter title.  This is resilient to minor
+schema changes while still extracting titles when present.
 """
 import logging
 from typing import Any
@@ -73,19 +75,27 @@ def series_url(title_id: int | str) -> str:
 
 def get_latest_chapter(title_id: int | str) -> str | None:
     """
-    Return the latest available (free or simulpub) chapter number for a
-    MangaPlus title as a string (e.g. "68"), or None on any failure.
+    Return the latest chapter number as a string (e.g. "68"), or None on failure.
+    Convenience wrapper around get_latest_chapter_info for callers that only
+    need the number.
+    """
+    return get_latest_chapter_info(title_id)["chapter"]
 
-    The function checks both the first-chapter list and the last-chapter list
-    (MangaPlus separates chapters into first-N-free + most-recent-N-free buckets).
-    It returns the highest chapter number found across all buckets.
+
+def get_latest_chapter_info(title_id: int | str) -> dict:
+    """
+    Return {"chapter": str|None, "title": str|None} for the latest chapter.
+
+    chapter — highest available chapter number (e.g. "68")
+    title   — subTitle field from the Chapter protobuf (e.g. "The Final Battle"),
+              or None if MangaPlus didn't include one for this chapter.
     """
     if not _HAS_PROTOBUF:
         logger.error(
             "blackboxprotobuf is not installed — install it with: "
             "pip install blackboxprotobuf  (then restart the app)"
         )
-        return None
+        return {"chapter": None, "title": None}
 
     try:
         url = f"{_API_BASE}/title_detailV3"
@@ -99,74 +109,92 @@ def get_latest_chapter(title_id: int | str) -> str | None:
         with httpx.Client(follow_redirects=True, timeout=15) as client:
             resp = client.get(url, params=params, headers=headers)
             resp.raise_for_status()
-        result = _parse_latest_chapter(resp.content)
-        logger.debug(f"MangaPlus title {title_id}: latest chapter = {result!r}")
+        result = _parse_latest_chapter_info(resp.content)
+        logger.debug(f"MangaPlus title {title_id}: {result!r}")
         return result
 
     except httpx.HTTPStatusError as e:
-        logger.warning(
-            f"MangaPlus HTTP {e.response.status_code} for title {title_id}"
-        )
+        logger.warning(f"MangaPlus HTTP {e.response.status_code} for title {title_id}")
     except Exception as e:
         logger.warning(f"MangaPlus fetch failed for title {title_id}: {e}")
 
-    return None
+    return {"chapter": None, "title": None}
 
 
 # ── Internal parsing ───────────────────────────────────────────────────────────
 
-def _parse_latest_chapter(data: bytes) -> str | None:
+def _parse_latest_chapter_info(data: bytes) -> dict:
     """
-    Decode a protobuf binary payload and return the highest chapter number
-    found anywhere in the message tree.
+    Decode a protobuf binary payload and return {"chapter": str|None, "title": str|None}
+    for the highest-numbered chapter found.
     """
     try:
         decoded, _ = blackboxprotobuf.decode_message(data)
-        names = _collect_chapter_names(decoded)
-        if not names:
-            logger.debug("MangaPlus: no chapter name strings found in protobuf")
-            return None
+        pairs = _collect_chapter_info(decoded)
+        if not pairs:
+            logger.debug("MangaPlus: no chapter entries found in protobuf")
+            return {"chapter": None, "title": None}
 
-        numbers = [_extract_number(n) for n in names]
-        numbers = [n for n in numbers if n is not None and n <= _MAX_CHAPTER]
-        if not numbers:
-            return None
+        best_num: float | None = None
+        best_name: str | None = None
+        best_title: str | None = None
 
-        best = max(numbers)
-        # Return as "68" for whole numbers, "68.5" for decimal chapters
-        return str(int(best)) if best == int(best) else str(best)
+        for name, subtitle in pairs:
+            num = _extract_number(name)
+            if num is None or num > _MAX_CHAPTER:
+                continue
+            if best_num is None or num > best_num:
+                best_num = num
+                best_name = name
+                best_title = subtitle
+
+        if best_num is None:
+            return {"chapter": None, "title": None}
+
+        chapter = str(int(best_num)) if best_num == int(best_num) else str(best_num)
+        return {"chapter": chapter, "title": best_title}
 
     except Exception as e:
         logger.warning(f"MangaPlus protobuf parse error: {e}")
-        return None
+        return {"chapter": None, "title": None}
 
 
-def _collect_chapter_names(obj: Any) -> list[str]:
+def _collect_chapter_info(obj: Any) -> list[tuple[str, str | None]]:
     """
-    Recursively walk a decoded blackboxprotobuf dict tree and collect any
-    string values that match a chapter-name pattern:
-      "Ch. 68"  |  "Ch.68"  |  "#68"  |  "Chapter 68"  |  "#68.5"
+    Structurally walk a decoded blackboxprotobuf dict tree and collect
+    (name, subtitle) pairs from Chapter objects.
 
-    A prefix (``#``, ``Ch.``, ``Chapter``) is **required** to avoid matching
-    bare-number metadata fields (e.g. group-level episode counts that the
-    MangaPlus API includes as string values at ``ChapterListGroup.1``).
+    A Chapter dict is identified by having field "3" whose value fully matches
+    a chapter-number pattern (e.g. "Ch. 68", "#68").  When found, field "4"
+    (subTitle) is captured as the chapter title if present and non-empty.
 
-    Uses the shared CHAPTER_CANONICAL_RE from chapter_utils.
+    Recursion stops at each matched Chapter node — chapters don't contain
+    nested chapters so this avoids double-counting.
     """
-    results: list[str] = []
+    results: list[tuple[str, str | None]] = []
+
     if isinstance(obj, dict):
+        raw3 = obj.get("3")
+        if isinstance(raw3, (str, bytes)):
+            s = raw3.decode("utf-8", errors="ignore") if isinstance(raw3, bytes) else raw3
+            s = s.strip()
+            if CHAPTER_CANONICAL_RE.fullmatch(s):
+                # This dict is a Chapter node — capture name + optional subTitle
+                raw4 = obj.get("4")
+                subtitle: str | None = None
+                if isinstance(raw4, (str, bytes)):
+                    t = raw4.decode("utf-8", errors="ignore") if isinstance(raw4, bytes) else raw4
+                    subtitle = t.strip() or None
+                results.append((s, subtitle))
+                return results  # don't recurse further into this Chapter dict
+
         for v in obj.values():
-            results.extend(_collect_chapter_names(v))
+            results.extend(_collect_chapter_info(v))
+
     elif isinstance(obj, list):
         for item in obj:
-            results.extend(_collect_chapter_names(item))
-    elif isinstance(obj, (str, bytes)):
-        s = obj.decode("utf-8", errors="ignore") if isinstance(obj, bytes) else obj
-        s = s.strip()
-        # Only match strings that are ENTIRELY a chapter reference (with prefix).
-        # This filters out bare-number metadata fields like group episode counts.
-        if CHAPTER_CANONICAL_RE.fullmatch(s):
-            results.append(s)
+            results.extend(_collect_chapter_info(item))
+
     return results
 
 

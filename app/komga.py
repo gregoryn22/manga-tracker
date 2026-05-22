@@ -128,16 +128,19 @@ class KomgaClient:
 
     # ── Chapter tracking ──────────────────────────────────────────────────
 
-    def get_latest_chapter(self, series_id: str) -> tuple[str | None, str | None]:
+    def get_latest_chapter(self, series_id: str) -> tuple[str | None, str | None, str | None]:
         """
-        Return (chapter, date_added) for the highest-numbered book in a Komga series.
+        Return (chapter, date_added, book_title) for the highest-numbered book.
 
         chapter    — display number string ("68", "12.5") or None if no books.
         date_added — ISO-8601 date string ("YYYY-MM-DD") from the book's `created`
                      field (when Komga first scanned the file), or None.
+        book_title — metadata.title from the book (e.g. "The Finale"), or None.
+                     This is the user-editable per-book title in Komga, distinct
+                     from the series name and the chapter number.
 
         Uses GET /api/v1/series/{seriesId}/books?sort=metadata.numberSort,desc&size=1.
-        Both values come from the same single API response — no extra cost.
+        All three values come from the same single API response — no extra cost.
         """
         data = self._get(
             f"/series/{series_id}/books",
@@ -150,7 +153,7 @@ class KomgaClient:
         content = data.get("content", [])
         if not content:
             logger.debug("Komga: series %s has no books", series_id)
-            return None, None
+            return None, None, None
 
         book = content[0]
         metadata = book.get("metadata", {})
@@ -160,12 +163,17 @@ class KomgaClient:
         raw_created = book.get("created") or book.get("fileLastModified")
         date_added = raw_created[:10] if raw_created else None
 
+        # metadata.title is the user-editable per-book title (distinct from the
+        # chapter number). Only include it when it's not just a bare number or empty.
+        raw_book_title = (metadata.get("title") or "").strip()
+        book_title = raw_book_title if raw_book_title else None
+
         # metadata.number is the display number (e.g. "68", "12.5")
         number = metadata.get("number")
         if number:
             chapter = str(number).strip()
             logger.debug("Komga: series %s latest chapter = %s", series_id, chapter)
-            return chapter, date_added
+            return chapter, date_added, book_title
 
         # Fallback: use numberSort if number is empty
         number_sort = metadata.get("numberSort")
@@ -176,10 +184,12 @@ class KomgaClient:
                 "Komga: series %s latest chapter (from numberSort) = %s",
                 series_id, chapter,
             )
-            return chapter, date_added
+            return chapter, date_added, book_title
 
-        # Last resort: use the book's name
-        name = metadata.get("title") or book.get("name", "")
+        # Last resort: parse chapter from the book's title field.
+        # In this path book_title is the fallback name, so don't expose it as a
+        # chapter title (it's being used as the number source, not a display title).
+        name = raw_book_title or book.get("name", "")
         if name:
             from .chapter_utils import parse_chapter_loose
             chapter = parse_chapter_loose(name)
@@ -188,10 +198,10 @@ class KomgaClient:
                     "Komga: series %s latest chapter (parsed from %r) = %s",
                     series_id, name, chapter,
                 )
-                return chapter, date_added
+                return chapter, date_added, None
 
         logger.warning("Komga: series %s has books but no chapter number metadata", series_id)
-        return None, date_added
+        return None, date_added, None
 
     def get_series_info(self, series_id: str) -> dict:
         """

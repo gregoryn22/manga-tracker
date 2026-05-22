@@ -50,6 +50,8 @@ EXPOSED_KEYS = [
     "poll_failure_push_threshold",
     "webhook_enabled",
     "webhook_url",
+    "rich_notification_chapter_titles",
+    "notify_locked_chapters",
     "default_page",
     "grid_density",
     "rating_input_mode",
@@ -113,6 +115,8 @@ class UpdateSettingsRequest(BaseModel):
     poll_failure_push_threshold: str | None = None
     webhook_enabled: str | None = None
     webhook_url: str | None = None
+    rich_notification_chapter_titles: str | None = None
+    notify_locked_chapters: str | None = None
     default_page: str | None = None
     grid_density: str | None = None
     rating_input_mode: str | None = None
