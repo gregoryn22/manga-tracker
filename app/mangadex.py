@@ -136,6 +136,43 @@ def get_latest_chapter(manga_id: str) -> str | None:
     return str(chapter)
 
 
+def get_latest_chapter_info(manga_id: str) -> dict:
+    """
+    Return {"chapter": str|None, "title": str|None} for the latest English chapter.
+
+    title is the chapter's own title (e.g. "The Last Stand") when MangaDex has
+    one stored; None or empty string chapters get title=None.
+    """
+    params: dict = {
+        "manga":                manga_id.strip().strip('/'),
+        "translatedLanguage[]": "en",
+        "order[chapter]":       "desc",
+        "limit":                1,
+    }
+    for rating in _CONTENT_RATINGS:
+        params.setdefault("contentRating[]", [])
+        if isinstance(params["contentRating[]"], list):
+            params["contentRating[]"].append(rating)
+        else:
+            params["contentRating[]"] = [params["contentRating[]"], rating]
+
+    data     = _get("/chapter", params)
+    chapters = data.get("data", [])
+
+    if not chapters:
+        return {"chapter": None, "title": None}
+
+    attrs   = chapters[0].get("attributes", {})
+    chapter = attrs.get("chapter")
+    if chapter is None:
+        chapter = "1"  # oneshot
+
+    raw_title = attrs.get("title") or ""
+    title = raw_title.strip() or None
+
+    return {"chapter": str(chapter), "title": title}
+
+
 def get_manga_info(manga_id: str) -> dict:
     """
     Return basic metadata for a MangaDex manga.

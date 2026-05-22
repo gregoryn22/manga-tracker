@@ -1127,6 +1127,40 @@
 
             <div class="notif-behaviour-card">
               <div class="notif-behaviour-header">
+                <div class="notif-behaviour-title">🔒 Notify on locked/paid chapters</div>
+                <select class="input input-compact" x-model="sf.notify_locked_chapters">
+                  <option value="false">Free only</option>
+                  <option value="true">All (incl. paid)</option>
+                </select>
+              </div>
+              <div class="notif-behaviour-desc">
+                When enabled, notifications fire as soon as a chapter drops — even if it
+                requires a subscription or purchase to read. Enable this if you subscribe
+                to MangaUp! (Square Enix) and want to know the moment a chapter is
+                available. When disabled (default), only free chapters trigger notifications.
+                Applies to sources that expose lock status (currently MangaUp!); other
+                sources are unaffected.
+              </div>
+            </div>
+
+            <div class="notif-behaviour-card">
+              <div class="notif-behaviour-header">
+                <div class="notif-behaviour-title">🏷 Chapter titles in notifications</div>
+                <select class="input input-compact" x-model="sf.rich_notification_chapter_titles">
+                  <option value="true">On</option>
+                  <option value="false">Off</option>
+                </select>
+              </div>
+              <div class="notif-behaviour-desc">
+                When a chapter title is available from the source (e.g. MangaDex or Komga),
+                include it in the notification message — e.g. <em>Ch. 42: The Finale</em>.
+                Only applies to sources that provide chapter titles; MangaUpdates releases
+                are not affected.
+              </div>
+            </div>
+
+            <div class="notif-behaviour-card">
+              <div class="notif-behaviour-header">
                 <div class="notif-behaviour-title">⚠ Polling failure alerts → Pushover</div>
                 <select class="input input-compact" x-model="sf.poll_failure_push_enabled">
                   <option value="false">Off</option>
