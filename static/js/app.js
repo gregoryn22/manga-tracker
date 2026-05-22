@@ -31,7 +31,7 @@ function app() {
     activityFilter: '',
 
     // Settings form
-    sf: { pushover_user_key:'', pushover_app_token:'', pushover_enabled:'false', push_chapter_updates:'true', push_news:'false', push_reading_only:'false', updates_reading_only:'false', poll_interval_hours:'6', mangabaka_token:'', mangabaka_pat:'', mb_sync_enabled:'false', mu_enabled:'true', kmanga_email:'', kmanga_password:'', kmanga_recaptcha_token:'', komga_url:'', komga_api_key:'', komga_sync_read_progress:'false', idle_detection_enabled:'false', idle_threshold_days:'90', idle_auto_archive:'false', webhook_enabled:'false', webhook_url:'', default_page:'library', grid_density:'normal',
+    sf: { pushover_user_key:'', pushover_app_token:'', pushover_enabled:'false', push_chapter_updates:'true', push_news:'false', push_reading_only:'false', rich_notification_chapter_titles:'true', notify_locked_chapters:'false', updates_reading_only:'false', poll_interval_hours:'6', mangabaka_token:'', mangabaka_pat:'', mb_sync_enabled:'false', mu_enabled:'true', kmanga_email:'', kmanga_password:'', kmanga_recaptcha_token:'', komga_url:'', komga_api_key:'', komga_sync_read_progress:'false', idle_detection_enabled:'false', idle_threshold_days:'90', idle_auto_archive:'false', webhook_enabled:'false', webhook_url:'', default_page:'library', grid_density:'normal',
       // ── Display preferences ────────────────────────────────────────────
       show_source_badges:    'true',   // platform banner (MangaPlus, K Manga, etc.) on cards
       show_ratings_on_cards: 'true',   // ★ score overlay on cover image

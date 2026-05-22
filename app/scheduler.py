@@ -55,12 +55,12 @@ from .kmanga import (
     KMangaError,
     KMangaRegionError,
 )
-from .mangaplus import get_latest_chapter as mp_get_latest_chapter
+from .mangaplus import get_latest_chapter_info as mp_get_latest_chapter_info
 from .mangadex import MangaDexError, MangaDexNotFound, MangaDexRateLimited
-from .mangadex import get_latest_chapter as mdx_get_latest_chapter
+from .mangadex import get_latest_chapter_info as mdx_get_latest_chapter_info
 from .komga import KomgaClient, KomgaAuthError, KomgaConnectionError, KomgaError, KomgaNotFound
 from .mangaup import MangaUpError, MangaUpNotFound
-from .mangaup import get_latest_chapter as mup_get_latest_chapter
+from .mangaup import get_latest_chapter_info as mup_get_latest_chapter_info
 from .notifier import clear_settings_cache, create_notification, get_pushover_creds, send_pushover
 
 logger = logging.getLogger(__name__)
@@ -850,6 +850,7 @@ def _send_chapter_notification(
     release_date: str | None,
     old_chapter: str | None,
     send_push: bool = True,
+    chapter_title: str | None = None,
 ):
     create_notification(
         db=db,
@@ -863,6 +864,7 @@ def _send_chapter_notification(
             "group_name": group_name,
             "release_date": release_date,
             "old_chapter": old_chapter,
+            "chapter_title": chapter_title,
             "url": series.mu_url or series.mangabaka_url,
             "cover_url": series.best_cover(),
         },
@@ -1001,9 +1003,13 @@ def _poll_via_simulpub(db: Session, series_list: list[TrackedSeries]):
 
 def _poll_mangaplus(db: Session, series_list: list[TrackedSeries]):
     """Poll MangaPlus API for each series and notify on new chapters."""
+    rich_titles = get_setting(db, "rich_notification_chapter_titles", "true") == "true"
+
     for series in series_list:
         try:
-            chapter = mp_get_latest_chapter(series.simulpub_id)
+            info = mp_get_latest_chapter_info(series.simulpub_id)
+            chapter = info["chapter"]
+            chapter_title = info["title"]
             if not chapter:
                 logger.debug(f"MangaPlus returned nothing for '{series.title}' (id={series.simulpub_id})")
                 series.last_checked = datetime.utcnow()
@@ -1023,7 +1029,8 @@ def _poll_mangaplus(db: Session, series_list: list[TrackedSeries]):
                 series.latest_release_date = datetime.utcnow().strftime("%Y-%m-%d")
                 series.latest_release_group = "MangaPlus (simulpub)"
 
-                ch_str = f"Ch. {chapter}"
+                title_suffix = f": {chapter_title}" if (rich_titles and chapter_title) else ""
+                ch_str = f"Ch. {chapter}{title_suffix}"
                 message = f"{series.title} — {ch_str} · MangaPlus (simulpub)"
 
                 rel = Release(
@@ -1049,6 +1056,7 @@ def _poll_mangaplus(db: Session, series_list: list[TrackedSeries]):
                     group_name="MangaPlus (simulpub)",
                     release_date=series.latest_release_date,
                     old_chapter=old_chapter,
+                    chapter_title=chapter_title,
                 )
                 logger.info(f"✓ MangaPlus new chapter: {message}")
             else:
@@ -1245,12 +1253,18 @@ def _poll_mangaup(db: Session, series_list: list[TrackedSeries]):
     """
     Poll MangaUp! (Square Enix Manga) for each series and notify on new chapters.
 
-    No authentication required — chapter data is scraped from the __NEXT_DATA__
-    JSON block embedded in every publicly accessible manga page.
+    Uses the protobuf API (global-api.manga-up.com) when blackboxprotobuf is
+    available — provides subtitle and skips paid chapters automatically.
+    Falls back to __NEXT_DATA__ web scraping otherwise.
     """
+    rich_titles   = get_setting(db, "rich_notification_chapter_titles", "true") == "true"
+    incl_locked   = get_setting(db, "notify_locked_chapters", "false") == "true"
+
     for series in series_list:
         try:
-            chapter = mup_get_latest_chapter(series.simulpub_id)
+            info = mup_get_latest_chapter_info(series.simulpub_id, include_locked=incl_locked)
+            chapter = info["chapter"]
+            chapter_title = info["title"]
             if not chapter:
                 logger.debug(
                     f"MangaUp!: no chapter data for '{series.title}' (id={series.simulpub_id})"
@@ -1271,7 +1285,8 @@ def _poll_mangaup(db: Session, series_list: list[TrackedSeries]):
                 series.latest_release_date  = datetime.utcnow().strftime("%Y-%m-%d")
                 series.latest_release_group = "MangaUp! (simulpub)"
 
-                ch_str  = f"Ch. {chapter}"
+                title_suffix = f": {chapter_title}" if (rich_titles and chapter_title) else ""
+                ch_str  = f"Ch. {chapter}{title_suffix}"
                 message = f"{series.title} — {ch_str} · MangaUp! (simulpub)"
 
                 mup_url = f"https://global.manga-up.com/en/manga/{series.simulpub_id}"
@@ -1298,6 +1313,7 @@ def _poll_mangaup(db: Session, series_list: list[TrackedSeries]):
                     group_name="MangaUp! (simulpub)",
                     release_date=series.latest_release_date,
                     old_chapter=old_chapter,
+                    chapter_title=chapter_title,
                 )
                 logger.info(f"✓ MangaUp! new chapter: {message}")
             else:
@@ -1334,9 +1350,13 @@ def _poll_mangadex(db: Session, series_list: list[TrackedSeries]):
     Manga IDs are UUIDs stored in simulpub_id.  No authentication required.
     Chapter numbers come directly from the API as strings ("68", "19.6", etc.).
     """
+    rich_titles = get_setting(db, "rich_notification_chapter_titles", "true") == "true"
+
     for series in series_list:
         try:
-            chapter = mdx_get_latest_chapter(series.simulpub_id)
+            info = mdx_get_latest_chapter_info(series.simulpub_id)
+            chapter = info["chapter"]
+            chapter_title = info["title"]
             if not chapter:
                 logger.debug(
                     f"MangaDex: no chapter data for '{series.title}' (id={series.simulpub_id})"
@@ -1357,7 +1377,8 @@ def _poll_mangadex(db: Session, series_list: list[TrackedSeries]):
                 series.latest_release_date  = datetime.utcnow().strftime("%Y-%m-%d")
                 series.latest_release_group = "MangaDex"
 
-                ch_str  = f"Ch. {chapter}"
+                title_suffix = f": {chapter_title}" if (rich_titles and chapter_title) else ""
+                ch_str  = f"Ch. {chapter}{title_suffix}"
                 message = f"{series.title} — {ch_str} · MangaDex"
 
                 mdx_url = f"https://mangadex.org/title/{series.simulpub_id}"
@@ -1384,6 +1405,7 @@ def _poll_mangadex(db: Session, series_list: list[TrackedSeries]):
                     group_name="MangaDex",
                     release_date=series.latest_release_date,
                     old_chapter=old_chapter,
+                    chapter_title=chapter_title,
                 )
                 logger.info(f"✓ MangaDex new chapter: {message}")
             else:
@@ -1431,6 +1453,7 @@ def _poll_komga(db: Session, series_list: list[TrackedSeries]):
         return
 
     sync_read_progress = get_setting(db, "komga_sync_read_progress", "false") == "true"
+    rich_titles = get_setting(db, "rich_notification_chapter_titles", "true") == "true"
     client = KomgaClient(komga_url, komga_key)
 
     for series in series_list:
@@ -1438,7 +1461,7 @@ def _poll_komga(db: Session, series_list: list[TrackedSeries]):
             is_volume = (getattr(series, "komga_track_mode", None) or "chapter") == "volume"
             unit_label = "Vol." if is_volume else "Ch."
 
-            number, date_added = client.get_latest_chapter(series.simulpub_id)
+            number, date_added, book_title = client.get_latest_chapter(series.simulpub_id)
             if not number:
                 logger.debug(
                     f"Komga: no data for '{series.title}' (id={series.simulpub_id})"
@@ -1466,7 +1489,8 @@ def _poll_komga(db: Session, series_list: list[TrackedSeries]):
                 series.latest_release_date  = release_date
                 series.latest_release_group = group_name
 
-                message = f"{series.title} — {unit_label} {number} · Komga"
+                title_suffix = f": {book_title}" if (rich_titles and book_title) else ""
+                message = f"{series.title} — {unit_label} {number}{title_suffix} · Komga"
 
                 kg_url = f"{komga_url}/series/{series.simulpub_id}"
                 rel = Release(
@@ -1492,6 +1516,7 @@ def _poll_komga(db: Session, series_list: list[TrackedSeries]):
                     group_name=group_name,
                     release_date=series.latest_release_date,
                     old_chapter=old_chapter,
+                    chapter_title=book_title,
                 )
                 logger.info(f"✓ Komga new: {message}")
             else:
@@ -1668,6 +1693,7 @@ def _process_komga_soft_links(db: Session):
         return
 
     client = KomgaClient(komga_url, komga_key)
+    rich_titles = get_setting(db, "rich_notification_chapter_titles", "true") == "true"
     changed = False
 
     for series in candidates:
@@ -1678,7 +1704,7 @@ def _process_komga_soft_links(db: Session):
         # ── Behaviour 1: release detection ──────────────────────────────
         if series.komga_detect_releases and series.reading_status in ACTIVE_STATUSES:
             try:
-                number, date_added = client.get_latest_chapter(komga_id)
+                number, date_added, book_title = client.get_latest_chapter(komga_id)
                 if number and chapter_is_newer(number, series.mu_latest_chapter):
                     group_name = "Komga (volume)" if is_volume else "Komga"
                     if not _simulpub_release_exists(db, series.id, number, group_name):
@@ -1701,7 +1727,8 @@ def _process_komga_soft_links(db: Session):
                             mu_url=f"{komga_url}/series/{komga_id}",
                         ))
 
-                        message = f"{series.title} — {unit_label} {number} · Komga"
+                        title_suffix = f": {book_title}" if (rich_titles and book_title) else ""
+                        message = f"{series.title} — {unit_label} {number}{title_suffix} · Komga"
                         _send_chapter_notification(
                             db=db,
                             series=series,
@@ -1711,6 +1738,7 @@ def _process_komga_soft_links(db: Session):
                             group_name=group_name,
                             release_date=release_date,
                             old_chapter=old_chapter,
+                            chapter_title=book_title,
                         )
                         logger.info(f"✓ Komga soft-link new: {message}")
                         changed = True
