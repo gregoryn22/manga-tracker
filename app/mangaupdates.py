@@ -61,7 +61,8 @@ def _get(path: str, params: dict | None = None) -> dict[str, Any]:
         resp = _request("get", url, params=params)
         return resp.json()
     except httpx.HTTPStatusError as e:
-        logger.error(f"MU GET {url} → {e.response.status_code}")
+        level = logger.warning if e.response.status_code in (404, 405) else logger.error
+        level(f"MU GET {url} → {e.response.status_code}")
         raise
     except Exception as e:
         logger.error(f"MU GET {url} error: {e}")
