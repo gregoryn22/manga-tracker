@@ -358,59 +358,6 @@ def _should_skip_poll(series: TrackedSeries) -> bool:
     return (series.id % skip_ratio) != 0
 
 
-def _titles_plausibly_match(tracked_title: str, release_title: str) -> bool:
-    """
-    Quick sanity check that a release record plausibly belongs to a tracked series.
-
-    MU uses different title forms in different places (English vs Japanese,
-    abbreviations, subtitles) so this is intentionally lenient.  It only rejects
-    releases that are clearly from a different franchise.
-
-    Strategy:
-      1. Exact (case-insensitive) match → True.
-      2. One title is a substring of the other → True.
-      3. For very short titles (1-2 words): require exact or substring match only —
-         word-overlap is too unreliable for short titles.
-      4. For longer titles: split into word-sets; if they share ≥40% of their words → True.
-      5. Otherwise → False.
-    """
-    a = tracked_title.lower().strip()
-    b = release_title.lower().strip()
-
-    if a == b:
-        return True
-    if a in b or b in a:
-        return True
-
-    # Word overlap — generous threshold to handle English/Japanese title differences
-    words_a = set(a.split())
-    words_b = set(b.split())
-    if not words_a or not words_b:
-        return True  # can't compare empty word sets → let it through
-
-    # Short titles (1-2 words) must match via exact or substring (checked above).
-    # Word-overlap is too unreliable for short titles.
-    min_len = min(len(words_a), len(words_b))
-    if min_len <= 2:
-        return False
-
-    # Filter out common stop-words that inflate overlap scores for short titles
-    _STOP = {"a", "an", "the", "no", "of", "on", "in", "to", "de", "wa", "ga", "ni"}
-    content_a = words_a - _STOP
-    content_b = words_b - _STOP
-    if content_a and content_b:
-        content_overlap = len(content_a & content_b)
-        content_min = min(len(content_a), len(content_b))
-        if content_overlap >= max(2, content_min * 0.5):
-            return True
-    else:
-        # All words were stop-words — fall back to raw overlap
-        overlap = len(words_a & words_b)
-        if overlap >= max(2, min_len * 0.5):
-            return True
-
-    return False
-
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
@@ -734,16 +681,6 @@ def _check_mu_series(
             logger.debug(f"Historical release query failed for '{series.title}': {e}")
 
     for rec in candidates:
-        # Safety guard: if the release record contains a title that is wildly
-        # different from our tracked series, skip it.  This prevents cross-series
-        # contamination if the MU API ever returns unfiltered results.
-        release_title = (rec.get("title") or "").strip()
-        if release_title and not _titles_plausibly_match(series.title, release_title):
-            logger.warning(
-                f"Skipping release '{release_title}' ch={rec.get('chapter')!r} — "
-                f"does not match tracked series '{series.title}'"
-            )
-            continue
         _process_release(db, series, rec)
 
     series.last_checked = datetime.utcnow()
