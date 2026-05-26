@@ -1098,7 +1098,7 @@
                           <template x-for="n in [1,2,3,4,5,6,7,8,9,10]" :key="n">
                             <button class="tier-star" :class="{active: (rHover ?? s.user_rating) >= n, 'tier-star--num': sf.rating_input_mode === 'numeric'}"
                               @mouseenter.stop="rHover = n" @mouseleave.stop="rHover = null"
-                              @click.stop="quickRate(s.id, s.user_rating === row.score ? null : n)"
+                              @click.stop="quickRate(s.id, s.user_rating === n ? null : n)"
                               x-text="sf.rating_input_mode === 'numeric' ? n : '★'"></button>
                           </template>
                         </div>
