@@ -479,6 +479,11 @@ def _migrate_db():
                 conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}"))
                 _log.info(f"DB migration: added {table}.{col}")
 
+        # Data migration: rename 'on_hold' → 'paused' to align with MangaBaka's state enum
+        conn.execute(text(
+            "UPDATE tracked_series SET reading_status = 'paused' WHERE reading_status = 'on_hold'"
+        ))
+
         for idx_name, table, columns in indexes:
             conn.execute(text(
                 f"CREATE INDEX IF NOT EXISTS {idx_name} ON {table} ({columns})"
@@ -526,6 +531,7 @@ def _seed_settings():
             "mangabaka_token": os.getenv("MANGABAKA_TOKEN", ""),
             "mangabaka_pat": os.getenv("MANGABAKA_PAT", ""),
             "mb_sync_enabled": "false",
+            "mb_auto_add": "false",
             "pushover_user_key": os.getenv("PUSHOVER_USER_KEY", ""),
             "pushover_app_token": os.getenv("PUSHOVER_APP_TOKEN", ""),
             "poll_interval_hours": os.getenv("POLL_INTERVAL_HOURS", "6"),

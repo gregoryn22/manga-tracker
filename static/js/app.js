@@ -3,7 +3,7 @@ function app() {
     page: 'library',
     loading: false,
     library: [],
-    filters: ['all'],  // multi-select: ['all'], ['reading','on_hold'], ['updates','reading'], etc.
+    filters: ['all'],  // multi-select: ['all'], ['reading','paused'], ['updates','reading'], etc.
     viewMode: 'grid',  // 'grid' or 'list'
 
     // Library toolbar
@@ -31,7 +31,7 @@ function app() {
     activityFilter: '',
 
     // Settings form
-    sf: { pushover_user_key:'', pushover_app_token:'', pushover_enabled:'false', push_chapter_updates:'true', push_news:'false', push_reading_only:'false', rich_notification_chapter_titles:'true', notify_locked_chapters:'false', updates_reading_only:'false', poll_interval_hours:'6', mangabaka_token:'', mangabaka_pat:'', mb_sync_enabled:'false', mu_enabled:'true', kmanga_email:'', kmanga_password:'', kmanga_recaptcha_token:'', komga_url:'', komga_api_key:'', komga_sync_read_progress:'false', idle_detection_enabled:'false', idle_threshold_days:'90', idle_auto_archive:'false', webhook_enabled:'false', webhook_url:'', default_page:'library', grid_density:'normal',
+    sf: { pushover_user_key:'', pushover_app_token:'', pushover_enabled:'false', push_chapter_updates:'true', push_news:'false', push_reading_only:'false', rich_notification_chapter_titles:'true', notify_locked_chapters:'false', updates_reading_only:'false', poll_interval_hours:'6', mangabaka_token:'', mangabaka_pat:'', mb_sync_enabled:'false', mb_auto_add:'false', mu_enabled:'true', kmanga_email:'', kmanga_password:'', kmanga_recaptcha_token:'', komga_url:'', komga_api_key:'', komga_sync_read_progress:'false', idle_detection_enabled:'false', idle_threshold_days:'90', idle_auto_archive:'false', webhook_enabled:'false', webhook_url:'', default_page:'library', grid_density:'normal',
       // ── Display preferences ────────────────────────────────────────────
       show_source_badges:    'true',   // platform banner (MangaPlus, K Manga, etc.) on cards
       show_ratings_on_cards: 'true',   // ★ score overlay on cover image
@@ -763,7 +763,11 @@ function app() {
     async testMbSync() {
       try {
         const d = await this.api('/api/settings/test-mb-sync', 'POST');
-        this.toast(`Connected as ${d.username}`, 'success');
+        if (d.missing_write_scope) {
+          this.toast(`Connected as ${d.username} — warning: PAT missing library.write scope, sync will fail`, 'warning');
+        } else {
+          this.toast(`Connected as ${d.username}`, 'success');
+        }
       } catch(e) { this.toast(e.detail || 'PAT invalid or connection failed', 'error'); }
     },
 
@@ -788,7 +792,10 @@ function app() {
             if (!s.running) {
               clearInterval(poll);
               this.mbPushingAll = false;
-              const parts = [`${s.pushed} pushed`, `${s.skipped} not in MB`];
+              const parts = [];
+              if (s.added > 0) parts.push(`${s.added} added to MB`);
+              parts.push(`${s.pushed} updated`);
+              if (s.skipped > 0) parts.push(`${s.skipped} not in MB`);
               if (s.failed > 0) parts.push(`${s.failed} failed (rate limited)`);
               this.toast(`MB push done — ${parts.join(', ')}`, s.failed > 0 ? 'warning' : 'success');
             }

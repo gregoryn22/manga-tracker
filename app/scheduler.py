@@ -69,7 +69,7 @@ scheduler = BackgroundScheduler(timezone="UTC")
 _JOB_ID = "poll_updates"
 _METADATA_JOB_ID = "refresh_metadata"
 
-ACTIVE_STATUSES = {"reading", "on_hold", "rereading"}
+ACTIVE_STATUSES = {"reading", "paused", "rereading"}
 
 _poll_state: dict = {
     "running": False,
@@ -92,7 +92,8 @@ _mb_push_all_state: dict = {
     "last_finished": None,
     "total": 0,
     "pushed": 0,
-    "skipped": 0,   # 404 — series not in MB library
+    "added": 0,     # newly added to MB library via POST then pushed
+    "skipped": 0,   # 404 — not in MB library (auto_add off) or Komga no-link
     "failed": 0,    # rate limited or transient error after retries
 }
 
@@ -204,7 +205,7 @@ def _do_mb_push_all() -> None:
     rate limited or error after retry).
     """
     import time as _time
-    from .mangabaka_sync import push_entry, _KOMGA_ID_FLOOR
+    from .mangabaka_sync import push_entry, add_to_library, _KOMGA_ID_FLOOR
 
     state = _mb_push_all_state
     if state["running"]:
@@ -213,6 +214,7 @@ def _do_mb_push_all() -> None:
     state["running"] = True
     state["last_started"] = datetime.utcnow()
     state["pushed"] = 0
+    state["added"] = 0
     state["skipped"] = 0
     state["failed"] = 0
     state["total"] = 0
@@ -225,9 +227,10 @@ def _do_mb_push_all() -> None:
             logger.warning("MB push-all: no PAT configured — aborting")
             return
 
+        auto_add = get_setting(db, "mb_auto_add", "false") == "true"
         all_series = db.query(TrackedSeries).all()
         state["total"] = len(all_series)
-        logger.info(f"▶ MB push-all starting for {len(all_series)} series…")
+        logger.info(f"▶ MB push-all starting for {len(all_series)} series (auto_add={auto_add})…")
 
         for series in all_series:
             # Synthetic Komga IDs are not real MB series — skip unless the user
@@ -266,10 +269,28 @@ def _do_mb_push_all() -> None:
                     user_rating=series.user_rating,
                 )
 
+            if result is False and auto_add:
+                # Series not in MB library — POST to add with full progress in one call
+                result = add_to_library(
+                    effective_id, pat, series.reading_status,
+                    series.current_chapter, series.current_volume,
+                    series.date_started, series.date_completed, series.user_rating,
+                )
+                if result is True:
+                    state["added"] += 1
+                    logger.debug(f"MB push-all: added series {effective_id} to MB library")
+                elif result is False:
+                    state["skipped"] += 1
+                else:
+                    state["failed"] += 1
+                    logger.warning(f"MB push-all: failed to add series {effective_id}")
+                _time.sleep(_MB_PUSH_INTERVAL)
+                continue
+
             if result is True:
                 state["pushed"] += 1
             elif result is False:
-                state["skipped"] += 1   # 404 — not in MB library
+                state["skipped"] += 1   # 404 — not in MB library (auto_add off or bad ID)
             else:
                 state["failed"] += 1    # still rate limited or error after retry
                 logger.warning(f"MB push-all: series {series.id} failed after retry")
@@ -278,7 +299,7 @@ def _do_mb_push_all() -> None:
 
         logger.info(
             f"✓ MB push-all done — "
-            f"pushed={state['pushed']}, "
+            f"pushed={state['pushed']}, added={state['added']}, "
             f"skipped(not-in-MB)={state['skipped']}, "
             f"failed={state['failed']}"
         )
@@ -1760,7 +1781,39 @@ def _refresh_series_metadata(db: Session, series: TrackedSeries, mb_client):
         try:
             resp = mb_client.get_series(mb_id)
             if resp.get("status") == 200 and resp.get("data"):
-                flat = series_from_api(resp["data"])
+                api_data = resp["data"]
+
+                # Handle series lifecycle states before processing metadata
+                mb_series_state = api_data.get("state", "active")
+                if mb_series_state == "deleted":
+                    logger.warning(
+                        f"MB: series {mb_id} ('{series.title}') is deleted — skipping metadata update"
+                    )
+                    return
+                if mb_series_state == "merged":
+                    merged_into = api_data.get("merged_with")
+                    if merged_into:
+                        logger.info(
+                            f"MB: series {mb_id} ('{series.title}') merged into {merged_into} "
+                            f"— updating link and re-fetching"
+                        )
+                        series.mb_linked_id = merged_into
+                        # Re-fetch with the new ID
+                        try:
+                            resp2 = mb_client.get_series(merged_into)
+                            if resp2.get("status") == 200 and resp2.get("data"):
+                                api_data = resp2["data"]
+                            else:
+                                return
+                        except Exception:
+                            return
+                    else:
+                        logger.warning(
+                            f"MB: series {mb_id} merged but no merged_with ID — skipping"
+                        )
+                        return
+
+                flat = series_from_api(api_data)
 
                 # Cover — always refresh (CDN URLs can rotate)
                 if flat.get("cover_url"):

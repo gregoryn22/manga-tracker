@@ -14,16 +14,17 @@ from ..database import TrackedSeries, get_db
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/export", tags=["export"])
 
-# MB accepted state values: reading, completed, dropped, on_hold, plan_to_read, rereading
+# MB accepted state values: reading, completed, dropped, paused, plan_to_read, rereading, considering
 _KOMGA_ID_FLOOR = 2_000_000_000
 
 _STATUS_MAP = {
     "reading":      "reading",
     "completed":    "completed",
     "dropped":      "dropped",
-    "on_hold":      "on_hold",
+    "paused":       "paused",
     "plan_to_read": "plan_to_read",
     "rereading":    "rereading",
+    "considering":  "considering",
 }
 
 
@@ -65,7 +66,7 @@ def _series_to_mb_entry(s: TrackedSeries) -> dict:
         "entry": {
             "note": s.notes or None,
             "read_link": None,
-            "rating": round(s.user_rating) if s.user_rating is not None else None,
+            "rating": round(s.user_rating * 10) if s.user_rating is not None else None,
             "state": _STATUS_MAP.get(s.reading_status or "reading", "reading"),
             "priority": 20,
             "is_private": False,

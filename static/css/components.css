@@ -157,7 +157,7 @@ textarea.input { resize: vertical; }
 .chip-new         { background: var(--green); color: white; }
 .chip-plan        { background: var(--blue); color: white; }
 .chip-considering { background: var(--pink); color: white; }
-.chip-hold        { background: var(--yellow); color: #111; }
+.chip-paused      { background: var(--yellow); color: #111; }
 .chip-dropped     { background: var(--red); color: white; }
 .chip-done        { background: var(--text-muted); color: white; }
 .chip-right-stack {
