@@ -1031,15 +1031,53 @@
         </div>
 
         <!-- Tier rows (only tiers with series are shown) -->
-        <template x-for="tier in ratingTiers()" :key="tier.label">
-          <div class="tier-row">
-            <div class="tier-label" :style="`--tier-color: ${tier.color}`">
-              <div class="tier-letter" x-text="tier.label"></div>
-              <div class="tier-range" x-text="tier.range[0] + '–' + tier.range[1]"></div>
+        <template x-if="sf.ratings_view_mode !== 'numeric'">
+          <div>
+            <template x-for="tier in ratingTiers()" :key="tier.label">
+              <div class="tier-row">
+                <div class="tier-label" :style="`--tier-color: ${tier.color}`">
+                  <div class="tier-letter" x-text="tier.label"></div>
+                  <div class="tier-range" x-text="tier.range[0] + '–' + tier.range[1]"></div>
+                </div>
+                <div class="tier-covers">
+                  <template x-for="s in tier.series" :key="s.id">
+                    <div class="tier-card" x-data="{rHover: null}" @click="openDetail(s)">
+                      <div class="tier-cover-wrap">
+                        <template x-if="s.cover_url">
+                          <img class="tier-cover-img" :src="s.cover_url" :alt="s.title" loading="lazy" @error="$el.style.display='none'" />
+                        </template>
+                        <template x-if="!s.cover_url">
+                          <div class="tier-cover-ph">📖</div>
+                        </template>
+                        <div class="tier-star-overlay">
+                          <template x-for="n in [1,2,3,4,5,6,7,8,9,10]" :key="n">
+                            <button class="tier-star" :class="{active: (rHover ?? s.user_rating) >= n}"
+                              @mouseenter.stop="rHover = n" @mouseleave.stop="rHover = null"
+                              @click.stop="quickRate(s.id, s.user_rating === n ? null : n)">★</button>
+                          </template>
+                        </div>
+                        <div class="tier-score-badge" x-text="s.user_rating"></div>
+                      </div>
+                      <div class="tier-card-title" x-text="s.title"></div>
+                    </div>
+                  </template>
+                </div>
+              </div>
+            </template>
+          </div>
+        </template>
+
+        <!-- Numeric view: flat grid sorted by score -->
+        <template x-if="sf.ratings_view_mode === 'numeric'">
+          <div class="card card-padded" x-show="library.filter(s => s.user_rating != null).length > 0">
+            <div class="section-heading">
+              <span class="section-heading-icon">🔢</span>
+              Ranked by Score
+              <span class="section-badge accent" x-text="library.filter(s => s.user_rating != null).length + ' series'"></span>
             </div>
-            <div class="tier-covers">
-              <template x-for="s in tier.series" :key="s.id">
-                <div class="tier-card" x-data="{rHover: null}" @click="openDetail(s)">
+            <div class="tier-covers tier-covers--wrap">
+              <template x-for="s in ratedSeriesSorted()" :key="s.id">
+                <div class="tier-card tier-card--numeric" x-data="{rHover: null}" @click="openDetail(s)">
                   <div class="tier-cover-wrap">
                     <template x-if="s.cover_url">
                       <img class="tier-cover-img" :src="s.cover_url" :alt="s.title" loading="lazy" @error="$el.style.display='none'" />
@@ -1054,7 +1092,7 @@
                           @click.stop="quickRate(s.id, s.user_rating === n ? null : n)">★</button>
                       </template>
                     </div>
-                    <div class="tier-score-badge" x-text="s.user_rating"></div>
+                    <div class="tier-numeric-score" x-text="s.user_rating"></div>
                   </div>
                   <div class="tier-card-title" x-text="s.title"></div>
                 </div>
@@ -1064,7 +1102,7 @@
         </template>
 
         <!-- Empty state when no ratings at all -->
-        <template x-if="ratingTiers().length === 0 && library.filter(s => s.user_rating != null).length === 0">
+        <template x-if="ratingTiers().length === 0 && sf.ratings_view_mode !== 'numeric' && library.filter(s => s.user_rating != null).length === 0">
           <div class="empty-state">
             <div class="empty-icon">⭐</div>
             <h3>No ratings yet</h3>
@@ -1726,6 +1764,16 @@
                       @click="sf.rating_input_mode = 'stars'">★ Stars</button>
               <button class="btn btn-sm" :class="sf.rating_input_mode === 'numeric' ? 'btn-primary' : 'btn-ghost'"
                       @click="sf.rating_input_mode = 'numeric'">123 Numeric</button>
+            </div>
+          </div>
+
+          <div class="settings-row mt-3">
+            <label>Ratings Page View</label>
+            <div class="flex gap-2">
+              <button class="btn btn-sm" :class="sf.ratings_view_mode !== 'numeric' ? 'btn-primary' : 'btn-ghost'"
+                      @click="sf.ratings_view_mode = 'tier'">🏆 Tier List</button>
+              <button class="btn btn-sm" :class="sf.ratings_view_mode === 'numeric' ? 'btn-primary' : 'btn-ghost'"
+                      @click="sf.ratings_view_mode = 'numeric'">🔢 Numeric</button>
             </div>
           </div>
 

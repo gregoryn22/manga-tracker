@@ -45,6 +45,8 @@ function app() {
       default_feed_grouped:  'false',  // persisted feed grouping: 'true' or 'false'
       // Rating input mode
       rating_input_mode:               'stars',
+      // Ratings page view mode
+      ratings_view_mode:               'tier',
       // Rating source for display
       rating_source:                   'mangaupdates',
       // Reading dates display
@@ -247,6 +249,15 @@ function app() {
       const rated = this.library.filter(s => s.user_rating != null);
       if (!rated.length) return '—';
       return (rated.reduce((acc, s) => acc + s.user_rating, 0) / rated.length).toFixed(1);
+    },
+
+    ratedSeriesSorted() {
+      const pool = this.ratingsStatusFilter
+        ? this.library.filter(s => s.reading_status === this.ratingsStatusFilter)
+        : this.library;
+      return pool
+        .filter(s => s.user_rating != null)
+        .sort((a, b) => b.user_rating - a.user_rating || (a.title||'').localeCompare(b.title||''));
     },
 
     async quickRate(seriesId, rating) {
