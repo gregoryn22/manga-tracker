@@ -700,6 +700,7 @@
                 <template x-if="n.notif_type==='chapter_update' && n.meta && n.meta.chapter">
                   <div>
                     <div class="notif-chapter" x-text="'Chapter ' + n.meta.chapter + (n.meta.volume ? ' · Vol. ' + n.meta.volume : '')"></div>
+                    <div class="notif-group" x-show="n.meta.chapter_title" x-text="n.meta.chapter_title"></div>
                     <div class="notif-group" x-show="n.meta.group_name" x-text="'by ' + n.meta.group_name"></div>
                     <div class="notif-group" x-show="n.meta.release_date" x-text="'Released ' + n.meta.release_date"></div>
                     <div class="notif-group" x-show="n.meta.old_chapter" x-text="'Was at ch. ' + n.meta.old_chapter"></div>
