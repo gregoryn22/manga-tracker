@@ -945,6 +945,12 @@ def _poll_mangaplus(db: Session, series_list: list[TrackedSeries]):
     for series in series_list:
         try:
             info = mp_get_latest_chapter_info(series.simulpub_id)
+            if info.get("banned"):
+                logger.error(
+                    "MangaPlus IP ban detected — skipping all MangaPlus series this cycle. "
+                    "Check your server's public IP against MangaPlus Terms of Service."
+                )
+                return
             chapter = info["chapter"]
             chapter_title = info["title"]
             if not chapter:

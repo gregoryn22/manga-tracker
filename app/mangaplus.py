@@ -126,10 +126,26 @@ def get_latest_chapter_info(title_id: int | str) -> dict:
 def _parse_latest_chapter_info(data: bytes) -> dict:
     """
     Decode a protobuf binary payload and return {"chapter": str|None, "title": str|None}
-    for the highest-numbered chapter found.
+    for the highest-numbered chapter found.  Adds "banned": True when the API returns
+    an error response (field 2 = ErrorResult) instead of a success response (field 1).
     """
     try:
         decoded, _ = blackboxprotobuf.decode_message(data)
+
+        # ErrorResult at field "2" means the API returned an error (e.g. IP ban).
+        # SuccessResult lives at field "1" — if that's absent we got an error response.
+        if "2" in decoded and "1" not in decoded:
+            error_block = decoded["2"]
+            # field "2" inside ErrorResult holds the localised popup; field "1" = title
+            popup = error_block.get("2") or error_block.get("3") or {}
+            if isinstance(popup, dict):
+                raw = popup.get("1", b"")
+                msg = raw.decode("utf-8", errors="ignore") if isinstance(raw, bytes) else str(raw)
+            else:
+                msg = "unknown error"
+            logger.error(f"MangaPlus API error response: {msg.splitlines()[0]}")
+            return {"chapter": None, "title": None, "banned": True}
+
         pairs = _collect_chapter_info(decoded)
         if not pairs:
             logger.debug("MangaPlus: no chapter entries found in protobuf")
