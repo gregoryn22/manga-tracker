@@ -1784,9 +1784,9 @@
             <label>Ratings Page View</label>
             <div class="flex gap-2">
               <button class="btn btn-sm" :class="sf.ratings_view_mode !== 'numeric' ? 'btn-primary' : 'btn-ghost'"
-                      @click="sf.ratings_view_mode = 'tier'">🏆 Tier List</button>
+                      @click="sf.ratings_view_mode = 'tier'; saveSettingsSilent()">🏆 Tier List</button>
               <button class="btn btn-sm" :class="sf.ratings_view_mode === 'numeric' ? 'btn-primary' : 'btn-ghost'"
-                      @click="sf.ratings_view_mode = 'numeric'">🔢 Numeric</button>
+                      @click="sf.ratings_view_mode = 'numeric'; saveSettingsSilent()">🔢 Numeric</button>
             </div>
           </div>
 

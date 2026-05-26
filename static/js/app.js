@@ -173,18 +173,32 @@ function app() {
       // Apply persisted view/feed preferences immediately after settings load
       this.viewMode    = this.sf.default_view_mode    || 'grid';
       this.feedGrouped = this.sf.default_feed_grouped === 'true';
+      // Restore ratings filter from localStorage
+      this.ratingsStatusFilter = localStorage.getItem('ratings_status_filter') || '';
       await this.loadLibrary();
       await this.pollUnreadCount();
-      // Load appropriate page based on default_page setting
-      const defaultPage = this.sf.default_page || 'library';
-      if (defaultPage !== 'library') {
-        this.page = defaultPage;
-        if (defaultPage === 'releases') { this.loadReleaseFeed().catch(()=>{}); }
-        else if (defaultPage === 'notifications') { this.loadNotifications().catch(()=>{}); }
-        else if (defaultPage === 'activity') { this.loadActivity().catch(()=>{}); }
-        else if (defaultPage === 'stats') { this.loadStats().catch(()=>{}); }
-        else if (defaultPage === 'komga') { this.loadKomgaBrowse().catch(()=>{}); }
-        else if (defaultPage === 'settings') { this.loadSettings().catch(()=>{}); }
+
+      // Hash routing: URL hash takes priority over default_page setting
+      const validPages = ['library','releases','search','ratings','komga','notifications','activity','stats','settings'];
+      const hashPage = location.hash.slice(1);
+      const startPage = (hashPage && validPages.includes(hashPage)) ? hashPage : (this.sf.default_page || 'library');
+
+      // Keep hash in sync with page navigation and persist ratings filter
+      this.$watch('page', val => { location.hash = val; });
+      this.$watch('ratingsStatusFilter', val => { localStorage.setItem('ratings_status_filter', val); });
+      window.addEventListener('hashchange', () => {
+        const p = location.hash.slice(1);
+        if (validPages.includes(p) && p !== this.page) this.page = p;
+      });
+
+      if (startPage !== 'library') {
+        this.page = startPage;
+        if (startPage === 'releases') { this.loadReleaseFeed().catch(()=>{}); }
+        else if (startPage === 'notifications') { this.loadNotifications().catch(()=>{}); }
+        else if (startPage === 'activity') { this.loadActivity().catch(()=>{}); }
+        else if (startPage === 'stats') { this.loadStats().catch(()=>{}); }
+        else if (startPage === 'komga') { this.loadKomgaBrowse().catch(()=>{}); }
+        else if (startPage === 'settings') { this.loadSettings().catch(()=>{}); }
       } else {
         // Silently prefetch feed in background (skip if section is hidden)
         if (this.sf.show_recent_drops !== 'false') {
