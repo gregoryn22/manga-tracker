@@ -188,6 +188,13 @@ function app() {
       this.$watch('ratingsStatusFilter', val => { localStorage.setItem('ratings_status_filter', val); });
       this.$watch('viewMode',    val => { this.sf.default_view_mode    = val;                  this.saveSettingsSilent(); });
       this.$watch('feedGrouped', val => { this.sf.default_feed_grouped = val ? 'true' : 'false'; this.saveSettingsSilent(); });
+      this.$watch('sf.accent_color', () => this.saveSettingsSilent());
+      this.$watch('sf.font_scale',   () => this.saveSettingsSilent());
+      this.$watch('sf.card_radius',  () => this.saveSettingsSilent());
+      this.$watch('sf.sidebar_width', () => {
+        clearTimeout(this._sidebarSaveTimer);
+        this._sidebarSaveTimer = setTimeout(() => this.saveSettingsSilent(), 500);
+      });
       window.addEventListener('hashchange', () => {
         const p = location.hash.slice(1);
         if (validPages.includes(p) && p !== this.page) this.page = p;

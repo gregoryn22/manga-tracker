@@ -24,6 +24,9 @@ from ..scheduler import (
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
+# Every key in this list must also appear in the `sf` object in static/js/app.js,
+# and every key in `sf` that needs server persistence must appear here.
+# Mismatch = silent data loss: server drops unknown keys on PATCH and never returns them on GET.
 EXPOSED_KEYS = [
     "pushover_user_key",
     "pushover_app_token",
