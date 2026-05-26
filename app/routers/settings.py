@@ -24,6 +24,9 @@ from ..scheduler import (
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
+# Every key in this list must also appear in the `sf` object in static/js/app.js,
+# and every key in `sf` that needs server persistence must appear here.
+# Mismatch = silent data loss: server drops unknown keys on PATCH and never returns them on GET.
 EXPOSED_KEYS = [
     "pushover_user_key",
     "pushover_app_token",
@@ -66,6 +69,15 @@ EXPOSED_KEYS = [
     "show_recent_drops",
     "metadata_refresh_enabled",
     "metadata_refresh_interval_days",
+    "ratings_view_mode",
+    "show_source_badges",
+    "show_ratings_on_cards",
+    "show_rating_votes",
+    "show_progress_bars",
+    "show_card_meta",
+    "show_release_group",
+    "show_tags_on_cards",
+    "show_card_controls",
 ]
 
 
@@ -131,6 +143,15 @@ class UpdateSettingsRequest(BaseModel):
     show_recent_drops: str | None = None
     metadata_refresh_enabled: str | None = None
     metadata_refresh_interval_days: str | None = None
+    ratings_view_mode: str | None = None
+    show_source_badges: str | None = None
+    show_ratings_on_cards: str | None = None
+    show_rating_votes: str | None = None
+    show_progress_bars: str | None = None
+    show_card_meta: str | None = None
+    show_release_group: str | None = None
+    show_tags_on_cards: str | None = None
+    show_card_controls: str | None = None
 
 
 # Sensitive keys that are masked in GET responses.  If a PATCH request sends
