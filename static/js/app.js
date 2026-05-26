@@ -277,8 +277,12 @@ function app() {
         const body = rating === null ? { clear_user_rating: true } : { user_rating: rating };
         const updated = await this.api(`/api/series/${seriesId}`, 'PATCH', body);
         const idx = this.library.findIndex(s => s.id === updated.id);
-        if (idx !== -1) this.library[idx] = updated;
+        if (idx !== -1) this.library.splice(idx, 1, updated);
       } catch(e) { this.toast('Failed to save rating', 'error'); }
+    },
+
+    async saveSettingsSilent() {
+      try { await this.api('/api/settings', 'PATCH', this.sf); } catch(e) {}
     },
 
     // ── Metadata helpers ────────────────────────────────

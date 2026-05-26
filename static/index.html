@@ -107,9 +107,9 @@
       <template x-if="page==='ratings'">
         <div class="flex gap-2 items-center">
           <button class="btn btn-ghost btn-sm" :class="sf.rating_input_mode !== 'numeric' ? 'btn-primary' : ''"
-                  @click="sf.rating_input_mode = 'stars'" title="Rate with stars">★ Stars</button>
+                  @click="sf.rating_input_mode = 'stars'; saveSettingsSilent()" title="Rate with stars">★ Stars</button>
           <button class="btn btn-ghost btn-sm" :class="sf.rating_input_mode === 'numeric' ? 'btn-primary' : ''"
-                  @click="sf.rating_input_mode = 'numeric'" title="Rate with numbers">🔢 Numbers</button>
+                  @click="sf.rating_input_mode = 'numeric'; saveSettingsSilent()" title="Rate with numbers">🔢 Numbers</button>
         </div>
       </template>
     </div>
