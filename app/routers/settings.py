@@ -38,6 +38,7 @@ EXPOSED_KEYS = [
     "mangabaka_token",
     "mangabaka_pat",
     "mb_sync_enabled",
+    "mb_auto_add",
     "mu_enabled",
     "kmanga_email",
     "kmanga_password",          # returned masked; full value stored in DB
@@ -112,6 +113,7 @@ class UpdateSettingsRequest(BaseModel):
     mangabaka_token: str | None = None
     mangabaka_pat: str | None = None
     mb_sync_enabled: str | None = None
+    mb_auto_add: str | None = None
     mu_enabled: str | None = None
     kmanga_email: str | None = None
     kmanga_password: str | None = None
@@ -403,7 +405,13 @@ def test_mb_sync(db: Session = Depends(get_db)):
     profile = get_profile(pat)
     if not profile:
         raise HTTPException(status_code=400, detail="PAT is invalid or expired")
-    return {"success": True, "username": profile.get("preferred_username") or profile.get("nickname")}
+    scopes = profile.get("scopes") or []
+    missing_write = "library.write" not in scopes
+    return {
+        "success": True,
+        "username": profile.get("preferred_username") or profile.get("nickname"),
+        "missing_write_scope": missing_write,
+    }
 
 
 @router.get("/mb-push-all/status")
@@ -416,6 +424,7 @@ def mb_push_all_status():
         "last_finished":  state["last_finished"].isoformat() if state["last_finished"] else None,
         "total":          state["total"],
         "pushed":         state["pushed"],
+        "added":          state.get("added", 0),
         "skipped":        state["skipped"],
         "failed":         state.get("failed", 0),
     }
@@ -492,8 +501,9 @@ def mb_pull(db: Session = Depends(get_db)):
         if mb_rating is not None and series.user_rating is None:
             try:
                 val = float(mb_rating)
-                if 0.0 <= val <= 10.0:
-                    series.user_rating = round(val * 2) / 2  # snap to 0.5 increments
+                if 0.0 <= val <= 100.0:
+                    # MB uses 0–100 scale; convert to internal 0–10, snap to 0.5 steps
+                    series.user_rating = round((val / 10) * 2) / 2
                     changed = True
             except (ValueError, TypeError):
                 pass

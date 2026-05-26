@@ -176,8 +176,9 @@
           <button class="pill" :class="{active: filters.includes('updates')}" @click="toggleFilter('updates')">🟢 Updates <span x-text="'(' + stats.updates + ')'"></span></button>
           <button class="pill" :class="{active: filters.includes('reading')}" @click="toggleFilter('reading')">Reading</button>
           <button class="pill" :class="{active: filters.includes('completed')}" @click="toggleFilter('completed')">Completed</button>
+          <button class="pill" :class="{active: filters.includes('rereading')}" @click="toggleFilter('rereading')">Rereading</button>
           <button class="pill" :class="{active: filters.includes('plan_to_read')}" @click="toggleFilter('plan_to_read')">Plan to Read</button>
-          <button class="pill" :class="{active: filters.includes('on_hold')}" @click="toggleFilter('on_hold')">On Hold</button>
+          <button class="pill" :class="{active: filters.includes('paused')}" @click="toggleFilter('paused')">Paused</button>
           <button class="pill" :class="{active: filters.includes('considering')}" @click="toggleFilter('considering')">Considering</button>
           <button class="pill" :class="{active: filters.includes('dropped')}" @click="toggleFilter('dropped')">Dropped</button>
           <button class="pill" :class="{active: filters.includes('idle')}" @click="toggleFilter('idle')"
@@ -250,8 +251,9 @@
                 <option value="reading">📖 Reading</option>
                 <option value="considering">🤔 Considering</option>
                 <option value="plan_to_read">📋 Plan to Read</option>
-                <option value="on_hold">⏸ On Hold</option>
+                <option value="paused">⏸ Paused</option>
                 <option value="completed">✅ Completed</option>
+                <option value="rereading">🔄 Rereading</option>
                 <option value="dropped">❌ Dropped</option>
               </select>
               <button class="btn btn-primary btn-sm" @click="applyBulkStatus()">Apply Status</button>
@@ -304,7 +306,7 @@
               <div class="status-chip chip-idle"    x-show="!s.has_update && isIdle(s) && sf.idle_detection_enabled==='true'">💤</div>
               <div class="status-chip chip-plan"    x-show="!s.has_update && !isIdle(s) && s.reading_status==='plan_to_read'">PLAN</div>
               <div class="status-chip chip-considering" x-show="!s.has_update && s.reading_status==='considering'">?</div>
-              <div class="status-chip chip-hold"    x-show="!s.has_update && s.reading_status==='on_hold'">HOLD</div>
+              <div class="status-chip chip-paused"    x-show="!s.has_update && s.reading_status==='paused'">PAUSE</div>
               <div class="status-chip chip-dropped" x-show="!s.has_update && s.reading_status==='dropped'">DROP</div>
               <div class="status-chip chip-done"    x-show="!s.has_update && s.reading_status==='completed'">DONE</div>
               <div class="chip-right-stack">
@@ -440,7 +442,7 @@
                         :class="{
                           'chip-new': s.has_update,
                           'chip-plan': !s.has_update && s.reading_status==='plan_to_read',
-                          'chip-hold': !s.has_update && s.reading_status==='on_hold',
+                          'chip-paused': !s.has_update && s.reading_status==='paused',
                           'chip-dropped': !s.has_update && s.reading_status==='dropped',
                           'chip-done': !s.has_update && s.reading_status==='completed',
                           'chip-considering': !s.has_update && s.reading_status==='considering',
@@ -557,7 +559,7 @@
                               :class="{
                                 'chip-new':         r.reading_status==='reading',
                                 'chip-plan':        r.reading_status==='plan_to_read',
-                                'chip-hold':        r.reading_status==='on_hold',
+                                'chip-paused':        r.reading_status==='paused',
                                 'chip-dropped':     r.reading_status==='dropped',
                                 'chip-done':        r.reading_status==='completed',
                                 'chip-considering': r.reading_status==='considering',
@@ -1035,7 +1037,8 @@
           <button class="pill" :class="{active: ratingsStatusFilter===''}" @click="ratingsStatusFilter=''">All</button>
           <button class="pill" :class="{active: ratingsStatusFilter==='reading'}" @click="ratingsStatusFilter='reading'">Reading</button>
           <button class="pill" :class="{active: ratingsStatusFilter==='completed'}" @click="ratingsStatusFilter='completed'">Completed</button>
-          <button class="pill" :class="{active: ratingsStatusFilter==='on_hold'}" @click="ratingsStatusFilter='on_hold'">On Hold</button>
+          <button class="pill" :class="{active: ratingsStatusFilter==='rereading'}" @click="ratingsStatusFilter='rereading'">Rereading</button>
+          <button class="pill" :class="{active: ratingsStatusFilter==='paused'}" @click="ratingsStatusFilter='paused'">Paused</button>
           <button class="pill" :class="{active: ratingsStatusFilter==='dropped'}" @click="ratingsStatusFilter='dropped'">Dropped</button>
         </div>
 
@@ -1217,6 +1220,17 @@
             ✅ Live sync active — changes pushed to MangaBaka automatically.
           </div>
 
+          <div class="settings-row mt-2">
+            <label>Auto-Add to MB Library</label>
+            <select class="input input-toggle" x-model="sf.mb_auto_add">
+              <option value="false">Off</option>
+              <option value="true">On</option>
+            </select>
+          </div>
+          <div class="text-xs text-muted mt-1 leading-relaxed" x-show="sf.mb_auto_add === 'true'">
+            ✅ New MangaBaka-linked series will be added to your MB library automatically during sync.
+          </div>
+
           <div class="flex gap-2 mt-3 flex-wrap">
             <button class="btn btn-primary btn-sm" @click="saveSettings()">💾 Save</button>
             <button class="btn btn-ghost btn-sm" @click="exportMangabaka()"
@@ -1283,7 +1297,7 @@
               </div>
               <div class="notif-behaviour-desc">
                 When enabled, Pushover notifications only fire for series you have marked
-                <strong>Reading</strong>. Series set to On Hold, Plan to Read, Considering, etc.
+                <strong>Reading</strong>. Series set to Paused, Plan to Read, Considering, etc.
                 still create in-app notifications but won't ping your device.
                 Useful if you have a large backlog you haven't started yet.
               </div>
@@ -1355,7 +1369,7 @@
               </div>
               <div class="notif-behaviour-desc">
                 When set to "Reading only", the Updates pill and badge on the dashboard only count
-                series with <strong>Reading</strong> status. Plan to Read, On Hold, etc. with new chapters
+                series with <strong>Reading</strong> status. Plan to Read, Paused, etc. with new chapters
                 still show a NEW chip on their card — they just won't be counted in the update total.
               </div>
             </div>
@@ -2009,8 +2023,9 @@
               <option value="reading">📖 Reading</option>
               <option value="considering">🤔 Considering</option>
               <option value="plan_to_read">📋 Plan to Read</option>
-              <option value="on_hold">⏸ On Hold</option>
+              <option value="paused">⏸ Paused</option>
               <option value="completed">✅ Completed</option>
+              <option value="rereading">🔄 Rereading</option>
               <option value="dropped">❌ Dropped</option>
             </select>
           </div>
@@ -2764,7 +2779,9 @@
               <option value="considering">🤔 Considering</option>
               <option value="plan_to_read">📋 Plan to Read</option>
               <option value="completed">✅ Completed</option>
-              <option value="on_hold">⏸ On Hold</option>
+              <option value="rereading">🔄 Rereading</option>
+              <option value="paused">⏸ Paused</option>
+              <option value="dropped">❌ Dropped</option>
             </select>
           </div>
           <div class="form-group">

@@ -671,7 +671,7 @@ def import_library(req: ImportRequest, background_tasks: BackgroundTasks, db: Se
 def _bg_sync_import_to_mb(series_ids: list[int]):
     """Push all imported series to MB if sync is enabled. Runs once after import."""
     from ..database import SessionLocal, get_setting
-    from ..mangabaka_sync import push_entry
+    from ..mangabaka_sync import push_entry, add_to_library
     db = SessionLocal()
     try:
         if get_setting(db, "mb_sync_enabled", "false") != "true":
@@ -679,15 +679,22 @@ def _bg_sync_import_to_mb(series_ids: list[int]):
         pat = get_setting(db, "mangabaka_pat", "")
         if not pat:
             return
+        auto_add = get_setting(db, "mb_auto_add", "false") == "true"
         for sid in series_ids:
             series = db.query(TrackedSeries).filter(TrackedSeries.id == sid).first()
             if series:
                 effective_id = series.mb_linked_id if series.mb_linked_id else series.id
-                push_entry(
+                result = push_entry(
                     effective_id, series.reading_status, series.current_chapter,
                     series.current_volume, series.date_started, series.date_completed,
                     pat, user_rating=series.user_rating,
                 )
+                if result is False and auto_add:
+                    add_to_library(
+                        effective_id, pat, series.reading_status,
+                        series.current_chapter, series.current_volume,
+                        series.date_started, series.date_completed, series.user_rating,
+                    )
     finally:
         db.close()
 
@@ -908,7 +915,7 @@ def get_series_endpoint(series_id: int, db: Session = Depends(get_db)):
 
 # ── Update series ─────────────────────────────────────────────────────────────
 
-_VALID_READING_STATUSES = {"reading", "plan_to_read", "completed", "on_hold", "dropped", "rereading"}
+_VALID_READING_STATUSES = {"reading", "plan_to_read", "completed", "paused", "dropped", "rereading", "considering"}
 _VALID_TRACK_MODES = {"chapter", "volume"}
 
 
@@ -954,7 +961,7 @@ def _bg_sync_to_mb(series_id: int, reading_status: str, current_chapter: str | N
                    user_rating: float | None = None):
     """Background task: push updated progress to MB if sync is enabled."""
     from ..database import SessionLocal, get_setting, TrackedSeries as _TS
-    from ..mangabaka_sync import push_entry
+    from ..mangabaka_sync import push_entry, add_to_library
     db = SessionLocal()
     try:
         if get_setting(db, "mb_sync_enabled", "false") != "true":
@@ -962,12 +969,19 @@ def _bg_sync_to_mb(series_id: int, reading_status: str, current_chapter: str | N
         pat = get_setting(db, "mangabaka_pat", "")
         if not pat:
             return
+        auto_add = get_setting(db, "mb_auto_add", "false") == "true"
         # Komga-imported series have synthetic IDs (>= 2_000_000_000).
         # Use mb_linked_id if the user has linked this series to a real MB entry.
         series = db.query(_TS).filter(_TS.id == series_id).first()
         effective_id = (series.mb_linked_id if series and series.mb_linked_id else series_id)
-        push_entry(effective_id, reading_status, current_chapter, current_volume,
-                   date_started, date_completed, pat, user_rating=user_rating)
+        result = push_entry(effective_id, reading_status, current_chapter, current_volume,
+                            date_started, date_completed, pat, user_rating=user_rating)
+        if result is False and auto_add:
+            add_to_library(
+                effective_id, pat, reading_status,
+                current_chapter, current_volume,
+                date_started, date_completed, user_rating,
+            )
     finally:
         db.close()
 
