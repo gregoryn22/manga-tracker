@@ -6,7 +6,7 @@ Push behaviour is governed by three settings (all toggled in the UI):
   push_chapter_updates  — send Pushover when a new chapter is detected (default: true)
   push_news             — send Pushover for news items (default: false)
   push_reading_only     — if true, only series with reading_status="reading" push to
-                          Pushover; series on hold, considering, etc. create in-app
+                          Pushover; series paused, considering, etc. create in-app
                           notifications but stay silent on the phone (default: false)
 """
 import ipaddress

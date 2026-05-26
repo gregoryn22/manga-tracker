@@ -2,8 +2,8 @@
 MangaBaka library sync — push reading progress to MB via PAT.
 
 Uses X-API-Key header (Personal Access Token).
-Only PATCH /v1/my/library/{series_id} is available; no API endpoint exists
-to add new entries, so sync is update-only for series already in MB.
+PATCH /v1/my/library/{series_id} updates progress for existing entries.
+POST  /v1/my/library/{series_id} adds a new entry (used when mb_auto_add enabled).
 """
 import logging
 import time
@@ -20,9 +20,10 @@ _STATE_MAP = {
     "reading":      "reading",
     "completed":    "completed",
     "dropped":      "dropped",
-    "on_hold":      "on_hold",
+    "paused":       "paused",
     "plan_to_read": "plan_to_read",
     "rereading":    "rereading",
+    "considering":  "considering",
 }
 
 
@@ -60,13 +61,13 @@ def push_entry(
       False  — 404 (series not in MB library; user must add it there first)
       None   — rate limited (429) or other transient error; caller should retry
 
-    MB rating field accepts integers 0–10 only; floats are rejected.
+    MB rating field accepts integers 0–100. App stores 0–10; multiply by 10.
     """
     if series_id >= _KOMGA_ID_FLOOR:
         return False  # Komga synthetic ID — not a real MB series
 
-    # MB rating: integer 0–10, or null to clear. Round from app's 0.5-step scale.
-    mb_rating = round(user_rating) if user_rating is not None else None
+    # MB rating: integer 0–100. App stores 0–10 scale; multiply to convert.
+    mb_rating = round(user_rating * 10) if user_rating is not None else None
 
     payload: dict = {
         "state": _STATE_MAP.get(reading_status, "reading"),
@@ -101,6 +102,65 @@ def push_entry(
         return None
 
 
+def add_to_library(
+    series_id: int,
+    pat: str,
+    state: str | None = None,
+    current_chapter: str | None = None,
+    current_volume: str | None = None,
+    date_started: datetime | None = None,
+    date_completed: datetime | None = None,
+    user_rating: float | None = None,
+) -> bool | None:
+    """
+    POST /v1/my/library/{series_id} to add a series to the MB library.
+
+    Sends all available progress fields in one call so no follow-up PATCH needed.
+
+    Returns:
+      True  — added (201)
+      False — series unknown to MB (404) or already in library (409)
+      None  — rate limited (429) or transient error; caller should retry
+    """
+    if series_id >= _KOMGA_ID_FLOOR:
+        return False
+
+    mb_rating = round(user_rating * 10) if user_rating is not None else None
+    payload: dict = {}
+    if state:
+        payload["state"] = _STATE_MAP.get(state, "reading")
+    if (ch := _parse_chapter(current_chapter)) is not None:
+        payload["progress_chapter"] = ch
+    if (vol := _parse_chapter(current_volume)) is not None:
+        payload["progress_volume"] = vol
+    if date_started:
+        payload["start_date"] = _iso(date_started)
+    if date_completed:
+        payload["finish_date"] = _iso(date_completed)
+    if mb_rating is not None:
+        payload["rating"] = mb_rating
+
+    try:
+        with httpx.Client(timeout=10.0) as client:
+            resp = client.post(
+                f"{BASE_URL}/v1/my/library/{series_id}",
+                headers={"X-API-Key": pat},
+                json=payload,
+            )
+            if resp.status_code == 201:
+                return True
+            if resp.status_code in (404, 409):
+                logger.debug(f"MB add_to_library: series {series_id} status {resp.status_code}")
+                return False
+            if resp.status_code == 429:
+                return None
+            resp.raise_for_status()
+            return True
+    except Exception as e:
+        logger.warning(f"MB add_to_library failed for series {series_id}: {e}")
+        return None
+
+
 def get_profile(pat: str) -> dict | None:
     """Validate PAT by fetching /v1/my/profile. Returns profile dict or None."""
     try:
@@ -124,26 +184,15 @@ def pull_library(pat: str) -> list[dict]:
     entries = []
     try:
         with httpx.Client(timeout=15.0) as client:
-            resp = client.get(
-                f"{BASE_URL}/v1/my/library",
-                headers={"X-API-Key": pat},
-                params={"limit": 100, "page": 1},
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            entries.extend(data.get("data", []))
-            pagination = data.get("pagination", {})
-            total = pagination.get("count", 0)
-            limit = pagination.get("limit", 100)
-            pages = -((-total) // limit) if limit else 1
-            for page in range(2, pages + 1):
-                r = client.get(
-                    f"{BASE_URL}/v1/my/library",
-                    headers={"X-API-Key": pat},
-                    params={"limit": 100, "page": page},
-                )
-                r.raise_for_status()
-                entries.extend(r.json().get("data", []))
+            next_url: str | None = f"{BASE_URL}/v1/my/library"
+            params: dict | None = {"limit": 100}
+            while next_url:
+                resp = client.get(next_url, headers={"X-API-Key": pat}, params=params)
+                resp.raise_for_status()
+                data = resp.json()
+                entries.extend(data.get("data", []))
+                next_url = (data.get("pagination") or {}).get("next")
+                params = None  # next_url already carries all query params
     except Exception as e:
         logger.warning(f"MB pull_library failed: {e}")
     return entries

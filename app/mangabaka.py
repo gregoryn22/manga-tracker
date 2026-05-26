@@ -36,9 +36,9 @@ class MangaBakaClient:
             logger.error(f"Error fetching {url}: {e}")
             raise
 
-    def search(self, query: str, page: int = 1) -> dict[str, Any]:
+    def search(self, query: str, page: int = 1, limit: int = 20) -> dict[str, Any]:
         """Search for series by title."""
-        return self._get("/v1/series/search", params={"q": query, "page": page})
+        return self._get("/v1/series/search", params={"q": query, "page": page, "limit": limit})
 
     def get_series(self, series_id: int) -> dict[str, Any]:
         """Get full details for a single series."""
