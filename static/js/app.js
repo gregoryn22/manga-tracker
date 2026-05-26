@@ -84,6 +84,9 @@ function app() {
     komgaSelected: [], komgaTrackMode: 'chapter', komgaSyncProgress: true,
     komgaImporting: false, komgaImportProgress: null,
 
+    // Ratings page
+    ratingsStatusFilter: '',
+
     // Polling
     polling: false,
     metadataRefreshing: false,
@@ -211,7 +214,48 @@ function app() {
     },
 
     pageTitle() {
-      return { library:'My Library', releases:'Live Feed', search:'Search', komga:'Komga Library', notifications:'Notifications', activity:'Activity Log', stats:'Statistics', settings:'Settings' }[this.page] || '';
+      return { library:'My Library', releases:'Live Feed', search:'Search', ratings:'Ratings', komga:'Komga Library', notifications:'Notifications', activity:'Activity Log', stats:'Statistics', settings:'Settings' }[this.page] || '';
+    },
+
+    ratingTiers() {
+      const tiers = [
+        { label: 'S', range: [9, 10], color: 'var(--yellow)' },
+        { label: 'A', range: [7,  8], color: 'var(--green)'  },
+        { label: 'B', range: [5,  6], color: 'var(--blue)'   },
+        { label: 'C', range: [3,  4], color: 'var(--accent)' },
+        { label: 'D', range: [1,  2], color: 'var(--red)'    },
+      ];
+      const pool = this.ratingsStatusFilter
+        ? this.library.filter(s => s.reading_status === this.ratingsStatusFilter)
+        : this.library;
+      return tiers.map(t => ({
+        ...t,
+        series: pool
+          .filter(s => s.user_rating != null && s.user_rating >= t.range[0] && s.user_rating <= t.range[1])
+          .sort((a, b) => b.user_rating - a.user_rating || (a.title||'').localeCompare(b.title||'')),
+      })).filter(t => t.series.length > 0);
+    },
+
+    unratedSeries() {
+      const pool = this.ratingsStatusFilter
+        ? this.library.filter(s => s.reading_status === this.ratingsStatusFilter)
+        : this.library;
+      return pool.filter(s => s.user_rating == null).sort((a, b) => (a.title||'').localeCompare(b.title||''));
+    },
+
+    ratingsAvgScore() {
+      const rated = this.library.filter(s => s.user_rating != null);
+      if (!rated.length) return '—';
+      return (rated.reduce((acc, s) => acc + s.user_rating, 0) / rated.length).toFixed(1);
+    },
+
+    async quickRate(seriesId, rating) {
+      try {
+        const body = rating === null ? { clear_user_rating: true } : { user_rating: rating };
+        const updated = await this.api(`/api/series/${seriesId}`, 'PATCH', body);
+        const idx = this.library.findIndex(s => s.id === updated.id);
+        if (idx !== -1) this.library[idx] = updated;
+      } catch(e) { this.toast('Failed to save rating', 'error'); }
     },
 
     // ── Metadata helpers ────────────────────────────────
