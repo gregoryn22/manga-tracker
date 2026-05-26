@@ -45,6 +45,8 @@ function app() {
       default_feed_grouped:  'false',  // persisted feed grouping: 'true' or 'false'
       // Rating input mode
       rating_input_mode:               'stars',
+      // Ratings page view mode
+      ratings_view_mode:               'tier',
       // Rating source for display
       rating_source:                   'mangaupdates',
       // Reading dates display
@@ -83,6 +85,9 @@ function app() {
     komgaReadFilter: 'IN_PROGRESS', // IN_PROGRESS, UNREAD, READ, or '' for all
     komgaSelected: [], komgaTrackMode: 'chapter', komgaSyncProgress: true,
     komgaImporting: false, komgaImportProgress: null,
+
+    // Ratings page
+    ratingsStatusFilter: '',
 
     // Polling
     polling: false,
@@ -168,18 +173,32 @@ function app() {
       // Apply persisted view/feed preferences immediately after settings load
       this.viewMode    = this.sf.default_view_mode    || 'grid';
       this.feedGrouped = this.sf.default_feed_grouped === 'true';
+      // Restore ratings filter from localStorage
+      this.ratingsStatusFilter = localStorage.getItem('ratings_status_filter') || '';
       await this.loadLibrary();
       await this.pollUnreadCount();
-      // Load appropriate page based on default_page setting
-      const defaultPage = this.sf.default_page || 'library';
-      if (defaultPage !== 'library') {
-        this.page = defaultPage;
-        if (defaultPage === 'releases') { this.loadReleaseFeed().catch(()=>{}); }
-        else if (defaultPage === 'notifications') { this.loadNotifications().catch(()=>{}); }
-        else if (defaultPage === 'activity') { this.loadActivity().catch(()=>{}); }
-        else if (defaultPage === 'stats') { this.loadStats().catch(()=>{}); }
-        else if (defaultPage === 'komga') { this.loadKomgaBrowse().catch(()=>{}); }
-        else if (defaultPage === 'settings') { this.loadSettings().catch(()=>{}); }
+
+      // Hash routing: URL hash takes priority over default_page setting
+      const validPages = ['library','releases','search','ratings','komga','notifications','activity','stats','settings'];
+      const hashPage = location.hash.slice(1);
+      const startPage = (hashPage && validPages.includes(hashPage)) ? hashPage : (this.sf.default_page || 'library');
+
+      // Keep hash in sync with page navigation and persist ratings filter
+      this.$watch('page', val => { location.hash = val; });
+      this.$watch('ratingsStatusFilter', val => { localStorage.setItem('ratings_status_filter', val); });
+      window.addEventListener('hashchange', () => {
+        const p = location.hash.slice(1);
+        if (validPages.includes(p) && p !== this.page) this.page = p;
+      });
+
+      if (startPage !== 'library') {
+        this.page = startPage;
+        if (startPage === 'releases') { this.loadReleaseFeed().catch(()=>{}); }
+        else if (startPage === 'notifications') { this.loadNotifications().catch(()=>{}); }
+        else if (startPage === 'activity') { this.loadActivity().catch(()=>{}); }
+        else if (startPage === 'stats') { this.loadStats().catch(()=>{}); }
+        else if (startPage === 'komga') { this.loadKomgaBrowse().catch(()=>{}); }
+        else if (startPage === 'settings') { this.loadSettings().catch(()=>{}); }
       } else {
         // Silently prefetch feed in background (skip if section is hidden)
         if (this.sf.show_recent_drops !== 'false') {
@@ -211,7 +230,73 @@ function app() {
     },
 
     pageTitle() {
-      return { library:'My Library', releases:'Live Feed', search:'Search', komga:'Komga Library', notifications:'Notifications', activity:'Activity Log', stats:'Statistics', settings:'Settings' }[this.page] || '';
+      return { library:'My Library', releases:'Live Feed', search:'Search', ratings:'Ratings', komga:'Komga Library', notifications:'Notifications', activity:'Activity Log', stats:'Statistics', settings:'Settings' }[this.page] || '';
+    },
+
+    ratingTiers() {
+      const tiers = [
+        { label: 'S', range: [9, 10], color: 'var(--yellow)' },
+        { label: 'A', range: [7,  8], color: 'var(--green)'  },
+        { label: 'B', range: [5,  6], color: 'var(--blue)'   },
+        { label: 'C', range: [3,  4], color: 'var(--accent)' },
+        { label: 'D', range: [1,  2], color: 'var(--red)'    },
+      ];
+      const pool = this.ratingsStatusFilter
+        ? this.library.filter(s => s.reading_status === this.ratingsStatusFilter)
+        : this.library;
+      return tiers.map(t => ({
+        ...t,
+        series: pool
+          .filter(s => s.user_rating != null && s.user_rating >= t.range[0] && s.user_rating <= t.range[1])
+          .sort((a, b) => b.user_rating - a.user_rating || (a.title||'').localeCompare(b.title||'')),
+      })).filter(t => t.series.length > 0);
+    },
+
+    unratedSeries() {
+      const pool = this.ratingsStatusFilter
+        ? this.library.filter(s => s.reading_status === this.ratingsStatusFilter)
+        : this.library;
+      return pool.filter(s => s.user_rating == null).sort((a, b) => (a.title||'').localeCompare(b.title||''));
+    },
+
+    ratingsAvgScore() {
+      const rated = this.library.filter(s => s.user_rating != null);
+      if (!rated.length) return '—';
+      return (rated.reduce((acc, s) => acc + s.user_rating, 0) / rated.length).toFixed(1);
+    },
+
+    ratedSeriesByScore() {
+      const scoreColors = {
+        10: 'var(--yellow)', 9: 'var(--yellow)',
+        8: 'var(--green)',   7: 'var(--green)',
+        6: 'var(--blue)',    5: 'var(--blue)',
+        4: 'var(--accent)',  3: 'var(--accent)',
+        2: 'var(--red)',     1: 'var(--red)',
+      };
+      const pool = this.ratingsStatusFilter
+        ? this.library.filter(s => s.reading_status === this.ratingsStatusFilter)
+        : this.library;
+      const rows = [];
+      for (let score = 10; score >= 1; score--) {
+        const series = pool
+          .filter(s => s.user_rating === score)
+          .sort((a, b) => (a.title||'').localeCompare(b.title||''));
+        if (series.length) rows.push({ score, color: scoreColors[score], series });
+      }
+      return rows;
+    },
+
+    async quickRate(seriesId, rating) {
+      try {
+        const body = rating === null ? { clear_user_rating: true } : { user_rating: rating };
+        const updated = await this.api(`/api/series/${seriesId}`, 'PATCH', body);
+        const idx = this.library.findIndex(s => s.id === updated.id);
+        if (idx !== -1) this.library.splice(idx, 1, updated);
+      } catch(e) { this.toast('Failed to save rating', 'error'); }
+    },
+
+    async saveSettingsSilent() {
+      try { await this.api('/api/settings', 'PATCH', this.sf); } catch(e) {}
     },
 
     // ── Metadata helpers ────────────────────────────────
