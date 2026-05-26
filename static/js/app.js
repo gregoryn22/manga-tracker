@@ -186,6 +186,8 @@ function app() {
       // Keep hash in sync with page navigation and persist ratings filter
       this.$watch('page', val => { location.hash = val; });
       this.$watch('ratingsStatusFilter', val => { localStorage.setItem('ratings_status_filter', val); });
+      this.$watch('viewMode',    val => { this.sf.default_view_mode    = val;                  this.saveSettingsSilent(); });
+      this.$watch('feedGrouped', val => { this.sf.default_feed_grouped = val ? 'true' : 'false'; this.saveSettingsSilent(); });
       window.addEventListener('hashchange', () => {
         const p = location.hash.slice(1);
         if (validPages.includes(p) && p !== this.page) this.page = p;
