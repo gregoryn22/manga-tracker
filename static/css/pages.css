@@ -391,6 +391,8 @@
 }
 .tier-star.active { color: var(--yellow); }
 .tier-star:hover { transform: scale(1.2); }
+.tier-star--num { font-size: 0.6rem; font-weight: 700; min-width: 12px; text-align: center; }
+.tier-star--num.active { color: var(--yellow); }
 .tier-score-badge {
   position: absolute; top: 4px; right: 4px;
   background: rgba(0,0,0,0.7); color: var(--yellow);

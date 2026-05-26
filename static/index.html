@@ -104,6 +104,14 @@
       <template x-if="page==='notifications' && notifications.length > 0">
         <button class="btn btn-ghost btn-sm" @click="markAllRead()">✓ All Read</button>
       </template>
+      <template x-if="page==='ratings'">
+        <div class="flex gap-2 items-center">
+          <button class="btn btn-ghost btn-sm" :class="sf.rating_input_mode !== 'numeric' ? 'btn-primary' : ''"
+                  @click="sf.rating_input_mode = 'stars'" title="Rate with stars">★ Stars</button>
+          <button class="btn btn-ghost btn-sm" :class="sf.rating_input_mode === 'numeric' ? 'btn-primary' : ''"
+                  @click="sf.rating_input_mode = 'numeric'" title="Rate with numbers">🔢 Numbers</button>
+        </div>
+      </template>
     </div>
 
     <div class="content">
@@ -1051,9 +1059,10 @@
                         </template>
                         <div class="tier-star-overlay">
                           <template x-for="n in [1,2,3,4,5,6,7,8,9,10]" :key="n">
-                            <button class="tier-star" :class="{active: (rHover ?? s.user_rating) >= n}"
+                            <button class="tier-star" :class="{active: (rHover ?? s.user_rating) >= n, 'tier-star--num': sf.rating_input_mode === 'numeric'}"
                               @mouseenter.stop="rHover = n" @mouseleave.stop="rHover = null"
-                              @click.stop="quickRate(s.id, s.user_rating === n ? null : n)">★</button>
+                              @click.stop="quickRate(s.id, s.user_rating === n ? null : n)"
+                              x-text="sf.rating_input_mode === 'numeric' ? n : '★'"></button>
                           </template>
                         </div>
                         <div class="tier-score-badge" x-text="s.user_rating"></div>
@@ -1087,9 +1096,10 @@
                         </template>
                         <div class="tier-star-overlay">
                           <template x-for="n in [1,2,3,4,5,6,7,8,9,10]" :key="n">
-                            <button class="tier-star" :class="{active: (rHover ?? s.user_rating) >= n}"
+                            <button class="tier-star" :class="{active: (rHover ?? s.user_rating) >= n, 'tier-star--num': sf.rating_input_mode === 'numeric'}"
                               @mouseenter.stop="rHover = n" @mouseleave.stop="rHover = null"
-                              @click.stop="quickRate(s.id, s.user_rating === row.score ? null : n)">★</button>
+                              @click.stop="quickRate(s.id, s.user_rating === row.score ? null : n)"
+                              x-text="sf.rating_input_mode === 'numeric' ? n : '★'"></button>
                           </template>
                         </div>
                         <div class="tier-score-badge" x-text="s.user_rating"></div>
@@ -1132,9 +1142,10 @@
                     </template>
                     <div class="tier-star-overlay">
                       <template x-for="n in [1,2,3,4,5,6,7,8,9,10]" :key="n">
-                        <button class="tier-star" :class="{active: rHover >= n}"
+                        <button class="tier-star" :class="{active: rHover >= n, 'tier-star--num': sf.rating_input_mode === 'numeric'}"
                           @mouseenter.stop="rHover = n" @mouseleave.stop="rHover = null"
-                          @click.stop="quickRate(s.id, n)">★</button>
+                          @click.stop="quickRate(s.id, n)"
+                          x-text="sf.rating_input_mode === 'numeric' ? n : '★'"></button>
                       </template>
                     </div>
                   </div>
