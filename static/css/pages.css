@@ -399,14 +399,6 @@
   pointer-events: none;
 }
 .tier-cover-wrap:hover .tier-score-badge { opacity: 0; }
-.tier-numeric-score {
-  position: absolute; bottom: 0; left: 0; right: 0;
-  background: linear-gradient(transparent, rgba(0,0,0,0.85));
-  color: var(--yellow); font-size: var(--fs-xl); font-weight: 800;
-  text-align: center; padding: var(--sp-3) var(--sp-1) var(--sp-1-5);
-  pointer-events: none; line-height: 1;
-}
-.tier-cover-wrap:hover .tier-numeric-score { opacity: 0; }
 .tier-card-title {
   font-size: var(--fs-2xs); font-weight: 500; color: var(--text-muted);
   margin-top: var(--sp-1); line-height: 1.3;

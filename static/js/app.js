@@ -251,13 +251,25 @@ function app() {
       return (rated.reduce((acc, s) => acc + s.user_rating, 0) / rated.length).toFixed(1);
     },
 
-    ratedSeriesSorted() {
+    ratedSeriesByScore() {
+      const scoreColors = {
+        10: 'var(--yellow)', 9: 'var(--yellow)',
+        8: 'var(--green)',   7: 'var(--green)',
+        6: 'var(--blue)',    5: 'var(--blue)',
+        4: 'var(--accent)',  3: 'var(--accent)',
+        2: 'var(--red)',     1: 'var(--red)',
+      };
       const pool = this.ratingsStatusFilter
         ? this.library.filter(s => s.reading_status === this.ratingsStatusFilter)
         : this.library;
-      return pool
-        .filter(s => s.user_rating != null)
-        .sort((a, b) => b.user_rating - a.user_rating || (a.title||'').localeCompare(b.title||''));
+      const rows = [];
+      for (let score = 10; score >= 1; score--) {
+        const series = pool
+          .filter(s => s.user_rating === score)
+          .sort((a, b) => (a.title||'').localeCompare(b.title||''));
+        if (series.length) rows.push({ score, color: scoreColors[score], series });
+      }
+      return rows;
     },
 
     async quickRate(seriesId, rating) {
