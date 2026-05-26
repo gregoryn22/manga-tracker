@@ -45,6 +45,9 @@
       <div class="nav-item" :class="{active: page==='search'}" @click="page='search'; sidebarOpen=false">
         <span class="nav-icon">🔍</span> Search
       </div>
+      <div class="nav-item" :class="{active: page==='ratings'}" @click="page='ratings'; sidebarOpen=false">
+        <span class="nav-icon">⭐</span> Ratings
+      </div>
       <div class="nav-item" :class="{active: page==='komga'}" @click="page='komga'; loadKomgaBrowse(); sidebarOpen=false"
            x-show="sf.komga_url && sf.komga_api_key">
         <span class="nav-icon">🏠</span> Komga
@@ -100,6 +103,14 @@
       </template>
       <template x-if="page==='notifications' && notifications.length > 0">
         <button class="btn btn-ghost btn-sm" @click="markAllRead()">✓ All Read</button>
+      </template>
+      <template x-if="page==='ratings'">
+        <div class="flex gap-2 items-center">
+          <button class="btn btn-ghost btn-sm" :class="sf.rating_input_mode !== 'numeric' ? 'btn-primary' : ''"
+                  @click="sf.rating_input_mode = 'stars'; saveSettingsSilent()" title="Rate with stars">★ Stars</button>
+          <button class="btn btn-ghost btn-sm" :class="sf.rating_input_mode === 'numeric' ? 'btn-primary' : ''"
+                  @click="sf.rating_input_mode = 'numeric'; saveSettingsSilent()" title="Rate with numbers">🔢 Numbers</button>
+        </div>
       </template>
     </div>
 
@@ -996,6 +1007,158 @@
       </div><!-- /komga -->
 
 
+      <!-- ══ RATINGS ═══════════════════════════════════════ -->
+      <div x-show="page==='ratings'">
+
+        <!-- Summary stats -->
+        <div class="stats-row">
+          <div class="stat-card">
+            <div class="stat-label">Rated</div>
+            <div class="stat-value yellow" x-text="library.filter(s => s.user_rating !== null && s.user_rating !== undefined).length"></div>
+            <div class="stat-sub">of <span x-text="library.length"></span> series</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Unrated</div>
+            <div class="stat-value text-muted" x-text="library.filter(s => s.user_rating === null || s.user_rating === undefined).length"></div>
+            <div class="stat-sub">need a score</div>
+          </div>
+          <div class="stat-card" x-show="library.filter(s => s.user_rating != null).length > 0">
+            <div class="stat-label">Avg Score</div>
+            <div class="stat-value accent" x-text="ratingsAvgScore()"></div>
+            <div class="stat-sub">your ratings</div>
+          </div>
+        </div>
+
+        <!-- Status filter pills -->
+        <div class="filter-bar mb-4">
+          <button class="pill" :class="{active: ratingsStatusFilter===''}" @click="ratingsStatusFilter=''">All</button>
+          <button class="pill" :class="{active: ratingsStatusFilter==='reading'}" @click="ratingsStatusFilter='reading'">Reading</button>
+          <button class="pill" :class="{active: ratingsStatusFilter==='completed'}" @click="ratingsStatusFilter='completed'">Completed</button>
+          <button class="pill" :class="{active: ratingsStatusFilter==='on_hold'}" @click="ratingsStatusFilter='on_hold'">On Hold</button>
+          <button class="pill" :class="{active: ratingsStatusFilter==='dropped'}" @click="ratingsStatusFilter='dropped'">Dropped</button>
+        </div>
+
+        <!-- Tier rows (only tiers with series are shown) -->
+        <template x-if="sf.ratings_view_mode !== 'numeric'">
+          <div>
+            <template x-for="tier in ratingTiers()" :key="tier.label">
+              <div class="tier-row">
+                <div class="tier-label" :style="`--tier-color: ${tier.color}`">
+                  <div class="tier-letter" x-text="tier.label"></div>
+                  <div class="tier-range" x-text="tier.range[0] + '–' + tier.range[1]"></div>
+                </div>
+                <div class="tier-covers">
+                  <template x-for="s in tier.series" :key="s.id">
+                    <div class="tier-card" x-data="{rHover: null}" @click="openDetail(s)">
+                      <div class="tier-cover-wrap">
+                        <template x-if="s.cover_url">
+                          <img class="tier-cover-img" :src="s.cover_url" :alt="s.title" loading="lazy" @error="$el.style.display='none'" />
+                        </template>
+                        <template x-if="!s.cover_url">
+                          <div class="tier-cover-ph">📖</div>
+                        </template>
+                        <div class="tier-star-overlay">
+                          <template x-for="n in [1,2,3,4,5,6,7,8,9,10]" :key="n">
+                            <button class="tier-star" :class="{active: (rHover ?? s.user_rating) >= n, 'tier-star--num': sf.rating_input_mode === 'numeric'}"
+                              @mouseenter.stop="rHover = n" @mouseleave.stop="rHover = null"
+                              @click.stop="quickRate(s.id, s.user_rating === n ? null : n)"
+                              x-text="sf.rating_input_mode === 'numeric' ? n : '★'"></button>
+                          </template>
+                        </div>
+                        <div class="tier-score-badge" x-text="s.user_rating"></div>
+                      </div>
+                      <div class="tier-card-title" x-text="s.title"></div>
+                    </div>
+                  </template>
+                </div>
+              </div>
+            </template>
+          </div>
+        </template>
+
+        <!-- Numeric view: score-grouped carousel rows -->
+        <template x-if="sf.ratings_view_mode === 'numeric'">
+          <div>
+            <template x-for="row in ratedSeriesByScore()" :key="row.score">
+              <div class="tier-row">
+                <div class="tier-label" :style="`--tier-color: ${row.color}`">
+                  <div class="tier-letter" x-text="row.score"></div>
+                </div>
+                <div class="tier-covers">
+                  <template x-for="s in row.series" :key="s.id">
+                    <div class="tier-card" x-data="{rHover: null}" @click="openDetail(s)">
+                      <div class="tier-cover-wrap">
+                        <template x-if="s.cover_url">
+                          <img class="tier-cover-img" :src="s.cover_url" :alt="s.title" loading="lazy" @error="$el.style.display='none'" />
+                        </template>
+                        <template x-if="!s.cover_url">
+                          <div class="tier-cover-ph">📖</div>
+                        </template>
+                        <div class="tier-star-overlay">
+                          <template x-for="n in [1,2,3,4,5,6,7,8,9,10]" :key="n">
+                            <button class="tier-star" :class="{active: (rHover ?? s.user_rating) >= n, 'tier-star--num': sf.rating_input_mode === 'numeric'}"
+                              @mouseenter.stop="rHover = n" @mouseleave.stop="rHover = null"
+                              @click.stop="quickRate(s.id, s.user_rating === n ? null : n)"
+                              x-text="sf.rating_input_mode === 'numeric' ? n : '★'"></button>
+                          </template>
+                        </div>
+                        <div class="tier-score-badge" x-text="s.user_rating"></div>
+                      </div>
+                      <div class="tier-card-title" x-text="s.title"></div>
+                    </div>
+                  </template>
+                </div>
+              </div>
+            </template>
+          </div>
+        </template>
+
+        <!-- Empty state when no ratings at all -->
+        <template x-if="ratingTiers().length === 0 && sf.ratings_view_mode !== 'numeric' && library.filter(s => s.user_rating != null).length === 0">
+          <div class="empty-state">
+            <div class="empty-icon">⭐</div>
+            <h3>No ratings yet</h3>
+            <p class="text-muted">Rate series from the queue below or via the detail panel.</p>
+          </div>
+        </template>
+
+        <!-- Unrated queue -->
+        <template x-if="unratedSeries().length > 0">
+          <div class="card card-padded">
+            <div class="section-heading">
+              <span class="section-heading-icon">⭕</span>
+              Unrated
+              <span class="section-badge" x-text="unratedSeries().length + ' series'"></span>
+            </div>
+            <div class="tier-covers tier-covers--wrap">
+              <template x-for="s in unratedSeries()" :key="s.id">
+                <div class="tier-card" x-data="{rHover: null}" @click="openDetail(s)">
+                  <div class="tier-cover-wrap">
+                    <template x-if="s.cover_url">
+                      <img class="tier-cover-img" :src="s.cover_url" :alt="s.title" loading="lazy" @error="$el.style.display='none'" />
+                    </template>
+                    <template x-if="!s.cover_url">
+                      <div class="tier-cover-ph">📖</div>
+                    </template>
+                    <div class="tier-star-overlay">
+                      <template x-for="n in [1,2,3,4,5,6,7,8,9,10]" :key="n">
+                        <button class="tier-star" :class="{active: rHover >= n, 'tier-star--num': sf.rating_input_mode === 'numeric'}"
+                          @mouseenter.stop="rHover = n" @mouseleave.stop="rHover = null"
+                          @click.stop="quickRate(s.id, n)"
+                          x-text="sf.rating_input_mode === 'numeric' ? n : '★'"></button>
+                      </template>
+                    </div>
+                  </div>
+                  <div class="tier-card-title" x-text="s.title"></div>
+                </div>
+              </template>
+            </div>
+          </div>
+        </template>
+
+      </div><!-- /ratings -->
+
+
       <!-- ══ SETTINGS ══════════════════════════════════════ -->
       <div x-show="page==='settings'">
 
@@ -1614,6 +1777,16 @@
                       @click="sf.rating_input_mode = 'stars'">★ Stars</button>
               <button class="btn btn-sm" :class="sf.rating_input_mode === 'numeric' ? 'btn-primary' : 'btn-ghost'"
                       @click="sf.rating_input_mode = 'numeric'">123 Numeric</button>
+            </div>
+          </div>
+
+          <div class="settings-row mt-3">
+            <label>Ratings Page View</label>
+            <div class="flex gap-2">
+              <button class="btn btn-sm" :class="sf.ratings_view_mode !== 'numeric' ? 'btn-primary' : 'btn-ghost'"
+                      @click="sf.ratings_view_mode = 'tier'; saveSettingsSilent()">🏆 Tier List</button>
+              <button class="btn btn-sm" :class="sf.ratings_view_mode === 'numeric' ? 'btn-primary' : 'btn-ghost'"
+                      @click="sf.ratings_view_mode = 'numeric'; saveSettingsSilent()">🔢 Numeric</button>
             </div>
           </div>
 
