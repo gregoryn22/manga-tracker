@@ -339,7 +339,7 @@ def _maybe_notify_poll_failure(db: "Session", series: TrackedSeries):
         return
     # Only fire at exact powers of 2 of the threshold to avoid spamming
     ratio = failures // threshold
-    if ratio & (ratio - 1) != 0:
+    if (ratio & (ratio - 1)) != 0:
         return
     user_key, app_token, pushover_enabled = get_pushover_creds(db)
     if not pushover_enabled or not user_key or not app_token:
