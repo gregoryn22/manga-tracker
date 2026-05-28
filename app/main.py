@@ -430,9 +430,14 @@ def komga_import(req: KomgaImportRequest, background_tasks: BackgroundTasks):
 
 @app.get("/api/komga/import/progress")
 def komga_import_progress():
-    """Poll this endpoint during a Komga import to show live progress."""
-    with _komga_import_lock:
-        return dict(_komga_import_progress)
+    """Poll this endpoint during a Komga import to show live progress.
+
+    Deliberately does NOT acquire _komga_import_lock — the running import holds
+    that lock for its full duration, so taking it here would block every poll
+    until the import finished, defeating live progress. Reading the plain dict
+    is atomic enough for progress display.
+    """
+    return dict(_komga_import_progress)
 
 
 def _schedule_mu_lookup(background_tasks: BackgroundTasks, series_id: int, title: str):
