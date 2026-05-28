@@ -487,7 +487,7 @@ def _schedule_mu_lookup(background_tasks: BackgroundTasks, series_id: int, title
                 series.genres = json.dumps(merged)
 
             # Authors
-            mu_authors = [a.get("name") for a in mu_data.get("authors", []) if a.get("name")]
+            mu_authors = [a.get("author_name") for a in mu_data.get("authors", []) if a.get("author_name")]
             if mu_authors and not series.authors:
                 series.authors = json.dumps(mu_authors)
 
