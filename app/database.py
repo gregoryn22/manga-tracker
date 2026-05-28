@@ -62,7 +62,7 @@ class TrackedSeries(Base):
     rating = Column(String, nullable=True)           # MangaBaka aggregated
     mu_rating = Column(Float, nullable=True)         # MangaUpdates bayesian rating (0-10)
     mu_rating_votes = Column(Integer, nullable=True)
-    user_rating = Column(Float, nullable=True)       # User's personal rating (0-10, integers)
+    user_rating = Column(Float, nullable=True)       # User's personal rating (0-10, 0.5 increments)
 
     # ── Chapter / release tracking ────────────────────────────────────
     total_chapters = Column(String, nullable=True)       # MB chapter count — unreliable per dev; last-resort fallback only
