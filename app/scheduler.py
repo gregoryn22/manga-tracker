@@ -339,7 +339,7 @@ def _maybe_notify_poll_failure(db: "Session", series: TrackedSeries):
         return
     # Only fire at exact powers of 2 of the threshold to avoid spamming
     ratio = failures // threshold
-    if ratio & (ratio - 1) != 0:
+    if (ratio & (ratio - 1)) != 0:
         return
     user_key, app_token, pushover_enabled = get_pushover_creds(db)
     if not pushover_enabled or not user_key or not app_token:
@@ -1496,15 +1496,15 @@ def _poll_komga(db: Session, series_list: list[TrackedSeries]):
 
         except KomgaAuthError:
             logger.error("Komga: API key is invalid — check Settings")
-            # Mark all remaining Komga series as failed before breaking
-            for s in series_list:
-                _mark_poll_failure(s, "API key invalid", db)
+            # Global failure — mark only the current series; don't taint series
+            # already polled successfully this run. The rest are simply left for
+            # the next cycle rather than recorded as failures they never hit.
+            _mark_poll_failure(series, "API key invalid", db)
             db.commit()
             break
         except KomgaConnectionError as e:
             logger.error(f"Komga: server unreachable — {e}")
-            for s in series_list:
-                _mark_poll_failure(s, f"Server unreachable: {e}", db)
+            _mark_poll_failure(series, f"Server unreachable: {e}", db)
             db.commit()
             break
         except KomgaNotFound:
