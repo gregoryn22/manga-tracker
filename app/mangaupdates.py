@@ -15,6 +15,8 @@ from typing import Any
 
 import httpx
 
+from app.chapter_utils import chapter_is_newer, normalize_chapter  # noqa: F401 — re-exported
+
 logger = logging.getLogger(__name__)
 
 BASE_URL = "https://api.mangaupdates.com/v1"
@@ -191,86 +193,3 @@ def extract_mu_cover(image_data: dict | None) -> str | None:
     return url_obj.get("original") or url_obj.get("thumb")
 
 
-def normalize_chapter(chapter_str: str | None) -> float | None:
-    """
-    Parse a chapter string into a comparable float.
-
-    Handles MangaUpdates formats including:
-      '121'             → 121.0
-      '12.5'            → 12.5
-      '23-24'           → 24.0   (simple range)
-      'c23-c24'         → 24.0   (prefixed range)
-      'Ch. 23 - Ch. 24' → 24.0   (verbose range)
-      'v3 c23'          → 23.0   (volume + chapter — prefers chapter)
-      'vol.3 ch.23-24'  → 24.0   (volume + chapter range)
-      'v100 c45'        → 45.0   (volume > chapter — still picks chapter)
-
-    Strategy:
-      1. Strip volume-prefixed numbers first (v3, vol.3, volume 3).
-      2. If explicit chapter-prefixed numbers exist (ch., c, chapter, #),
-         return the max of those.
-      3. Otherwise return the max of all remaining numbers.
-    """
-    if not chapter_str:
-        return None
-    import re
-
-    s = str(chapter_str)
-
-    # 1. Remove volume-prefixed numbers so they don't pollute the max
-    s_no_vol = re.sub(r"(?i)\b(?:v(?:ol(?:ume)?)?\.?\s*)\d+(?:\.\d+)?", "", s)
-
-    # 2. If the string has explicit chapter prefixes (ch., c, #), we know
-    #    the remaining numbers are chapter-related (including range endpoints
-    #    like the "24" in "ch.23-24"). Use max of all remaining numbers.
-    has_ch_prefix = re.search(
-        r"(?i)(?:ch(?:ap(?:ter)?)?\.?\s*|c(?=\d)|#)\d", s_no_vol
-    )
-    numbers = re.findall(r"\d+(?:\.\d+)?", s_no_vol)
-    if has_ch_prefix and numbers:
-        return max(float(n) for n in numbers)
-
-    # 3. Fall back to all remaining numbers in the volume-stripped string
-    if numbers:
-        return max(float(n) for n in numbers)
-
-    # 4. Last resort: all numbers from the original, but only if the original
-    #    string has no volume prefix — avoids returning a vol number as a chapter.
-    if not re.search(r"(?i)\b(?:v(?:ol(?:ume)?)?\.?\s*)\d+", s):
-        numbers = re.findall(r"\d+(?:\.\d+)?", s)
-        if numbers:
-            return max(float(n) for n in numbers)
-
-    return None
-
-
-def chapter_is_newer(new_ch: str | None, known_ch: str | None) -> bool:
-    """
-    Return True if new_ch represents a chapter newer than known_ch.
-
-    Non-numeric chapters (Prologue, Intermission, Extra, etc.) have no
-    inherent ordering.  Rules:
-      - No new chapter            → False
-      - Any chapter vs nothing    → True
-      - Both numeric              → numeric comparison
-      - New is non-numeric, known is numeric  → False (numbered > special)
-      - New is numeric, known is non-numeric  → True
-      - Both non-numeric, different strings   → True (different special chapter)
-      - Both non-numeric, same string         → False (already seen)
-    """
-    if not new_ch:
-        return False
-    if not known_ch:
-        return True
-
-    new_f = normalize_chapter(new_ch)
-    known_f = normalize_chapter(known_ch)
-
-    if new_f is not None and known_f is not None:
-        return new_f > known_f
-    if new_f is None and known_f is not None:
-        return False   # numbered chapter already surpasses this special chapter
-    if new_f is not None and known_f is None:
-        return True    # numeric chapter is ahead of a non-numeric one
-    # Both non-numeric: treat as new only if the string is different
-    return new_ch.strip().lower() != known_ch.strip().lower()

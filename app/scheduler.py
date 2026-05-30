@@ -38,6 +38,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from .chapter_utils import _format_chapter
 from .database import Notification, Release, SessionLocal, TrackedSeries, get_setting, set_setting
 from .mangabaka import MangaBakaClient
 from .mangaupdates import (
@@ -716,6 +717,14 @@ def _process_release(db: Session, series: TrackedSeries, rec: dict, send_push: b
     mu_release_id = rec.get("id")
     chapter = rec.get("chapter")
     volume = rec.get("volume")
+
+    # Normalize chapter to canonical form ("12.50" → "12.5", "68.0" → "68")
+    # so dedup queries and comparisons use consistent string representation.
+    if chapter is not None:
+        try:
+            chapter = _format_chapter(str(chapter))
+        except (ValueError, TypeError):
+            pass  # non-numeric chapter (e.g. "Extra"), keep as-is
     release_date = rec.get("release_date")
     groups = rec.get("groups", [])
     group_name = groups[0].get("name") if groups else None

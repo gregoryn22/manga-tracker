@@ -26,6 +26,8 @@ import logging
 
 import httpx
 
+from app.chapter_utils import _format_chapter
+
 logger = logging.getLogger(__name__)
 
 _HEADERS_BASE = {
@@ -311,7 +313,13 @@ class KomgaClient:
         metadata = book.get("metadata", {})
         number = metadata.get("number")
         if number is not None:
-            return str(number).strip() or None
+            raw = str(number).strip()
+            if raw:
+                try:
+                    return _format_chapter(raw)
+                except (ValueError, TypeError):
+                    return raw  # non-numeric display number (e.g. "Extra 1")
+            return None
 
         # Fallback to numberSort if number field is missing
         number_sort = metadata.get("numberSort")
