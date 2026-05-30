@@ -2,6 +2,8 @@ import json
 import os
 from datetime import datetime
 
+from app.chapter_utils import chapter_is_newer
+
 from sqlalchemy import (
     BigInteger,
     Boolean,
@@ -178,16 +180,13 @@ class TrackedSeries(Base):
             getattr(self, "simulpub_source", None) == "komga"
             and (getattr(self, "komga_track_mode", None) or "chapter") == "volume"
         )
-        try:
-            if latest:
-                if is_komga_volume:
-                    read = self.current_volume or self.current_chapter
-                else:
-                    read = self.current_chapter
-                if read is not None:
-                    return float(latest) > float(read)
-        except (ValueError, TypeError):
-            pass
+        if latest:
+            if is_komga_volume:
+                read = self.current_volume or self.current_chapter
+            else:
+                read = self.current_chapter
+            if read is not None:
+                return chapter_is_newer(latest, read)
         return False
 
     @staticmethod
