@@ -113,6 +113,8 @@ function app() {
         updates: this.library.filter(s => s.has_update && !s.updates_hidden && (!readingOnly || s.reading_status === 'reading')).length,
         reading: this.library.filter(s=>s.reading_status==='reading').length,
         mu_linked: this.library.filter(s=>s.mu_series_id).length,
+        hidden: this.library.filter(s=>s.updates_hidden).length,
+        muted: this.library.filter(s=>s.notification_muted).length,
       };
     },
 
@@ -385,6 +387,8 @@ function app() {
         list = list.filter(s => {
           for (const f of this.filters) {
             if (f === 'updates' && s.has_update && !s.updates_hidden && (this.sf.updates_reading_only !== 'true' || s.reading_status === 'reading')) return true;
+            if (f === 'hidden' && s.updates_hidden) return true;
+            if (f === 'muted' && s.notification_muted) return true;
             if (f === 'idle' && this.isIdle(s)) return true;
             if (s.reading_status === f) return true;
           }
