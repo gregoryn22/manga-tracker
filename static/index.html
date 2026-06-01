@@ -13,7 +13,7 @@
   <link rel="stylesheet" href="/static/css/pages.css?v=2">
   <link rel="stylesheet" href="/static/css/utilities.css?v=2">
   <style>[x-cloak] { display: none !important; }</style>
-  <script defer src="/static/js/app.js?v=1"></script>
+  <script defer src="/static/js/app.js?v=2"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 </head>
 <body>
@@ -184,6 +184,12 @@
           <button class="pill" :class="{active: filters.includes('idle')}" @click="toggleFilter('idle')"
                   x-show="sf.idle_detection_enabled==='true'"
                   title="Series with no releases in the configured idle threshold">💤 Idle</button>
+          <button class="pill" :class="{active: filters.includes('hidden')}" @click="toggleFilter('hidden')"
+                  x-show="stats.hidden > 0"
+                  title="Series excluded from the Updates filter & badge count">🙈 Hidden <span x-text="'(' + stats.hidden + ')'"></span></button>
+          <button class="pill" :class="{active: filters.includes('muted')}" @click="toggleFilter('muted')"
+                  x-show="stats.muted > 0"
+                  title="Series with push notifications muted">🔇 Muted <span x-text="'(' + stats.muted + ')'"></span></button>
         </div>
 
         <!-- Library toolbar: search + sort + genre filter + bulk -->
