@@ -17,6 +17,18 @@ Self-hosted manga release tracker. Monitors multiple sources for new chapters an
 
 ---
 
+## Screenshots
+
+| Library | Live Feed |
+|---|---|
+| ![Library view](docs/screenshots/library.png) | ![Live Feed](docs/screenshots/live-feed.png) |
+
+| Search | Komga | Settings |
+|---|---|---|
+| ![Search](docs/screenshots/search.png) | ![Komga integration](docs/screenshots/komga.png) | ![Settings](docs/screenshots/settings.png) |
+
+---
+
 ## Prerequisites
 
 - A [MangaBaka](https://mangabaka.org) account and personal API token — this is the metadata backbone the app relies on
