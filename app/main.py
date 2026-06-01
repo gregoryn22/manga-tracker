@@ -112,6 +112,13 @@ app.include_router(notifications.router)
 app.include_router(settings.router)
 app.include_router(export.router)
 
+# Liveness probe — intentionally does no DB work or serialization so the
+# container healthcheck stays cheap even with a large library.
+@app.get("/health", include_in_schema=False)
+def health():
+    return {"ok": True}
+
+
 # Komga library search proxy (lightweight — no separate router needed)
 @app.get("/api/komga/search")
 def komga_search(q: str = ""):
