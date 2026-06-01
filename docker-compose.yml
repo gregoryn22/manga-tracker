@@ -5,6 +5,10 @@ services:
     build: .
     container_name: manga-tracker
     restart: unless-stopped
+    # Resource caps — keep this container well-behaved alongside others on the host.
+    # 256m is generous headroom for a FastAPI + SQLite tracker (idle RSS ~100m).
+    mem_limit: 256m
+    cpus: 0.5
     ports:
       - "8765:8000"   # Host port 8765 → container port 8000. Change left side as needed.
     volumes:
