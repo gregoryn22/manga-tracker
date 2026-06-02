@@ -9,11 +9,11 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/css/tokens.css?v=2">
   <link rel="stylesheet" href="/static/css/base.css?v=2">
-  <link rel="stylesheet" href="/static/css/components.css?v=2">
-  <link rel="stylesheet" href="/static/css/pages.css?v=2">
+  <link rel="stylesheet" href="/static/css/components.css?v=4">
+  <link rel="stylesheet" href="/static/css/pages.css?v=3">
   <link rel="stylesheet" href="/static/css/utilities.css?v=2">
   <style>[x-cloak] { display: none !important; }</style>
-  <script defer src="/static/js/app.js?v=2"></script>
+  <script defer src="/static/js/app.js?v=5"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 </head>
 <body>
@@ -137,10 +137,17 @@
             <div class="stat-sub">active</div>
           </div>
           <div class="stat-card">
-            <div class="stat-label">MU Linked</div>
-            <div class="stat-value" :class="{'text-green': stats.mu_linked === library.length, 'text-yellow': stats.mu_linked !== library.length}" x-text="stats.mu_linked"></div>
-            <div class="stat-sub">of <span x-text="library.length"></span> tracked</div>
+            <div class="stat-label">Completed</div>
+            <div class="stat-value" x-text="stats.completed"></div>
+            <div class="stat-sub">finished</div>
           </div>
+        </div>
+
+        <!-- MU-link health: only surfaces when something needs linking (actionable) -->
+        <div class="health-chip" x-show="library.length > 0 && stats.mu_linked < library.length"
+             @click="toggleFilter('all'); librarySearch=''"
+             title="Series not linked to MangaUpdates won't get authoritative release data — open them and refresh to link">
+          ⚠ <span x-text="(library.length - stats.mu_linked)"></span> of <span x-text="library.length"></span> not linked to MangaUpdates
         </div>
 
         <!-- Recent Drops (last 24h, from live feed + local DB) -->
@@ -172,27 +179,42 @@
 
         <!-- Filter pills (multi-select: click to toggle, "All" resets) -->
         <div class="filter-bar">
+          <!-- Primary reading filters -->
           <button class="pill" :class="{active: filters.includes('all')}" @click="toggleFilter('all')">All <span x-text="'(' + library.length + ')'"></span></button>
           <button class="pill" :class="{active: filters.includes('updates')}" @click="toggleFilter('updates')">🟢 Updates <span x-text="'(' + stats.updates + ')'"></span></button>
           <button class="pill" :class="{active: filters.includes('reading')}" @click="toggleFilter('reading')">Reading</button>
-          <button class="pill" :class="{active: filters.includes('completed')}" @click="toggleFilter('completed')">Completed</button>
-          <button class="pill" :class="{active: filters.includes('rereading')}" @click="toggleFilter('rereading')">Rereading</button>
           <button class="pill" :class="{active: filters.includes('plan_to_read')}" @click="toggleFilter('plan_to_read')">Plan to Read</button>
-          <button class="pill" :class="{active: filters.includes('paused')}" @click="toggleFilter('paused')">Paused</button>
-          <button class="pill" :class="{active: filters.includes('considering')}" @click="toggleFilter('considering')">Considering</button>
-          <button class="pill" :class="{active: filters.includes('dropped')}" @click="toggleFilter('dropped')">Dropped</button>
-          <button class="pill" :class="{active: filters.includes('idle')}" @click="toggleFilter('idle')"
+
+          <!-- Secondary statuses, collapsed under "More ▾" -->
+          <div class="filter-more" @click.outside="moreFiltersOpen=false">
+            <button class="pill" :class="{active: secondaryFilterCount > 0, open: moreFiltersOpen}" @click="moreFiltersOpen=!moreFiltersOpen">
+              More<span x-show="secondaryFilterCount > 0" x-text="' (' + secondaryFilterCount + ')'"></span> <span class="caret">▾</span>
+            </button>
+            <div class="filter-more-panel" x-show="moreFiltersOpen" x-cloak @click.stop>
+              <button class="pill" :class="{active: filters.includes('completed')}" @click="toggleFilter('completed')">Completed</button>
+              <button class="pill" :class="{active: filters.includes('rereading')}" @click="toggleFilter('rereading')">Rereading</button>
+              <button class="pill" :class="{active: filters.includes('paused')}" @click="toggleFilter('paused')">Paused</button>
+              <button class="pill" :class="{active: filters.includes('considering')}" @click="toggleFilter('considering')">Considering</button>
+              <button class="pill" :class="{active: filters.includes('dropped')}" @click="toggleFilter('dropped')">Dropped</button>
+            </div>
+          </div>
+
+          <!-- System filters (only shown when relevant), separated -->
+          <template x-if="sf.idle_detection_enabled==='true' || stats.hidden > 0 || stats.muted > 0">
+            <span class="filter-divider"></span>
+          </template>
+          <button class="pill pill-sys" :class="{active: filters.includes('idle')}" @click="toggleFilter('idle')"
                   x-show="sf.idle_detection_enabled==='true'"
                   title="Series with no releases in the configured idle threshold">💤 Idle</button>
-          <button class="pill" :class="{active: filters.includes('hidden')}" @click="toggleFilter('hidden')"
+          <button class="pill pill-sys" :class="{active: filters.includes('hidden')}" @click="toggleFilter('hidden')"
                   x-show="stats.hidden > 0"
                   title="Series excluded from the Updates filter & badge count">🙈 Hidden <span x-text="'(' + stats.hidden + ')'"></span></button>
-          <button class="pill" :class="{active: filters.includes('muted')}" @click="toggleFilter('muted')"
+          <button class="pill pill-sys" :class="{active: filters.includes('muted')}" @click="toggleFilter('muted')"
                   x-show="stats.muted > 0"
                   title="Series with push notifications muted">🔇 Muted <span x-text="'(' + stats.muted + ')'"></span></button>
         </div>
 
-        <!-- Library toolbar: search + sort + genre filter + bulk -->
+        <!-- Library toolbar: search + sort + Filters popover + view + bulk -->
         <div class="library-toolbar">
           <input class="input search-input" type="text" placeholder="Search library…"
                  x-model="librarySearch" @input="librarySearchDebounce()" />
@@ -211,32 +233,51 @@
             <option value="unread_desc">Most Unread</option>
             <option value="progress_desc">Most Complete</option>
           </select>
-          <select class="input input-toolbar" x-model="genreFilter" x-show="allGenres.length > 0">
-            <option value="">All Genres</option>
-            <template x-for="g in allGenres" :key="g">
-              <option :value="g" x-text="g"></option>
-            </template>
-          </select>
-          <select class="input input-toolbar" x-model="authorFilter" x-show="allAuthors.length > 0">
-            <option value="">All Authors</option>
-            <template x-for="a in allAuthors" :key="a">
-              <option :value="a" x-text="a"></option>
-            </template>
-          </select>
-          <select class="input input-toolbar" x-model="tagFilter" x-show="allTags.length > 0">
-            <option value="">All Tags</option>
-            <template x-for="t in allTags" :key="t">
-              <option :value="t" x-text="t"></option>
-            </template>
-          </select>
-          <select class="input input-toolbar" x-model="typeFilter">
-            <option value="">All Types</option>
-            <option value="manga">Manga</option>
-            <option value="manhwa">Manhwa</option>
-            <option value="manhua">Manhua</option>
-            <option value="novel">Novel</option>
-            <option value="other">Other</option>
-          </select>
+
+          <!-- Advanced filters popover (genre / author / tag / type) -->
+          <div class="adv-filters" @click.outside="advFiltersOpen=false">
+            <button class="btn btn-ghost btn-sm" :class="{'btn-primary': advFilterCount > 0}"
+                    @click="advFiltersOpen=!advFiltersOpen">
+              ⛃ Filters<span x-show="advFilterCount > 0" x-text="' (' + advFilterCount + ')'"></span>
+            </button>
+            <div class="adv-filters-panel" x-show="advFiltersOpen" x-cloak @click.stop>
+              <label class="adv-filter-row" x-show="allGenres.length > 0">
+                <span>Genre</span>
+                <select class="input" x-model="genreFilter">
+                  <option value="">All Genres</option>
+                  <template x-for="g in allGenres" :key="g"><option :value="g" x-text="g"></option></template>
+                </select>
+              </label>
+              <label class="adv-filter-row" x-show="allAuthors.length > 0">
+                <span>Author</span>
+                <select class="input" x-model="authorFilter">
+                  <option value="">All Authors</option>
+                  <template x-for="a in allAuthors" :key="a"><option :value="a" x-text="a"></option></template>
+                </select>
+              </label>
+              <label class="adv-filter-row" x-show="allTags.length > 0">
+                <span>Tag</span>
+                <select class="input" x-model="tagFilter">
+                  <option value="">All Tags</option>
+                  <template x-for="t in allTags" :key="t"><option :value="t" x-text="t"></option></template>
+                </select>
+              </label>
+              <label class="adv-filter-row">
+                <span>Type</span>
+                <select class="input" x-model="typeFilter">
+                  <option value="">All Types</option>
+                  <option value="manga">Manga</option>
+                  <option value="manhwa">Manhwa</option>
+                  <option value="manhua">Manhua</option>
+                  <option value="novel">Novel</option>
+                  <option value="other">Other</option>
+                </select>
+              </label>
+              <button class="btn btn-ghost btn-xs" x-show="advFilterCount > 0"
+                      @click="genreFilter=''; authorFilter=''; tagFilter=''; typeFilter=''">Clear filters</button>
+            </div>
+          </div>
+
           <div class="view-toggle">
             <button :class="{active: viewMode==='grid'}" @click="viewMode='grid'" title="Grid view">▦</button>
             <button :class="{active: viewMode==='list'}" @click="viewMode='list'" title="List view">☰</button>
@@ -245,6 +286,26 @@
                   :class="{'btn-primary': bulkMode}">
             <span x-text="bulkMode ? '✕ Cancel' : '☑ Bulk'"></span>
           </button>
+        </div>
+
+        <!-- Active advanced-filter chips (removable) -->
+        <div class="active-filters" x-show="advFilterCount > 0">
+          <span class="active-filter-chip" x-show="genreFilter">
+            Genre: <span x-text="genreFilter"></span>
+            <button @click="genreFilter=''" title="Clear">×</button>
+          </span>
+          <span class="active-filter-chip" x-show="authorFilter">
+            Author: <span x-text="authorFilter"></span>
+            <button @click="authorFilter=''" title="Clear">×</button>
+          </span>
+          <span class="active-filter-chip" x-show="tagFilter">
+            Tag: <span x-text="tagFilter"></span>
+            <button @click="tagFilter=''" title="Clear">×</button>
+          </span>
+          <span class="active-filter-chip" x-show="typeFilter">
+            Type: <span class="capitalize" x-text="typeFilter"></span>
+            <button @click="typeFilter=''" title="Clear">×</button>
+          </span>
         </div>
 
         <!-- Bulk action bar -->
@@ -299,7 +360,7 @@
                'gap': sf.grid_density === 'compact' ? '10px' : (sf.grid_density === 'large' ? '20px' : '16px')
              }">
           <template x-for="s in filteredLibrary()" :key="s.id">
-            <div class="series-card" :class="{'has-update': s.has_update, 'selected': bulkSelected.includes(s.id)}"
+            <div class="series-card" :class="{'has-update': showsUpdate(s), 'is-finished': isFinished(s), 'selected': bulkSelected.includes(s.id)}"
                  @click="bulkMode ? toggleBulk(s.id) : openDetail(s)">
 
               <!-- Bulk select checkbox -->
@@ -308,23 +369,24 @@
                      @click.stop="toggleBulk(s.id)" />
 
               <!-- Status chips -->
-              <div class="status-chip chip-new"     x-show="s.has_update">NEW</div>
-              <div class="status-chip chip-idle"    x-show="!s.has_update && isIdle(s) && sf.idle_detection_enabled==='true'">💤</div>
-              <div class="status-chip chip-plan"    x-show="!s.has_update && !isIdle(s) && s.reading_status==='plan_to_read'">PLAN</div>
-              <div class="status-chip chip-considering" x-show="!s.has_update && s.reading_status==='considering'">?</div>
-              <div class="status-chip chip-paused"    x-show="!s.has_update && s.reading_status==='paused'">PAUSE</div>
-              <div class="status-chip chip-dropped" x-show="!s.has_update && s.reading_status==='dropped'">DROP</div>
-              <div class="status-chip chip-done"    x-show="!s.has_update && s.reading_status==='completed'">DONE</div>
+              <div class="status-chip chip-new"     x-show="showsUpdate(s)">NEW</div>
+              <div class="status-chip chip-idle"    x-show="!showsUpdate(s) && isIdle(s) && sf.idle_detection_enabled==='true'">💤</div>
+              <div class="status-chip chip-plan"    x-show="!showsUpdate(s) && !isIdle(s) && s.reading_status==='plan_to_read'">PLAN</div>
+              <div class="status-chip chip-considering" x-show="!showsUpdate(s) && s.reading_status==='considering'">?</div>
+              <div class="status-chip chip-paused"    x-show="!showsUpdate(s) && s.reading_status==='paused'">PAUSE</div>
+              <div class="status-chip chip-dropped" x-show="!showsUpdate(s) && s.reading_status==='dropped'">DROP</div>
+              <div class="status-chip chip-done"    x-show="!showsUpdate(s) && s.reading_status==='completed'">DONE</div>
               <div class="chip-right-stack">
                 <div class="chip-linked" x-show="s.mu_series_id">
                   MU
                   <span class="poll-health" :class="pollHealthClass(s)" :title="pollHealthTitle(s)"></span>
                 </div>
-                <div x-show="s.simulpub_source && s.simulpub_source !== '' && s.poll_failures > 0"
-                     class="chip-linked chip-error"
-                     :title="(s.poll_failures >= 10 ? 'Polling paused — click series then Refresh to reset. ' : (s.poll_failures >= 5 ? 'Polling slowed (backoff active). ' : '')) + (s.last_poll_error || 'Simulpub polling errors detected')">
-                  ⚠ <span x-text="s.poll_failures"></span>
-                </div>
+                <!-- Consolidated maintenance/health warnings (MU link, MangaBaka, poll errors) -->
+                <template x-if="cardWarnings(s).length > 0">
+                  <div class="chip-linked chip-warn" :title="cardWarnings(s).join('\n')">
+                    ⚠ <span x-show="cardWarnings(s).length > 1" x-text="cardWarnings(s).length"></span>
+                  </div>
+                </template>
               </div>
 
               <!-- Cover -->
@@ -349,14 +411,7 @@
                   <div class="source-badge" :class="'src-' + s.simulpub_source"
                        x-text="{'mangaplus':'MangaPlus','kmanga':'K Manga','mangaup':'MangaUp!','mangadex':'MangaDex','komga':'Komga'}[s.simulpub_source] || s.simulpub_source"></div>
                 </template>
-                <!-- MU link uncertain badge -->
-                <template x-if="s.mu_link_status === 'uncertain'">
-                  <div class="source-badge src-uncertain" title="MU link needs review — open series to review">⚠ MU</div>
-                </template>
-                <!-- No MangaBaka URL badge -->
-                <template x-if="!s.mangabaka_url">
-                  <div class="source-badge src-no-mb" title="Not linked to MangaBaka — open series and refresh to fix">⚠ MB</div>
-                </template>
+                <!-- MU-uncertain / MangaBaka / poll-error warnings consolidated into ⚠ badge in right stack -->
               </div>
 
               <div class="card-body">
@@ -366,9 +421,9 @@
                   <span x-text="s.year || ''"></span>
                 </div>
                 <!-- Latest chapter info -->
-                <div class="card-chapter" :class="{'new': s.has_update}" x-show="s.latest_chapter">
+                <div class="card-chapter" :class="{'new': showsUpdate(s)}" x-show="s.latest_chapter">
                   <span x-text="unitLabel(s)"></span> <span x-text="s.latest_chapter"></span>
-                  <template x-if="s.has_update">
+                  <template x-if="showsUpdate(s)">
                     <span class="text-2xs text-muted"> ← <span x-text="readProgress(s)"></span> read</span>
                   </template>
                 </div>
@@ -377,7 +432,7 @@
 
                 <!-- Progress bar -->
                 <div class="progress-wrap" x-show="sf.show_progress_bars !== 'false' && s.latest_chapter && (isKomgaVolume(s) ? s.current_volume : s.current_chapter)">
-                  <div class="progress-bar" :class="{'green': s.has_update}" :style="`width: ${chapterProgress(s)}%`"></div>
+                  <div class="progress-bar" :class="{'green': showsUpdate(s)}" :style="`width: ${chapterProgress(s)}%`"></div>
                 </div>
 
                 <!-- Tags -->
@@ -412,7 +467,7 @@
                          @keydown.enter="quickSetChapter(s, $event.target.value); $event.target.blur()"
                          @blur="quickSetChapter(s, $event.target.value)"
                          @focus="$event.target.select()" />
-                  <button class="ch-btn catch-up" x-show="s.has_update"
+                  <button class="ch-btn catch-up" x-show="showsUpdate(s)"
                           @click="markCaughtUp(s)"
                           title="Mark as caught up">✓ Catch up</button>
                 </div>
@@ -424,7 +479,7 @@
         <!-- List view -->
         <div class="card series-list card-inset" x-show="!loading && filteredLibrary().length > 0 && viewMode==='list'">
           <template x-for="s in filteredLibrary()" :key="s.id">
-            <div class="series-list-item" :class="{'has-update': s.has_update, 'selected': bulkSelected.includes(s.id)}"
+            <div class="series-list-item" :class="{'has-update': showsUpdate(s), 'is-finished': isFinished(s), 'selected': bulkSelected.includes(s.id)}"
                  @click="bulkMode ? toggleBulk(s.id) : openDetail(s)">
 
               <!-- Bulk checkbox -->
@@ -446,14 +501,14 @@
                 <div class="list-sub">
                   <span class="list-status-chip"
                         :class="{
-                          'chip-new': s.has_update,
-                          'chip-plan': !s.has_update && s.reading_status==='plan_to_read',
-                          'chip-paused': !s.has_update && s.reading_status==='paused',
-                          'chip-dropped': !s.has_update && s.reading_status==='dropped',
-                          'chip-done': !s.has_update && s.reading_status==='completed',
-                          'chip-considering': !s.has_update && s.reading_status==='considering',
+                          'chip-new': showsUpdate(s),
+                          'chip-plan': !showsUpdate(s) && s.reading_status==='plan_to_read',
+                          'chip-paused': !showsUpdate(s) && s.reading_status==='paused',
+                          'chip-dropped': !showsUpdate(s) && s.reading_status==='dropped',
+                          'chip-done': !showsUpdate(s) && s.reading_status==='completed',
+                          'chip-considering': !showsUpdate(s) && s.reading_status==='considering',
                         }"
-                        x-text="s.has_update ? 'NEW' : (s.reading_status||'').replace('_',' ')"></span>
+                        x-text="showsUpdate(s) ? 'NEW' : (s.reading_status||'').replace('_',' ')"></span>
                   <span x-show="sf.show_card_meta !== 'false'" class="capitalize" x-text="(s.series_type || 'manga')"></span>
                   <span x-show="sf.show_card_meta !== 'false' && s.year" x-text="s.year"></span>
                   <span class="list-rating" x-show="sf.show_ratings_on_cards !== 'false' && (sf.rating_source === 'mangabaka' ? s.rating : s.mu_rating)">★ <span x-text="sf.rating_source === 'mangabaka' ? (parseFloat(s.rating)||0).toFixed(1) : (s.mu_rating ? s.mu_rating.toFixed(1) : '')"></span>
@@ -489,7 +544,7 @@
               <!-- Progress -->
               <div class="list-progress" x-show="sf.show_progress_bars !== 'false' && s.latest_chapter && (isKomgaVolume(s) ? (s.current_volume || s.current_chapter) : s.current_chapter)">
                 <div class="progress-wrap">
-                  <div class="progress-bar" :class="{'green': s.has_update}" :style="`width: ${chapterProgress(s)}%`"></div>
+                  <div class="progress-bar" :class="{'green': showsUpdate(s)}" :style="`width: ${chapterProgress(s)}%`"></div>
                 </div>
               </div>
 
@@ -501,7 +556,7 @@
                        @keydown.enter="quickSetChapter(s, $event.target.value); $event.target.blur()"
                        @blur="quickSetChapter(s, $event.target.value)"
                        @focus="$event.target.select()" />
-                <button class="ch-btn catch-up text-2xs" x-show="s.has_update"
+                <button class="ch-btn catch-up text-2xs" x-show="showsUpdate(s)"
                         @click="markCaughtUp(s)"
                         title="Mark as caught up">✓</button>
               </div>
@@ -1811,6 +1866,19 @@
             </div>
           </div>
 
+          <div class="settings-row mt-3">
+            <label>Volume "Mark Current" marks chapters read</label>
+            <select class="input input-compact" x-model="sf.volume_catchup_marks_chapters">
+              <option value="false">Off</option>
+              <option value="true">On</option>
+            </select>
+          </div>
+          <div class="text-xs text-muted mt-1">
+            When on, hitting <strong>Mark Current</strong> in a series' Volume Progress also jumps your
+            chapter progress to the latest chapter — handy if you read by volume. No prompt each time;
+            this toggle is the consent.
+          </div>
+
           <div class="flex gap-2 mt-4">
             <button class="btn btn-primary btn-sm" @click="saveSettings()">💾 Save</button>
           </div>
@@ -1889,9 +1957,9 @@
 
 <!-- ── Series Detail Modal ──────────────────────────────────────────── -->
 <div class="overlay" x-show="detailOpen" x-cloak @click.self="detailOpen=false">
-  <div class="modal" @click.stop x-show="detailOpen">
+  <div class="modal modal--tall" @click.stop x-show="detailOpen">
     <template x-if="ds">
-      <div>
+      <div class="modal-shell">
         <div class="modal-head">
           <template x-if="ds.cover_url">
             <img class="modal-cover" :src="ds.cover_url" :alt="ds.title" />
@@ -1977,9 +2045,17 @@
           </div>
         </div>
 
+        <div class="modal-scroll">
+        <div class="modal-tabs">
+          <button type="button" class="modal-tab" :class="{active: detailTab==='overview'}" @click="detailTab='overview'">📖 Overview</button>
+          <button type="button" class="modal-tab" :class="{active: detailTab==='progress'}" @click="detailTab='progress'">✏️ Progress</button>
+          <button type="button" class="modal-tab" :class="{active: detailTab==='sources'}" @click="detailTab='sources'">🛰 Sources
+            <span class="tab-alert" x-show="!ds.mangabaka_url || ds.mu_link_status==='uncertain' || ds.poll_failures>0"></span>
+          </button>
+        </div>
         <div class="modal-body">
 
-          <!-- ── Link alert banners ──────────────────────────────── -->
+          <!-- ── Link alert banners (always visible across tabs) ──── -->
           <template x-if="!ds.mangabaka_url">
             <div class="alert-banner alert-banner-critical">
               <span class="alert-icon">⚠</span>
@@ -2001,6 +2077,8 @@
             </div>
           </template>
 
+          <!-- ═══════════ OVERVIEW TAB ═══════════ -->
+          <div x-show="detailTab==='overview'">
           <div class="modal-desc" x-text="stripHtml(ds.description || 'No description available.')"></div>
 
           <!-- Latest release info -->
@@ -2022,6 +2100,10 @@
             </div>
           </template>
 
+          </div><!-- /Overview run 1 -->
+
+          <!-- ═══════════ PROGRESS TAB ═══════════ -->
+          <div x-show="detailTab==='progress'">
           <!-- Progress form -->
           <div class="form-group">
             <div class="form-label">Reading Status</div>
@@ -2088,8 +2170,7 @@
                 <!-- Catch up to Komga's latest, or mark complete if total_volumes known -->
                 <button class="btn btn-green btn-sm"
                         x-show="isKomgaVolume(ds) ? !!volumeTotal(ds) : !!ds.total_volumes"
-                        x-text="isKomgaVolume(ds) ? 'Catch Up' : 'Mark Complete'"
-                        @click="ef.current_volume = isKomgaVolume(ds) ? volumeTotal(ds) : String(ds.total_volumes)"></button>
+                        @click="markVolumeCurrent()">Mark Current</button>
                 <button class="btn btn-ghost btn-sm" x-show="ef.current_volume" @click="ef.current_volume = ''">Clear</button>
               </div>
               <!-- Progress bar: Komga-volume uses latest_chapter as denominator; others use total_volumes -->
@@ -2108,14 +2189,7 @@
             </div>
           </template>
 
-          <div class="flex gap-2 items-center mb-4 pb-4" style="border-bottom: 1px solid var(--border);">
-            <button class="btn btn-danger btn-sm" @click="removeSeries(ds.id)">🗑 Remove</button>
-            <button class="btn btn-ghost btn-sm" @click="refreshSeries(ds.id)">🔄 Refresh</button>
-            <div class="ml-auto flex gap-2">
-              <button class="btn btn-ghost" @click="detailOpen=false">Cancel</button>
-              <button class="btn btn-primary" @click="saveDetail()">💾 Save</button>
-            </div>
-          </div>
+          <!-- (Save / Cancel / Refresh / Remove moved to sticky footer) -->
 
           <!-- Notes -->
           <div class="form-group">
@@ -2227,13 +2301,22 @@
             </template>
           </div>
 
-          <div class="form-group">
+          </div><!-- /Progress tab -->
+
+          <!-- ═══════════ SOURCES TAB ═══════════ -->
+          <div x-show="detailTab==='sources'">
+          <div class="form-group" x-show="!['completed','dropped'].includes(ef.reading_status)">
             <label class="checkbox-label text-sm">
               <input type="checkbox" x-model="ef.updates_hidden" class="accent-check" />
               <span>🙈 Hide from Updates filter &amp; badge count</span>
             </label>
             <div class="text-xs text-muted" style="margin-left:26px">
               Still tracked and polled. Progress and notifications work normally. Just excluded from the Updates view.
+            </div>
+          </div>
+          <div class="form-group" x-show="['completed','dropped'].includes(ef.reading_status)">
+            <div class="text-xs text-muted">
+              🙈 Auto-excluded from Updates — <span x-text="ef.reading_status"></span> series never show the green Updates outline or count toward the badge.
             </div>
           </div>
 
@@ -2542,6 +2625,10 @@
             </div>
           </template>
 
+          </div><!-- /Sources run 1 -->
+
+          <!-- ═══════════ OVERVIEW TAB (run 2) ═══════════ -->
+          <div x-show="detailTab==='overview'">
           <!-- MU Categories cloud -->
           <template x-if="ds.categories && ds.categories.length > 0">
             <div class="mb-4">
@@ -2580,6 +2667,10 @@
             </div>
           </template>
 
+          </div><!-- /Overview run 2 -->
+
+          <!-- ═══════════ SOURCES TAB (run 2) ═══════════ -->
+          <div x-show="detailTab==='sources'">
           <!-- MB link management — Komga series only -->
           <template x-if="ds.simulpub_source === 'komga'">
             <div class="form-group">
@@ -2635,6 +2726,10 @@
             </div>
           </template>
 
+          </div><!-- /Sources run 2 -->
+
+          <!-- ═══════════ OVERVIEW TAB (run 3) ═══════════ -->
+          <div x-show="detailTab==='overview'">
           <!-- External links -->
           <div class="ext-links-section">
             <div class="form-label mb-1">Links</div>
@@ -2686,10 +2781,12 @@
               </div>
             </div>
           </template>
-        </div>
+          </div><!-- /Overview run 3 -->
 
-        <!-- MU Link Review -->
-        <template x-if="ds.mu_link_status === 'uncertain' || muReviewOpen">
+          <!-- ═══════════ SOURCES TAB (run 3) — MU link review ═══════════ -->
+          <div x-show="detailTab==='sources'">
+          <!-- MU Link Review -->
+          <template x-if="ds.mu_link_status === 'uncertain' || muReviewOpen">
           <div class="mu-review-section">
             <hr class="divider" />
             <div class="mu-review-header">
@@ -2748,6 +2845,20 @@
             </template>
           </div>
         </template>
+          </div><!-- /Sources run 3 -->
+
+        </div><!-- /modal-body -->
+        </div><!-- /modal-scroll -->
+
+        <!-- Sticky action footer -->
+        <div class="modal-footer">
+          <button class="btn btn-danger btn-sm" @click="removeSeries(ds.id)">🗑 Remove</button>
+          <button class="btn btn-ghost btn-sm" @click="refreshSeries(ds.id)">🔄 Refresh</button>
+          <div class="ml-auto flex gap-2">
+            <button class="btn btn-ghost" @click="detailOpen=false">Cancel</button>
+            <button class="btn btn-primary" @click="saveDetail()">💾 Save</button>
+          </div>
+        </div>
 
       </div>
     </template>

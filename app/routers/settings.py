@@ -79,6 +79,7 @@ EXPOSED_KEYS = [
     "show_release_group",
     "show_tags_on_cards",
     "show_card_controls",
+    "volume_catchup_marks_chapters",
 ]
 
 
@@ -154,6 +155,7 @@ class UpdateSettingsRequest(BaseModel):
     show_release_group: str | None = None
     show_tags_on_cards: str | None = None
     show_card_controls: str | None = None
+    volume_catchup_marks_chapters: str | None = None
 
 
 # Sensitive keys that are masked in GET responses.  If a PATCH request sends

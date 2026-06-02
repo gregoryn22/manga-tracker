@@ -14,6 +14,13 @@ function app() {
     tagFilter: '',
     typeFilter: '',
 
+    // UI: filter overflow + advanced-filter popover open state
+    moreFiltersOpen: false,
+    advFiltersOpen: false,
+
+    // Detail modal active tab: 'overview' | 'progress' | 'sources'
+    detailTab: 'progress',
+
     // Bulk mode
     bulkMode: false, bulkSelected: [], bulkStatus: 'reading',
 
@@ -41,6 +48,7 @@ function app() {
       show_release_group:    'true',   // scanlation/release group name on cards + feed
       show_tags_on_cards:    'true',   // user tag chips on library cards
       show_card_controls:    'true',   // inline "Read:" input + catch-up button on cards
+      volume_catchup_marks_chapters: 'false', // Volume "Mark Current" also jumps chapter progress to latest
       default_view_mode:     'grid',   // persisted view mode: 'grid' or 'list'
       default_feed_grouped:  'false',  // persisted feed grouping: 'true' or 'false'
       // Rating input mode
@@ -108,14 +116,50 @@ function app() {
 
     // Computed stats
     get stats() {
-      const readingOnly = this.sf.updates_reading_only === 'true';
       return {
-        updates: this.library.filter(s => s.has_update && !s.updates_hidden && (!readingOnly || s.reading_status === 'reading')).length,
+        updates: this.library.filter(s => this.showsUpdate(s)).length,
         reading: this.library.filter(s=>s.reading_status==='reading').length,
+        completed: this.library.filter(s=>s.reading_status==='completed').length,
         mu_linked: this.library.filter(s=>s.mu_series_id).length,
         hidden: this.library.filter(s=>s.updates_hidden).length,
         muted: this.library.filter(s=>s.notification_muted).length,
       };
+    },
+
+    // Finished statuses are implicitly excluded from Updates (no green outline,
+    // no NEW chip, not counted/filtered). Single source of truth for "show as update".
+    isFinished(s) {
+      return s.reading_status === 'dropped' || s.reading_status === 'completed';
+    },
+    showsUpdate(s) {
+      if (this.isFinished(s)) return false;
+      if (s.updates_hidden) return false;
+      if (this.sf.updates_reading_only === 'true' && s.reading_status !== 'reading') return false;
+      return !!s.has_update;
+    },
+
+    // Maintenance/health warnings for a card, collapsed into one ⚠ badge.
+    cardWarnings(s) {
+      const w = [];
+      if (s.mu_link_status === 'uncertain') w.push('MU link needs review — open series to review');
+      if (!s.mangabaka_url) w.push('Not linked to MangaBaka — open series and refresh to fix');
+      if (s.simulpub_source && s.simulpub_source !== '' && s.poll_failures > 0) {
+        const prefix = s.poll_failures >= 10
+          ? 'Polling paused — open series then Refresh to reset. '
+          : (s.poll_failures >= 5 ? 'Polling slowed (backoff active). ' : '');
+        w.push(prefix + (s.last_poll_error || `${s.poll_failures} polling error(s) detected`));
+      }
+      return w;
+    },
+
+    // Count of active secondary status filters (those hidden behind "More ▾")
+    get secondaryFilterCount() {
+      const secondary = ['completed','rereading','paused','considering','dropped'];
+      return this.filters.filter(f => secondary.includes(f)).length;
+    },
+    // Count of active advanced filters (genre/author/tag/type) in the popover
+    get advFilterCount() {
+      return [this.genreFilter, this.authorFilter, this.tagFilter, this.typeFilter].filter(Boolean).length;
     },
 
     applyThemeSettings() {
@@ -386,7 +430,7 @@ function app() {
       if (!this.filters.includes('all')) {
         list = list.filter(s => {
           for (const f of this.filters) {
-            if (f === 'updates' && s.has_update && !s.updates_hidden && (this.sf.updates_reading_only !== 'true' || s.reading_status === 'reading')) return true;
+            if (f === 'updates' && this.showsUpdate(s)) return true;
             if (f === 'hidden' && s.updates_hidden) return true;
             if (f === 'muted' && s.notification_muted) return true;
             if (f === 'idle' && this.isIdle(s)) return true;
@@ -513,6 +557,21 @@ function app() {
       if (!s || !this.isKomgaVolume(s)) return null;
       if (s.simulpub_source === 'komga') return s.latest_chapter || null;
       return s.total_volumes || null;
+    },
+
+    // Detail-modal: set volume progress to the latest known volume ("Mark Current").
+    // If the volume_catchup_marks_chapters setting is on, also jump chapter progress
+    // to the latest chapter (read-by-volume workflow) — for non-Komga-volume series,
+    // where latest_chapter is a real chapter number rather than a volume count.
+    markVolumeCurrent() {
+      const target = this.isKomgaVolume(this.ds) ? this.volumeTotal(this.ds) : this.ds.total_volumes;
+      if (target === null || target === undefined || target === '') return;
+      this.ef.current_volume = String(target);
+      if (this.sf.volume_catchup_marks_chapters === 'true'
+          && !this.isKomgaVolume(this.ds)
+          && this.ds.latest_chapter) {
+        this.ef.current_chapter = String(this.ds.latest_chapter);
+      }
     },
 
     chapterProgress(s) {
@@ -1029,6 +1088,7 @@ function app() {
         date_completed_reset: false,
       };
       this.detailOpen = true;
+      this.detailTab = 'progress';
       this.detailReleases = [];
       this.muReviewOpen = false;
       this.muSearchQ = '';

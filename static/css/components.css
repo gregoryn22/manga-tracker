@@ -147,6 +147,27 @@ textarea.input { resize: vertical; }
 }
 .pill:hover { border-color: var(--accent); color: var(--text); }
 .pill.active { background: var(--accent); border-color: var(--accent); color: white; }
+.pill .caret { font-size: 0.7em; opacity: 0.7; transition: transform 0.12s; display: inline-block; }
+.pill.open .caret { transform: rotate(180deg); }
+
+/* System filters (idle/hidden/muted): visually quieter than reading filters */
+.pill-sys { font-size: var(--fs-xs); opacity: 0.85; }
+.pill-sys:hover, .pill-sys.active { opacity: 1; }
+.filter-divider {
+  width: 1px; align-self: stretch; min-height: 20px;
+  background: var(--border); margin: 0 var(--sp-1);
+}
+
+/* "More ▾" secondary-status dropdown */
+.filter-more { position: relative; }
+.filter-more-panel {
+  position: absolute; top: calc(100% + 6px); left: 0; z-index: 30;
+  display: flex; flex-direction: column; gap: 6px;
+  padding: var(--sp-2-5); border-radius: var(--radius-md);
+  background: var(--surface); border: 1px solid var(--border);
+  box-shadow: var(--shadow); min-width: 150px;
+}
+.filter-more-panel .pill { text-align: left; }
 
 /* ── Status chips ─────────────────────────────────────────────────── */
 .status-chip {
@@ -171,6 +192,11 @@ textarea.input { resize: vertical; }
 }
 .chip-idle { background: rgba(245,158,11,0.15); color: var(--yellow); }
 .chip-error { background: rgba(239,68,68,0.15); color: var(--red); }
+/* Consolidated maintenance/health warning badge (MU link, MangaBaka, poll errors) */
+.chip-warn {
+  background: rgba(220,160,0,0.92); color: #fff; cursor: help;
+  display: inline-flex; align-items: center; gap: 2px;
+}
 
 /* ── Tags / Genres / Categories ───────────────────────────────────── */
 .tag {
@@ -226,6 +252,30 @@ textarea.input { resize: vertical; }
   max-height: 90vh; overflow-y: auto; box-shadow: var(--shadow);
 }
 .modal--sm { max-width: 440px; }
+
+/* Tall modal: fixed header + scrollable tabbed body + pinned footer */
+.modal--tall { overflow: hidden; display: flex; flex-direction: column; }
+.modal--tall .modal-shell { display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; overflow: hidden; }
+.modal--tall .modal-head { flex-shrink: 0; }
+.modal--tall .modal-scroll { flex: 1 1 auto; overflow-y: auto; min-height: 0; }
+.modal--tall .modal-footer { flex-shrink: 0; }
+
+/* Tab nav (sticky at top of scroll region) */
+.modal-tabs {
+  display: flex; gap: var(--sp-1); padding: 0 22px;
+  border-bottom: 1px solid var(--border);
+  position: sticky; top: 0; background: var(--surface); z-index: 5;
+}
+.modal-tab {
+  padding: var(--sp-3) var(--sp-3); background: none; border: none;
+  border-bottom: 2px solid transparent; margin-bottom: -1px;
+  color: var(--text-muted); font-weight: 600; font-size: var(--fs-sm);
+  cursor: pointer; font-family: inherit; display: inline-flex; align-items: center; gap: 5px;
+  transition: color 0.12s, border-color 0.12s;
+}
+.modal-tab:hover { color: var(--text); }
+.modal-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+.modal-tab .tab-alert { width: 7px; height: 7px; border-radius: 50%; background: var(--red); display: inline-block; }
 .modal-head {
   display: flex; gap: 18px; padding: 22px;
   border-bottom: 1px solid var(--border); position: relative;

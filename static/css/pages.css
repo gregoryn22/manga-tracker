@@ -101,6 +101,44 @@
   flex: 1; min-width: 160px; max-width: 300px;
 }
 
+/* Advanced filters popover (genre / author / tag / type) */
+.adv-filters { position: relative; }
+.adv-filters-panel {
+  position: absolute; top: calc(100% + 6px); left: 0; z-index: 30;
+  display: flex; flex-direction: column; gap: var(--sp-2-5);
+  padding: var(--sp-3); border-radius: var(--radius-md);
+  background: var(--surface); border: 1px solid var(--border);
+  box-shadow: var(--shadow); min-width: 240px;
+}
+.adv-filter-row { display: flex; flex-direction: column; gap: var(--sp-1); font-size: var(--fs-xs); color: var(--text-muted); }
+.adv-filter-row select { width: 100%; }
+
+/* Active advanced-filter chips */
+.active-filters { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-bottom: var(--sp-4); margin-top: calc(-1 * var(--sp-2)); }
+.active-filter-chip {
+  display: inline-flex; align-items: center; gap: var(--sp-1);
+  font-size: var(--fs-xs); padding: 3px 6px 3px 10px; border-radius: var(--radius-full);
+  background: var(--accent-dim); color: var(--accent); border: 1px solid var(--accent);
+}
+.active-filter-chip button {
+  border: none; background: transparent; color: inherit; cursor: pointer;
+  font-size: var(--fs-base); line-height: 1; padding: 0 2px;
+}
+.active-filter-chip button:hover { color: var(--text); }
+
+/* MU-link health chip under stats (only when actionable) */
+.health-chip {
+  display: inline-flex; align-items: center; gap: var(--sp-1-5);
+  font-size: var(--fs-xs); color: var(--yellow); cursor: help;
+  background: rgba(245,158,11,0.10); border: 1px solid rgba(245,158,11,0.30);
+  border-radius: var(--radius-md); padding: var(--sp-1) var(--sp-2-5);
+  margin-bottom: var(--sp-4);
+}
+
+/* Finished (completed/dropped) cards recede — no green outline, gentle de-emphasis */
+.series-card.is-finished:not(:hover) { border-color: var(--border); }
+.series-list-item.is-finished { border-left: 3px solid transparent; }
+
 /* ── Recent drops feed (last 24h) ─────────────────────────────────── */
 .drops-section { margin-bottom: var(--sp-7); }
 .section-header {
