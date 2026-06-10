@@ -302,6 +302,11 @@ def add_series(req: AddSeriesRequest, background_tasks: BackgroundTasks, db: Ses
         added_at=datetime.utcnow(),
     )
     db.add(series)
+    db.add(ReadingLog(
+        series_id=series.id, series_title=series.title,
+        action="added", detail="Added to library",
+        created_at=datetime.utcnow(),
+    ))
     db.commit()
     db.refresh(series)
 
@@ -487,6 +492,31 @@ def bulk_status(req: BulkStatusRequest, background_tasks: BackgroundTasks, db: S
             )
 
     return {"success": True, "updated": updated}
+
+
+# ── Bulk delete ──────────────────────────────────────────────────────
+
+class BulkDeleteRequest(BaseModel):
+    series_ids: List[int]
+
+
+@router.post("/bulk/delete")
+def bulk_delete(req: BulkDeleteRequest, db: Session = Depends(get_db)):
+    """Delete multiple series (and their related records) in one transaction."""
+    from ..database import Notification, Release
+
+    deleted = 0
+    for sid in req.series_ids:
+        series = db.query(TrackedSeries).filter(TrackedSeries.id == sid).first()
+        if not series:
+            continue
+        db.query(Release).filter(Release.series_id == sid).delete()
+        db.query(Notification).filter(Notification.series_id == sid).delete()
+        db.query(ReadingLog).filter(ReadingLog.series_id == sid).delete()
+        db.delete(series)
+        deleted += 1
+    db.commit()
+    return {"success": True, "deleted": deleted}
 
 
 # ── Bulk fill missing MB covers ──────────────────────────────────────
@@ -1211,17 +1241,25 @@ def refresh_series(series_id: int, background_tasks: BackgroundTasks, db: Sessio
             flat = series_from_api(api_data)
             new_total = flat.get("total_chapters")
             if new_total and new_total != series.total_chapters:
-                from ..notifier import notify_chapter_update
-                notify_chapter_update(
-                    db=db,
-                    series_id=series.id,
-                    series_title=series.title,
-                    old_chapters=series.total_chapters,
-                    new_chapters=new_total,
-                    mangabaka_url=series.mangabaka_url,
-                    reading_status=series.reading_status,
-                    notification_muted=bool(getattr(series, "notification_muted", False)),
-                )
+                # MB chapter counts are unreliable (scraped upstream). Only notify
+                # when this is the series' fallback source (no MU link) AND the
+                # count genuinely increased — mirrors the scheduler's MB fallback.
+                try:
+                    increased = float(new_total) > float(series.total_chapters or 0)
+                except (TypeError, ValueError):
+                    increased = False
+                if increased and not series.mu_series_id:
+                    from ..notifier import notify_chapter_update
+                    notify_chapter_update(
+                        db=db,
+                        series_id=series.id,
+                        series_title=series.title,
+                        old_chapters=series.total_chapters,
+                        new_chapters=new_total,
+                        mangabaka_url=series.mangabaka_url,
+                        reading_status=series.reading_status,
+                        notification_muted=bool(getattr(series, "notification_muted", False)),
+                    )
             series.total_chapters  = flat["total_chapters"]
             series.total_volumes   = flat.get("total_volumes")
             series.status          = flat["status"]

@@ -13,11 +13,11 @@ router = APIRouter(prefix="/api/notifications", tags=["notifications"])
 
 
 @router.get("")
-def list_notifications(limit: int = 50, unread_only: bool = False, db: Session = Depends(get_db)):
+def list_notifications(limit: int = 50, offset: int = 0, unread_only: bool = False, db: Session = Depends(get_db)):
     q = db.query(Notification)
     if unread_only:
         q = q.filter(Notification.is_read == False)
-    notifs = q.order_by(Notification.created_at.desc()).limit(limit).all()
+    notifs = q.order_by(Notification.created_at.desc()).offset(max(0, offset)).limit(min(limit, 500)).all()
     unread_count = db.query(Notification).filter(Notification.is_read == False).count()
     return {
         "notifications": [n.to_dict() for n in notifs],
