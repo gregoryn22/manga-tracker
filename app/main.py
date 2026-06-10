@@ -54,7 +54,11 @@ async def lifespan(app: FastAPI):
 
     db = SessionLocal()
     try:
-        interval = float(get_setting(db, "poll_interval_hours", "6") or "6")
+        try:
+            interval = float(get_setting(db, "poll_interval_hours", "6") or "6")
+        except ValueError:
+            logger.warning("Invalid poll_interval_hours in settings — falling back to 6h")
+            interval = 6.0
         meta_enabled = get_setting(db, "metadata_refresh_enabled", "false") == "true"
         try:
             meta_days = float(get_setting(db, "metadata_refresh_interval_days", "7") or "7")
@@ -390,6 +394,12 @@ def komga_import(req: KomgaImportRequest, background_tasks: BackgroundTasks):
                 )
                 next_id += 1
                 db.add(series_obj)
+                db.add(ReadingLog(
+                    series_id=series_obj.id,
+                    series_title=title,
+                    action="added",
+                    detail="Imported from Komga",
+                ))
 
                 # Log the initial add as activity
                 logged_progress = current_volume if is_volume else current_chapter
@@ -519,6 +529,9 @@ if STATIC_DIR.exists():
     @app.get("/", include_in_schema=False)
     @app.get("/{path:path}", include_in_schema=False)
     async def serve_spa(path: str = ""):
+        # Unknown API routes should 404 as JSON, not silently return the SPA shell
+        if path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="Not found")
         index = STATIC_DIR / "index.html"
         if index.exists():
             return FileResponse(str(index))

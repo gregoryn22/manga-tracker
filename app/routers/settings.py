@@ -58,6 +58,8 @@ EXPOSED_KEYS = [
     "notify_locked_chapters",
     "default_page",
     "grid_density",
+    "default_view_mode",
+    "default_feed_grouped",
     "rating_input_mode",
     "rating_source",
     "show_reading_dates",
@@ -89,17 +91,9 @@ def get_settings(db: Session = Depends(get_db)):
     result = {r.key: r.value for r in rows}
     # Mask sensitive values with a fixed-length placeholder so key length
     # is never revealed (avoids partial-reconstruction attacks).
-    _MASK = "••••••••••••"
-    if result.get("mangabaka_token"):
-        result["mangabaka_token"] = _MASK
-    if result.get("mangabaka_pat"):
-        result["mangabaka_pat"] = _MASK
-    if result.get("kmanga_password"):
-        result["kmanga_password"] = _MASK
-    if result.get("komga_api_key"):
-        result["komga_api_key"] = _MASK
-    if result.get("pushover_app_token"):
-        result["pushover_app_token"] = _MASK
+    for key in _MASKED_KEYS:
+        if result.get(key):
+            result[key] = _MASK
     return result
 
 
@@ -134,6 +128,8 @@ class UpdateSettingsRequest(BaseModel):
     notify_locked_chapters: str | None = None
     default_page: str | None = None
     grid_density: str | None = None
+    default_view_mode: str | None = None
+    default_feed_grouped: str | None = None
     rating_input_mode: str | None = None
     rating_source: str | None = None
     show_reading_dates: str | None = None
@@ -161,44 +157,69 @@ class UpdateSettingsRequest(BaseModel):
 # Sensitive keys that are masked in GET responses.  If a PATCH request sends
 # back the exact mask placeholder, that means the user left the field unchanged —
 # we must NOT overwrite the real stored value with the placeholder string.
-_MASKED_KEYS = {"mangabaka_token", "mangabaka_pat", "kmanga_password", "komga_api_key", "pushover_app_token"}
+_MASKED_KEYS = {
+    "mangabaka_token",
+    "mangabaka_pat",
+    "kmanga_password",
+    "komga_api_key",
+    "pushover_app_token",
+    "pushover_user_key",
+}
 _MASK = "••••••••••••"
 
 
 @router.patch("")
 def update_settings(req: UpdateSettingsRequest, db: Session = Depends(get_db)):
     updates = req.model_dump(exclude_none=True)
+
+    # Validate BEFORE persisting anything — otherwise an invalid value gets
+    # stored and crashes the scheduler bootstrap on next app start.
+    if "poll_interval_hours" in updates:
+        try:
+            hours = float(updates["poll_interval_hours"])
+        except ValueError:
+            raise HTTPException(
+                status_code=422,
+                detail="poll_interval_hours must be a valid number",
+            )
+        if hours <= 0:
+            raise HTTPException(
+                status_code=422,
+                detail="poll_interval_hours must be a positive number (e.g. 1, 6, 24)",
+            )
+
+    # The frontend PATCHes its entire settings object on every save, so most
+    # keys arrive unchanged. Diff against stored values and only act on real
+    # changes — otherwise every save would clear the K Manga session and
+    # reschedule the poll job (pushing the next run ever further out).
+    current = {
+        r.key: r.value
+        for r in db.query(Settings).filter(Settings.key.in_(EXPOSED_KEYS)).all()
+    }
+    changed: dict[str, str] = {}
     for key, value in updates.items():
         if key not in EXPOSED_KEYS:
             continue
         # Skip masked placeholder — user didn't change this field
         if key in _MASKED_KEYS and value == _MASK:
             continue
+        if current.get(key) == value:
+            continue
         set_setting(db, key, value)
+        changed[key] = value
 
-    # If K Manga credentials changed, clear cached session cookies so next poll re-logs in
-    if "kmanga_email" in updates or ("kmanga_password" in updates and updates["kmanga_password"] != _MASK):
+    # If K Manga credentials actually changed, clear cached session cookies
+    # so the next poll re-logs in
+    if "kmanga_email" in changed or "kmanga_password" in changed:
         set_setting(db, "kmanga_cookies", "")
         logger.info("K Manga credentials updated — session cookies cleared")
 
-    # If poll interval changed, validate and reschedule
-    if "poll_interval_hours" in updates:
-        try:
-            hours = float(updates["poll_interval_hours"])
-            if hours <= 0:
-                raise HTTPException(
-                    status_code=422,
-                    detail="poll_interval_hours must be a positive number (e.g. 1, 6, 24)",
-                )
-            start_scheduler(hours)
-        except ValueError:
-            raise HTTPException(
-                status_code=422,
-                detail="poll_interval_hours must be a valid number",
-            )
+    # If poll interval actually changed, reschedule
+    if "poll_interval_hours" in changed:
+        start_scheduler(float(changed["poll_interval_hours"]))
 
-    # If metadata refresh settings changed, update the job
-    if "metadata_refresh_enabled" in updates or "metadata_refresh_interval_days" in updates:
+    # If metadata refresh settings actually changed, update the job
+    if "metadata_refresh_enabled" in changed or "metadata_refresh_interval_days" in changed:
         enabled = get_setting(db, "metadata_refresh_enabled", "false") == "true"
         if not enabled:
             _remove_metadata_job()
