@@ -7,7 +7,8 @@ function app() {
     viewMode: 'grid',  // 'grid' or 'list'
 
     // Library toolbar
-    librarySearch: '',
+    librarySearch: '',      // applied filter value (set after debounce)
+    librarySearchRaw: '',   // live input binding
     sortBy: localStorage.getItem('library_sort') || 'added_desc',
     genreFilter: '',
     authorFilter: '',
@@ -31,7 +32,10 @@ function app() {
     searchQuery: '', searchResults: [], searchPagination: {}, searching: false, hasSearched: false,
 
     // Notifications
-    notifications: [], unreadCount: 0,
+    notifications: [], unreadCount: 0, notifHasMore: false,
+
+    // Confirm dialog (replaces native confirm())
+    confirmState: { open: false, title: '', message: '', confirmText: 'Confirm', danger: false, _resolve: null },
 
     // Activity log
     activityLog: [],
@@ -229,8 +233,13 @@ function app() {
       const hashPage = location.hash.slice(1);
       const startPage = (hashPage && validPages.includes(hashPage)) ? hashPage : (this.sf.default_page || 'library');
 
-      // Keep hash in sync with page navigation and persist ratings filter
-      this.$watch('page', val => { location.hash = val; });
+      // Keep hash in sync with page navigation, load page data, persist ratings filter.
+      // Loading here (not in sidebar click handlers) means browser back/forward
+      // navigation fetches data too.
+      this.$watch('page', val => {
+        location.hash = val;
+        this._loadPageData(val);
+      });
       this.$watch('ratingsStatusFilter', val => { localStorage.setItem('ratings_status_filter', val); });
       this.$watch('viewMode',    val => { this.sf.default_view_mode    = val;                  this.saveSettingsSilent(); });
       this.$watch('feedGrouped', val => { this.sf.default_feed_grouped = val ? 'true' : 'false'; this.saveSettingsSilent(); });
@@ -247,20 +256,44 @@ function app() {
       });
 
       if (startPage !== 'library') {
-        this.page = startPage;
-        if (startPage === 'releases') { this.loadReleaseFeed().catch(()=>{}); }
-        else if (startPage === 'notifications') { this.loadNotifications().catch(()=>{}); }
-        else if (startPage === 'activity') { this.loadActivity().catch(()=>{}); }
-        else if (startPage === 'stats') { this.loadStats().catch(()=>{}); }
-        else if (startPage === 'komga') { this.loadKomgaBrowse().catch(()=>{}); }
-        else if (startPage === 'settings') { this.loadSettings().catch(()=>{}); }
+        this.page = startPage;  // $watch('page') loads the page data
       } else {
-        // Silently prefetch feed in background (skip if section is hidden)
-        if (this.sf.show_recent_drops !== 'false') {
-          this.loadReleaseFeed().catch(()=>{});
-        }
+        // Silently prefetch feed in background — also powers the sidebar
+        // Live Feed badge, so fetch even when Recent Drops is hidden.
+        this.loadReleaseFeed().catch(()=>{});
       }
       setInterval(() => this.pollUnreadCount(), 30000);
+    },
+
+    // Fetch data for pages that need it. Called from the page watcher so both
+    // sidebar clicks and browser back/forward navigation trigger loads.
+    _loadPageData(page) {
+      if (page === 'releases')      this.loadReleaseFeed().catch(()=>{});
+      else if (page === 'notifications') this.loadNotifications().catch(()=>{});
+      else if (page === 'activity') this.loadActivity().catch(()=>{});
+      else if (page === 'stats')    this.loadStats().catch(()=>{});
+      else if (page === 'komga')    this.loadKomgaBrowse().catch(()=>{});
+      else if (page === 'settings') this.loadSettings().catch(()=>{});
+    },
+
+    // Promise-based confirm dialog (replaces blocking native confirm())
+    confirmDialog(opts = {}) {
+      return new Promise(resolve => {
+        this.confirmState = {
+          open: true,
+          title: opts.title || 'Are you sure?',
+          message: opts.message || '',
+          confirmText: opts.confirmText || 'Confirm',
+          danger: !!opts.danger,
+          _resolve: resolve,
+        };
+      });
+    },
+    _confirmResolve(val) {
+      const resolve = this.confirmState._resolve;
+      this.confirmState.open = false;
+      this.confirmState._resolve = null;
+      if (resolve) resolve(val);
     },
 
     // Computed: all genres from library
@@ -288,6 +321,18 @@ function app() {
       return { library:'My Library', releases:'Live Feed', search:'Search', ratings:'Ratings', komga:'Komga Library', notifications:'Notifications', activity:'Activity Log', stats:'Statistics', settings:'Settings' }[this.page] || '';
     },
 
+    // Series visible on the Ratings page given the active status filter.
+    // Single source of truth — tiers, numeric rows, stat cards, and the
+    // unrated queue all use the same pool so their counts agree.
+    ratingsPool() {
+      return this.ratingsStatusFilter
+        ? this.library.filter(s => s.reading_status === this.ratingsStatusFilter)
+        : this.library;
+    },
+
+    ratedCount()   { return this.ratingsPool().filter(s => s.user_rating != null).length; },
+    unratedCount() { return this.ratingsPool().filter(s => s.user_rating == null).length; },
+
     ratingTiers() {
       const tiers = [
         { label: 'S', range: [9, 10], color: 'var(--yellow)' },
@@ -296,9 +341,7 @@ function app() {
         { label: 'C', range: [3,  4], color: 'var(--accent)' },
         { label: 'D', range: [1,  2], color: 'var(--red)'    },
       ];
-      const pool = this.ratingsStatusFilter
-        ? this.library.filter(s => s.reading_status === this.ratingsStatusFilter)
-        : this.library;
+      const pool = this.ratingsPool();
       return tiers.map(t => ({
         ...t,
         series: pool
@@ -308,14 +351,11 @@ function app() {
     },
 
     unratedSeries() {
-      const pool = this.ratingsStatusFilter
-        ? this.library.filter(s => s.reading_status === this.ratingsStatusFilter)
-        : this.library;
-      return pool.filter(s => s.user_rating == null).sort((a, b) => (a.title||'').localeCompare(b.title||''));
+      return this.ratingsPool().filter(s => s.user_rating == null).sort((a, b) => (a.title||'').localeCompare(b.title||''));
     },
 
     ratingsAvgScore() {
-      const rated = this.library.filter(s => s.user_rating != null);
+      const rated = this.ratingsPool().filter(s => s.user_rating != null);
       if (!rated.length) return '—';
       return (rated.reduce((acc, s) => acc + s.user_rating, 0) / rated.length).toFixed(1);
     },
@@ -328,9 +368,7 @@ function app() {
         4: 'var(--accent)',  3: 'var(--accent)',
         2: 'var(--red)',     1: 'var(--red)',
       };
-      const pool = this.ratingsStatusFilter
-        ? this.library.filter(s => s.reading_status === this.ratingsStatusFilter)
-        : this.library;
+      const pool = this.ratingsPool();
       const rows = [];
       for (let score = 10; score >= 1; score--) {
         const series = pool
@@ -434,6 +472,7 @@ function app() {
             if (f === 'hidden' && s.updates_hidden) return true;
             if (f === 'muted' && s.notification_muted) return true;
             if (f === 'idle' && this.isIdle(s)) return true;
+            if (f === 'unlinked' && !s.mu_series_id) return true;
             if (s.reading_status === f) return true;
           }
           return false;
@@ -466,8 +505,11 @@ function app() {
         list = list.filter(s => (s.series_type || 'manga') === this.typeFilter);
       }
 
-      // Sorting
-      const [field, dir] = this.sortBy.split('_');
+      // Sorting — split on the LAST underscore so multi-word fields
+      // ("last_read_desc") keep their full field name.
+      const sep = this.sortBy.lastIndexOf('_');
+      const field = this.sortBy.slice(0, sep);
+      const dir = this.sortBy.slice(sep + 1);
       const mul = dir === 'desc' ? -1 : 1;
       list = [...list].sort((a, b) => {
         let va, vb;
@@ -526,8 +568,11 @@ function app() {
     },
 
     librarySearchDebounce() {
+      // Copy the live input into the applied filter after a short pause so
+      // filteredLibrary() (filter + sort over the whole library) doesn't run
+      // on every keystroke.
       clearTimeout(this._searchTimer);
-      this._searchTimer = setTimeout(() => {}, 150); // triggers Alpine reactivity
+      this._searchTimer = setTimeout(() => { this.librarySearch = this.librarySearchRaw; }, 150);
     },
 
     sortLibrary() {
@@ -611,19 +656,26 @@ function app() {
         const idx = this.library.findIndex(x => x.id === s.id);
         if (idx !== -1) {
           this.library[idx][field] = val;
-          const latest = parseFloat(this.library[idx].latest_chapter || 0);
+          // Compare in the unit actually tracked: volume total for
+          // volume-tracked series, latest chapter otherwise.
+          const latest = parseFloat(
+            isVolSeries ? this.volumeTotal(this.library[idx]) : this.library[idx].latest_chapter
+          ) || 0;
           const readVal = parseFloat(val);
           this.library[idx].has_update = latest > 0 && readVal < latest;
         }
-        this.toast(`${s.title} → ${this.unitLabel(s)} ${val} read`, 'success');
+        this.toast(`${s.title} → ${isVolSeries ? 'Vol.' : 'Ch.'} ${val} read`, 'success');
       } catch(e) {
         this.toast('Failed to update progress', 'error');
       }
     },
 
     async markCaughtUp(s) {
-      if (!s.latest_chapter) return;
-      await this.quickSetChapter(s, s.latest_chapter);
+      // Volume-tracked series catch up to the volume total (latest_chapter is
+      // the wrong unit for soft-linked volume series).
+      const target = this.isKomgaVolume(s) ? this.volumeTotal(s) : s.latest_chapter;
+      if (!target) return;
+      await this.quickSetChapter(s, target);
     },
 
     // ── Idle detection ─────────────────────────────────
@@ -667,28 +719,28 @@ function app() {
 
     async bulkDelete() {
       const count = this.bulkSelected.length;
-      let msg;
+      let msg = `This cannot be undone. Release history, notifications, and activity log entries will also be removed.`;
       if (count <= 5) {
         const titles = this.bulkSelected
           .map(id => this.library.find(s => s.id === id)?.title || `#${id}`)
           .map(t => `• ${t}`)
           .join('\n');
-        msg = `Delete ${count} series from your library? This cannot be undone.\n\n${titles}`;
-      } else {
-        msg = `Delete ${count} series from your library? This cannot be undone.`;
+        msg += `\n\n${titles}`;
       }
-      if (!confirm(msg)) return;
+      const ok = await this.confirmDialog({
+        title: `Delete ${count} series from your library?`,
+        message: msg,
+        confirmText: 'Delete',
+        danger: true,
+      });
+      if (!ok) return;
       try {
-        let deleted = 0;
-        for (const id of this.bulkSelected) {
-          await this.api(`/api/series/${id}`, 'DELETE');
-          deleted++;
-        }
+        const resp = await this.api('/api/series/bulk/delete', 'POST', { series_ids: this.bulkSelected });
         this.library = this.library.filter(s => !this.bulkSelected.includes(s.id));
         this.bulkSelected = [];
         this.bulkMode = false;
-        this.toast(`Deleted ${deleted} series`, 'success');
-      } catch(e) { this.toast('Bulk delete failed', 'error'); }
+        this.toast(`Deleted ${resp.deleted} series`, 'success');
+      } catch(e) { this.toast(e.detail || 'Bulk delete failed', 'error'); }
     },
 
     async applyBulkStatus() {
@@ -735,12 +787,6 @@ function app() {
       } finally {
         this.statsLoading = false;
       }
-    },
-
-    // ── Settings ─────────────────────────────────────
-    async loadSettings() {
-      try { const d = await this.api('/api/settings'); this.sf = {...this.sf,...d}; }
-      catch(e) { this.toast('Failed to load settings', 'error'); }
     },
 
     // ── Export / Import ──────────────────────────────
@@ -1014,7 +1060,7 @@ function app() {
         const data = await this.api(`/api/series/search?q=${encodeURIComponent(this.searchQuery)}&page=${page}`);
         this.searchResults = data.data || [];
         this.searchPagination = data.pagination || {};
-      } catch(e) { this.toast('Search failed', 'error'); }
+      } catch(e) { this.toast(e.detail || 'Search failed', 'error'); }
       finally { this.searching = false; }
     },
 
@@ -1037,7 +1083,11 @@ function app() {
         const { similar } = await this.api(`/api/series/similar?title=${encodeURIComponent(this.addTarget.title)}`);
         if (similar && similar.length > 0) {
           const names = similar.map(s => `• ${s.title} (${(s.similarity*100).toFixed(0)}% match)`).join('\n');
-          const proceed = confirm(`Similar series already in your library:\n${names}\n\nAdd anyway?`);
+          const proceed = await this.confirmDialog({
+            title: 'Similar series already in your library',
+            message: `${names}\n\nAdd anyway?`,
+            confirmText: 'Add Anyway',
+          });
           if (!proceed) { this.adding = false; return; }
         }
         await this.api('/api/series','POST',{
@@ -1133,7 +1183,8 @@ function app() {
       try {
         const body = {
           current_chapter: this.ef.current_chapter,
-          current_volume: this.ef.current_volume || null,
+          // Send '' (not null) when cleared — backend treats null as "not sent"
+          current_volume: this.ef.current_volume ?? '',
           reading_status: this.ef.reading_status,
           notes: this.ef.notes,
           tags: this.ef.tags,
@@ -1169,7 +1220,13 @@ function app() {
 
     async removeSeries(id) {
       const title = this.ds?.title || 'this series';
-      if (!confirm(`Remove "${title}" from your library? This will also delete its release history, notifications, and activity log entries.`)) return;
+      const ok = await this.confirmDialog({
+        title: `Remove "${title}"?`,
+        message: 'This will also delete its release history, notifications, and activity log entries.',
+        confirmText: 'Remove',
+        danger: true,
+      });
+      if (!ok) return;
       try {
         await this.api(`/api/series/${id}`,'DELETE');
         this.library = this.library.filter(s=>s.id!==id);
@@ -1266,11 +1323,14 @@ function app() {
       } catch(e) {}
     },
 
-    async loadNotifications() {
+    async loadNotifications(append = false) {
       try {
-        const data = await this.api('/api/notifications?limit=100');
-        this.notifications = data.notifications || [];
+        const offset = append ? this.notifications.length : 0;
+        const data = await this.api(`/api/notifications?limit=100&offset=${offset}`);
+        const list = data.notifications || [];
+        this.notifications = append ? [...this.notifications, ...list] : list;
         this.unreadCount = data.unread_count || 0;
+        this.notifHasMore = list.length === 100;
       } catch(e) { this.toast('Failed to load notifications','error'); }
     },
 
@@ -1299,7 +1359,12 @@ function app() {
     },
 
     async clearAllNotifs() {
-      if (!confirm('Clear all notifications?')) return;
+      const ok = await this.confirmDialog({
+        title: 'Clear all notifications?',
+        confirmText: 'Clear All',
+        danger: true,
+      });
+      if (!ok) return;
       try {
         await this.api('/api/notifications','DELETE');
         this.notifications = []; this.unreadCount = 0;
@@ -1335,13 +1400,28 @@ function app() {
     },
 
     async pollNow() {
+      if (this.polling) return;
       this.polling = true;
       try {
         await this.api('/api/settings/poll-now','POST');
         this.toast('Poll started — updating shortly…','success');
-        setTimeout(async () => { await this.loadLibrary(); await this.loadReleaseFeed(); this.pollUnreadCount(); }, 6000);
-        setTimeout(() => { this.polling = false; }, 10000);
-      } catch(e) { this.toast('Poll failed','error'); this.polling=false; }
+        // Track the real poll state instead of guessing with fixed timeouts
+        const poll = setInterval(async () => {
+          try {
+            const s = await this.api('/api/settings/poll/status');
+            if (!s.running) {
+              clearInterval(poll);
+              this.polling = false;
+              await this.loadLibrary();
+              await this.loadReleaseFeed();
+              this.pollUnreadCount();
+              this.toast('Poll complete','success');
+            }
+          } catch { clearInterval(poll); this.polling = false; }
+        }, 2000);
+        // Safety fallback — stop polling status after 5 min
+        setTimeout(() => { if (this.polling) { clearInterval(poll); this.polling = false; } }, 300000);
+      } catch(e) { this.toast(e.detail || 'Poll failed','error'); this.polling=false; }
     },
 
     async refreshMetadataNow() {
@@ -1367,10 +1447,16 @@ function app() {
       return data;
     },
 
-    toast(message, type='success') {
+    toast(message, type='success', duration=null) {
       const id = ++this._tid;
       this.toasts.push({id, message, type});
-      setTimeout(()=>{ this.toasts = this.toasts.filter(t=>t.id!==id); }, 3500);
+      // Errors carry actionable detail — keep them visible longer
+      const ms = duration ?? (type === 'error' ? 7000 : 3500);
+      setTimeout(()=>{ this.dismissToast(id); }, ms);
+    },
+
+    dismissToast(id) {
+      this.toasts = this.toasts.filter(t=>t.id!==id);
     },
 
     relativeTime(iso) {

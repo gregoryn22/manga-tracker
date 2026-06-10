@@ -26,6 +26,9 @@
   padding: 9px var(--sp-4); cursor: pointer; user-select: none;
   border-left: 3px solid transparent; transition: all 0.12s;
   color: var(--text-muted); font-size: var(--fs-md); font-weight: 500;
+  /* Button reset — nav items are <button> for keyboard accessibility */
+  width: 100%; background: none; border-top: none; border-right: none;
+  border-bottom: none; font-family: inherit; text-align: left;
 }
 .nav-item:hover { background: var(--surface2); color: var(--text); }
 .nav-item.active {
@@ -456,6 +459,9 @@ textarea.input { resize: vertical; }
 }
 .toast.success { border-color: var(--green); }
 .toast.error   { border-color: var(--red); }
+/* toast-wrap is pointer-events:none so toasts don't block the page;
+   re-enable on the toast itself for click-to-dismiss */
+.toast { pointer-events: auto; cursor: pointer; }
 .toast-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
 .toast.success .toast-dot { background: var(--green); }
 .toast.error   .toast-dot { background: var(--red); }

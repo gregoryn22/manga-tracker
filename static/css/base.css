@@ -11,6 +11,21 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 
 [x-cloak] { display: none !important; }
 
+/* ── Accessibility ────────────────────────────────────────────────── */
+/* Visible focus ring for keyboard navigation (mouse clicks unaffected) */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
 /* ── App layout ───────────────────────────────────────────────────── */
 .app { display: flex; height: 100vh; overflow: hidden; }
 

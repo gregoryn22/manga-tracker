@@ -8,12 +8,12 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/css/tokens.css?v=2">
-  <link rel="stylesheet" href="/static/css/base.css?v=2">
-  <link rel="stylesheet" href="/static/css/components.css?v=4">
-  <link rel="stylesheet" href="/static/css/pages.css?v=3">
+  <link rel="stylesheet" href="/static/css/base.css?v=3">
+  <link rel="stylesheet" href="/static/css/components.css?v=5">
+  <link rel="stylesheet" href="/static/css/pages.css?v=4">
   <link rel="stylesheet" href="/static/css/utilities.css?v=2">
   <style>[x-cloak] { display: none !important; }</style>
-  <script defer src="/static/js/app.js?v=5"></script>
+  <script defer src="/static/js/app.js?v=6"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 </head>
 <body>
@@ -34,39 +34,39 @@
 
     <div class="nav">
       <div class="nav-section">Browse</div>
-      <div class="nav-item" :class="{active: page==='library'}" @click="page='library'; sidebarOpen=false">
+      <button type="button" class="nav-item" :class="{active: page==='library'}" @click="page='library'; sidebarOpen=false">
         <span class="nav-icon">🗂️</span> Library
         <span class="nav-badge green" x-show="stats.updates > 0" x-text="stats.updates"></span>
-      </div>
-      <div class="nav-item" :class="{active: page==='releases'}" @click="page='releases'; loadReleaseFeed(); sidebarOpen=false">
+      </button>
+      <button type="button" class="nav-item" :class="{active: page==='releases'}" @click="page='releases'; sidebarOpen=false">
         <span class="nav-icon">⚡</span> Live Feed
         <span class="nav-badge green" x-show="feedReleases.length > 0" x-text="feedReleases.length"></span>
-      </div>
-      <div class="nav-item" :class="{active: page==='search'}" @click="page='search'; sidebarOpen=false">
+      </button>
+      <button type="button" class="nav-item" :class="{active: page==='search'}" @click="page='search'; sidebarOpen=false">
         <span class="nav-icon">🔍</span> Search
-      </div>
-      <div class="nav-item" :class="{active: page==='ratings'}" @click="page='ratings'; sidebarOpen=false">
+      </button>
+      <button type="button" class="nav-item" :class="{active: page==='ratings'}" @click="page='ratings'; sidebarOpen=false">
         <span class="nav-icon">⭐</span> Ratings
-      </div>
-      <div class="nav-item" :class="{active: page==='komga'}" @click="page='komga'; loadKomgaBrowse(); sidebarOpen=false"
+      </button>
+      <button type="button" class="nav-item" :class="{active: page==='komga'}" @click="page='komga'; sidebarOpen=false"
            x-show="sf.komga_url && sf.komga_api_key">
         <span class="nav-icon">🏠</span> Komga
-      </div>
+      </button>
 
       <div class="nav-section">Manage</div>
-      <div class="nav-item" :class="{active: page==='notifications'}" @click="page='notifications'; loadNotifications(); sidebarOpen=false">
+      <button type="button" class="nav-item" :class="{active: page==='notifications'}" @click="page='notifications'; sidebarOpen=false">
         <span class="nav-icon">🔔</span> Notifications
         <span class="nav-badge" x-show="unreadCount > 0" x-text="unreadCount > 99 ? '99+' : unreadCount"></span>
-      </div>
-      <div class="nav-item" :class="{active: page==='activity'}" @click="page='activity'; loadActivity(); sidebarOpen=false">
+      </button>
+      <button type="button" class="nav-item" :class="{active: page==='activity'}" @click="page='activity'; sidebarOpen=false">
         <span class="nav-icon">📋</span> Activity
-      </div>
-      <div class="nav-item" :class="{active: page==='stats'}" @click="page='stats'; loadStats(); sidebarOpen=false">
+      </button>
+      <button type="button" class="nav-item" :class="{active: page==='stats'}" @click="page='stats'; sidebarOpen=false">
         <span class="nav-icon">📊</span> Statistics
-      </div>
-      <div class="nav-item" :class="{active: page==='settings'}" @click="page='settings'; loadSettings(); sidebarOpen=false">
+      </button>
+      <button type="button" class="nav-item" :class="{active: page==='settings'}" @click="page='settings'; sidebarOpen=false">
         <span class="nav-icon">⚙️</span> Settings
-      </div>
+      </button>
     </div>
 
     <div class="sidebar-footer">
@@ -129,7 +129,7 @@
           <div class="stat-card">
             <div class="stat-label">Updates</div>
             <div class="stat-value green" x-text="stats.updates"></div>
-            <div class="stat-sub">unread chapters</div>
+            <div class="stat-sub">with new chapters</div>
           </div>
           <div class="stat-card">
             <div class="stat-label">Reading</div>
@@ -145,9 +145,11 @@
 
         <!-- MU-link health: only surfaces when something needs linking (actionable) -->
         <div class="health-chip" x-show="library.length > 0 && stats.mu_linked < library.length"
-             @click="toggleFilter('all'); librarySearch=''"
-             title="Series not linked to MangaUpdates won't get authoritative release data — open them and refresh to link">
+             @click="filters = filters.includes('unlinked') ? ['all'] : ['unlinked']; librarySearch=''; librarySearchRaw=''"
+             :class="{active: filters.includes('unlinked')}"
+             title="Series not linked to MangaUpdates won't get authoritative release data — click to show them, then open each and refresh to link">
           ⚠ <span x-text="(library.length - stats.mu_linked)"></span> of <span x-text="library.length"></span> not linked to MangaUpdates
+          <span x-show="filters.includes('unlinked')"> · showing — click to reset</span>
         </div>
 
         <!-- Recent Drops (last 24h, from live feed + local DB) -->
@@ -161,10 +163,10 @@
           <div class="drops-scroller">
             <template x-for="r in feedReleases" :key="r.mu_release_id || r.series_id + r.chapter">
               <div class="drop-card" @click="openDetailById(r.series_id)">
-                <template x-if="r.cover_url">
-                  <img class="drop-cover" :src="r.cover_url" :alt="r.series_title" loading="lazy" />
+                <template x-if="r.cover_url && !r._coverErr">
+                  <img class="drop-cover" :src="r.cover_url" :alt="r.series_title" loading="lazy" @error="r._coverErr = true" />
                 </template>
-                <template x-if="!r.cover_url">
+                <template x-if="!r.cover_url || r._coverErr">
                   <div class="drop-cover-ph">📖</div>
                 </template>
                 <div class="drop-body">
@@ -217,7 +219,7 @@
         <!-- Library toolbar: search + sort + Filters popover + view + bulk -->
         <div class="library-toolbar">
           <input class="input search-input" type="text" placeholder="Search library…"
-                 x-model="librarySearch" @input="librarySearchDebounce()" />
+                 x-model="librarySearchRaw" @input="librarySearchDebounce()" />
           <select class="input input-toolbar" x-model="sortBy" @change="sortLibrary()">
             <option value="title_asc">A → Z</option>
             <option value="title_desc">Z → A</option>
@@ -391,12 +393,12 @@
 
               <!-- Cover -->
               <div class="cover-wrap">
-                <template x-if="s.cover_url">
+                <template x-if="s.cover_url && !s._coverErr">
                   <img class="cover-img" :src="s.cover_url" :alt="s.title" loading="lazy"
-                       @error="$el.style.display='none'"
+                       @error="s._coverErr = true"
                        :style="sf.dim_finished_covers !== 'false' && (s.reading_status === 'completed' || s.reading_status === 'dropped') ? 'filter:brightness(0.55) saturate(0.6)' : ''" />
                 </template>
-                <template x-if="!s.cover_url">
+                <template x-if="!s.cover_url || s._coverErr">
                   <div class="cover-placeholder">📖</div>
                 </template>
                 <!-- Rating overlay -->
@@ -462,7 +464,7 @@
                 <div class="card-chapter-controls" @click.stop
                      x-show="sf.show_card_controls !== 'false' && s.latest_chapter">
                   <span class="ch-label" x-text="isKomgaVolume(s) ? 'Vol:' : 'Read:'"></span>
-                  <input class="ch-read-input" type="number" min="0" step="1"
+                  <input class="ch-read-input" type="number" min="0" step="0.5"
                          :value="isKomgaVolume(s) ? (s.current_volume || '0') : (s.current_chapter || '0')"
                          @keydown.enter="quickSetChapter(s, $event.target.value); $event.target.blur()"
                          @blur="quickSetChapter(s, $event.target.value)"
@@ -488,10 +490,10 @@
                      @click.stop="toggleBulk(s.id)" />
 
               <!-- Cover thumbnail -->
-              <template x-if="s.cover_url">
-                <img class="list-cover" :src="s.cover_url" :alt="s.title" loading="lazy" />
+              <template x-if="s.cover_url && !s._coverErr">
+                <img class="list-cover" :src="s.cover_url" :alt="s.title" loading="lazy" @error="s._coverErr = true" />
               </template>
-              <template x-if="!s.cover_url">
+              <template x-if="!s.cover_url || s._coverErr">
                 <div class="list-cover-ph">📖</div>
               </template>
 
@@ -551,7 +553,7 @@
               <!-- Inline controls -->
               <div class="list-controls" @click.stop
                    x-show="sf.show_card_controls !== 'false' && s.latest_chapter">
-                <input class="ch-read-input" type="number" min="0" step="1"
+                <input class="ch-read-input" type="number" min="0" step="0.5"
                        :value="isKomgaVolume(s) ? (s.current_volume || '0') : (s.current_chapter || '0')"
                        @keydown.enter="quickSetChapter(s, $event.target.value); $event.target.blur()"
                        @blur="quickSetChapter(s, $event.target.value)"
@@ -604,10 +606,10 @@
               <div class="card card-inset" x-show="!feedGrouped">
                 <template x-for="r in feedReleases" :key="r.mu_release_id || r.series_title+r.chapter">
                   <div class="release-row">
-                    <template x-if="r.cover_url">
-                      <img class="release-cover" :src="r.cover_url" :alt="r.series_title" loading="lazy" />
+                    <template x-if="r.cover_url && !r._coverErr">
+                      <img class="release-cover" :src="r.cover_url" :alt="r.series_title" loading="lazy" @error="r._coverErr = true" />
                     </template>
-                    <template x-if="!r.cover_url">
+                    <template x-if="!r.cover_url || r._coverErr">
                       <div class="release-cover-ph">📖</div>
                     </template>
 
@@ -697,7 +699,12 @@
           <template x-for="r in searchResults" :key="r.id">
             <div class="search-result">
               <div class="search-cover-wrap">
-                <img class="search-cover" :src="getCoverUrl(r)" :alt="r.title" loading="lazy" @error="$el.src=''" />
+                <template x-if="getCoverUrl(r) && !r._coverErr">
+                  <img class="search-cover" :src="getCoverUrl(r)" :alt="r.title" loading="lazy" @error="r._coverErr = true" />
+                </template>
+                <template x-if="!getCoverUrl(r) || r._coverErr">
+                  <div class="search-cover-ph">📖</div>
+                </template>
               </div>
               <div class="search-info">
                 <div class="search-title" x-text="r.title"></div>
@@ -783,7 +790,8 @@
             </div>
           </template>
           </div><!-- /.card -->
-          <div class="flex justify-center mt-4">
+          <div class="flex justify-center gap-2 mt-4">
+            <button class="btn btn-ghost btn-sm" x-show="notifHasMore" @click="loadNotifications(true)">↓ Load More</button>
             <button class="btn btn-danger btn-sm" @click="clearAllNotifs()">🗑 Clear All</button>
           </div>
         </div>
@@ -799,6 +807,7 @@
             <option value="chapter_update">📖 Chapter Updates</option>
             <option value="status_change">🏷️ Status Changes</option>
             <option value="source_change">📋 Source Changes</option>
+            <option value="added">➕ Added</option>
           </select>
         </div>
 
@@ -1075,18 +1084,20 @@
       <div x-show="page==='ratings'">
 
         <!-- Summary stats -->
+        <!-- Stat cards share ratingsPool() with the tier rows below, so the
+             counts always match the active status filter -->
         <div class="stats-row">
           <div class="stat-card">
             <div class="stat-label">Rated</div>
-            <div class="stat-value yellow" x-text="library.filter(s => s.user_rating !== null && s.user_rating !== undefined).length"></div>
-            <div class="stat-sub">of <span x-text="library.length"></span> series</div>
+            <div class="stat-value yellow" x-text="ratedCount()"></div>
+            <div class="stat-sub">of <span x-text="ratingsPool().length"></span> series</div>
           </div>
           <div class="stat-card">
             <div class="stat-label">Unrated</div>
-            <div class="stat-value text-muted" x-text="library.filter(s => s.user_rating === null || s.user_rating === undefined).length"></div>
+            <div class="stat-value text-muted" x-text="unratedCount()"></div>
             <div class="stat-sub">need a score</div>
           </div>
-          <div class="stat-card" x-show="library.filter(s => s.user_rating != null).length > 0">
+          <div class="stat-card" x-show="ratedCount() > 0">
             <div class="stat-label">Avg Score</div>
             <div class="stat-value accent" x-text="ratingsAvgScore()"></div>
             <div class="stat-sub">your ratings</div>
@@ -1116,10 +1127,10 @@
                   <template x-for="s in tier.series" :key="s.id">
                     <div class="tier-card" x-data="{rHover: null}" @click="openDetail(s)">
                       <div class="tier-cover-wrap">
-                        <template x-if="s.cover_url">
-                          <img class="tier-cover-img" :src="s.cover_url" :alt="s.title" loading="lazy" @error="$el.style.display='none'" />
+                        <template x-if="s.cover_url && !s._coverErr">
+                          <img class="tier-cover-img" :src="s.cover_url" :alt="s.title" loading="lazy" @error="s._coverErr = true" />
                         </template>
-                        <template x-if="!s.cover_url">
+                        <template x-if="!s.cover_url || s._coverErr">
                           <div class="tier-cover-ph">📖</div>
                         </template>
                         <div class="tier-star-overlay">
@@ -1153,10 +1164,10 @@
                   <template x-for="s in row.series" :key="s.id">
                     <div class="tier-card" x-data="{rHover: null}" @click="openDetail(s)">
                       <div class="tier-cover-wrap">
-                        <template x-if="s.cover_url">
-                          <img class="tier-cover-img" :src="s.cover_url" :alt="s.title" loading="lazy" @error="$el.style.display='none'" />
+                        <template x-if="s.cover_url && !s._coverErr">
+                          <img class="tier-cover-img" :src="s.cover_url" :alt="s.title" loading="lazy" @error="s._coverErr = true" />
                         </template>
-                        <template x-if="!s.cover_url">
+                        <template x-if="!s.cover_url || s._coverErr">
                           <div class="tier-cover-ph">📖</div>
                         </template>
                         <div class="tier-star-overlay">
@@ -1199,10 +1210,10 @@
               <template x-for="s in unratedSeries()" :key="s.id">
                 <div class="tier-card" x-data="{rHover: null}" @click="openDetail(s)">
                   <div class="tier-cover-wrap">
-                    <template x-if="s.cover_url">
-                      <img class="tier-cover-img" :src="s.cover_url" :alt="s.title" loading="lazy" @error="$el.style.display='none'" />
+                    <template x-if="s.cover_url && !s._coverErr">
+                      <img class="tier-cover-img" :src="s.cover_url" :alt="s.title" loading="lazy" @error="s._coverErr = true" />
                     </template>
-                    <template x-if="!s.cover_url">
+                    <template x-if="!s.cover_url || s._coverErr">
                       <div class="tier-cover-ph">📖</div>
                     </template>
                     <div class="tier-star-overlay">
@@ -1956,7 +1967,8 @@
 
 
 <!-- ── Series Detail Modal ──────────────────────────────────────────── -->
-<div class="overlay" x-show="detailOpen" x-cloak @click.self="detailOpen=false">
+<div class="overlay" x-show="detailOpen" x-cloak @click.self="detailOpen=false"
+     @keydown.escape.window="if (!confirmState.open) detailOpen=false">
   <div class="modal modal--tall" @click.stop x-show="detailOpen">
     <template x-if="ds">
       <div class="modal-shell">
@@ -2127,7 +2139,7 @@
                     x-text="`(latest: ${ds.latest_chapter})`"></span>
             </div>
             <div class="flex gap-2 items-center">
-              <input class="input input-sm" type="number" min="0" step="1" x-model="ef.current_chapter" />
+              <input class="input input-sm" type="number" min="0" step="0.5" x-model="ef.current_chapter" />
               <!-- Mark Current only makes sense for non-Komga-volume series -->
               <button class="btn btn-green btn-sm"
                       x-show="ds.latest_chapter && !isKomgaVolume(ds)"
@@ -2758,9 +2770,9 @@
                  :href="ds.mangabaka_url" target="_blank" class="ext-link-chip type-tracker">MangaBaka ↗</a>
               <a x-show="ds.mu_url && !externalLinkExists(ds, 'mangaupdates')"
                  :href="ds.mu_url" target="_blank" class="ext-link-chip type-tracker">MangaUpdates ↗</a>
-              <button x-show="ds.mu_series_id || true" class="ext-link-chip type-tracker"
+              <button class="ext-link-chip type-tracker"
                       style="cursor:pointer;border:none;background:none"
-                      @click="muReviewOpen = true; muSearchQ = ds.title">✏ Edit MU Link</button>
+                      @click="muReviewOpen = true; muSearchQ = ds.title; detailTab = 'sources'">✏ Edit MU Link</button>
             </div>
           </div>
 
@@ -2866,7 +2878,8 @@
 </div>
 
 <!-- ── Quick Add Modal ──────────────────────────────────────────────── -->
-<div class="overlay" x-show="addOpen" x-cloak @click.self="addOpen=false">
+<div class="overlay" x-show="addOpen" x-cloak @click.self="addOpen=false"
+     @keydown.escape.window="if (!confirmState.open) addOpen=false">
   <div class="modal modal--sm" @click.stop x-show="addOpen">
     <template x-if="addTarget">
       <div>
@@ -2904,7 +2917,7 @@
           <div class="form-group">
             <div class="form-label">Current Chapter</div>
             <div style="display:flex;align-items:center;gap:0.5rem;">
-              <input class="input input-sm" type="number" min="0" step="1" x-model="addForm.current_chapter" style="width:6rem;" />
+              <input class="input input-sm" type="number" min="0" step="0.5" x-model="addForm.current_chapter" style="width:6rem;" />
               <span class="text-xs text-muted" x-show="addTarget.total_chapters" x-text="`of ${addTarget.total_chapters}`"></span>
             </div>
           </div>
@@ -2923,10 +2936,29 @@
   </div>
 </div>
 
+<!-- ── Confirm Dialog ──────────────────────────────────────────────── -->
+<div class="overlay" x-show="confirmState.open" x-cloak
+     @click.self="_confirmResolve(false)"
+     @keydown.escape.window="confirmState.open && _confirmResolve(false)">
+  <div class="modal modal--sm" @click.stop x-show="confirmState.open">
+    <div class="modal-body modal-body--compact">
+      <div class="text-lg fw-600 mb-2" x-text="confirmState.title"></div>
+      <div class="text-sm text-muted" style="white-space:pre-line" x-show="confirmState.message" x-text="confirmState.message"></div>
+    </div>
+    <div class="modal-footer modal-footer--compact">
+      <button class="btn btn-ghost" @click="_confirmResolve(false)">Cancel</button>
+      <div class="ml-auto">
+        <button class="btn" :class="confirmState.danger ? 'btn-danger' : 'btn-primary'"
+                @click="_confirmResolve(true)" x-text="confirmState.confirmText"></button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- ── Toasts ───────────────────────────────────────────────────────── -->
 <div class="toast-wrap">
   <template x-for="t in toasts" :key="t.id">
-    <div class="toast" :class="t.type">
+    <div class="toast" :class="t.type" @click="dismissToast(t.id)" title="Dismiss">
       <div class="toast-dot"></div>
       <span x-text="t.message"></span>
     </div>
