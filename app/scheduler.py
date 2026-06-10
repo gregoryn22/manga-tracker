@@ -357,6 +357,12 @@ def _maybe_notify_poll_failure(db: "Session", series: TrackedSeries):
 # Max consecutive failures before a series is skipped entirely until manual refresh
 _MAX_BACKOFF_FAILURES = 10
 
+# Monotonic poll-cycle counter. Combined with series.id it staggers backoff
+# skips and historical-release checks ACROSS cycles — a static `id % ratio`
+# would skip the same series every cycle, permanently parking it in backoff
+# (its failure count never changes while skipped, so it never recovers).
+_poll_cycle = 0
+
 
 def _should_skip_poll(series: TrackedSeries) -> bool:
     """
@@ -366,8 +372,8 @@ def _should_skip_poll(series: TrackedSeries) -> bool:
     After 7 failures, skip 3 out of 4 cycles.
     After 10+ failures, skip entirely until manually refreshed.
 
-    Uses a simple modulo on poll_failures to approximate a backoff curve
-    without needing a separate timer or counter.
+    Uses (series.id + poll cycle) modulo so each series rotates through
+    skip/run slots over successive cycles instead of being pinned to one.
     """
     failures = series.poll_failures or 0
     if failures < 5:
@@ -376,8 +382,7 @@ def _should_skip_poll(series: TrackedSeries) -> bool:
         return True  # fully paused — manual refresh required
     # Skip increasingly often: 5-6 → every 2nd, 7-8 → every 4th, 9 → every 8th
     skip_ratio = 2 ** ((failures - 5) // 2 + 1)
-    # Use a simple hash of the series ID to stagger which poll cycle runs
-    return (series.id % skip_ratio) != 0
+    return ((series.id + _poll_cycle) % skip_ratio) != 0
 
 
 
@@ -462,6 +467,8 @@ def trigger_manual_metadata_refresh():
 # ── Main poll ─────────────────────────────────────────────────────────────────
 
 def poll_updates():
+    global _poll_cycle
+    _poll_cycle += 1
     _poll_state["running"] = True
     _poll_state["last_started"] = datetime.utcnow()
     _poll_state["total_series"] = 0
@@ -671,6 +678,12 @@ def _enrich_from_mu(db: Session, series: TrackedSeries, mu_id: int):
         series.status = "hiatus"
 
 
+# How often (in poll cycles) each series runs the per-series historical
+# releases/search fallback. 1 = every cycle (previous behaviour); 3 keeps
+# MU API volume at ~⅓ of library size per cycle.
+_HISTORY_CHECK_EVERY = 3
+
+
 def _check_mu_series(
     db: Session,
     series: TrackedSeries,
@@ -691,8 +704,12 @@ def _check_mu_series(
             rec = item["record"]
             candidates.append(rec)
         logger.debug(f"'{series.title}' in today's feed: {len(candidates)} releases")
-    else:
-        # Not in today's feed — query historical releases.
+    elif ((series.id + _poll_cycle) % _HISTORY_CHECK_EVERY) == 0:
+        # Not in today's feed — query historical releases as a safety net for
+        # releases missed while the app was offline. This is one MU API call
+        # PER SERIES, so it's staggered: each series only runs the historical
+        # check every _HISTORY_CHECK_EVERY cycles. Same-day releases are still
+        # caught immediately via the global feed above.
         # NOTE: search_releases uses search_type=series which filters by series_id
         # on the server side.  We still validate results below as a safety net.
         try:
